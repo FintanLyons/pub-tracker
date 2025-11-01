@@ -1,14 +1,13 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import PintGlassIcon from '../components/PintGlassIcon';
 
 const Tab = createBottomTabNavigator();
 
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
+const AMBER = '#D4A017';
+const DARK_CHARCOAL = '#1C1C1C';
 
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
@@ -17,11 +16,11 @@ export default function TabNavigator() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: DARK_GREY,
-        tabBarInactiveTintColor: MEDIUM_GREY,
+        tabBarActiveTintColor: AMBER,
+        tabBarInactiveTintColor: AMBER,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopColor: LIGHT_GREY,
+          backgroundColor: DARK_CHARCOAL,
+          borderTopColor: DARK_CHARCOAL,
           borderTopWidth: 1,
           height: 60 + insets.bottom,
           paddingBottom: Math.max(insets.bottom, 8),
@@ -30,6 +29,7 @@ export default function TabNavigator() {
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
+          color: AMBER,
         },
       }}
     >
@@ -38,7 +38,7 @@ export default function TabNavigator() {
         component={MapScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <PintGlassIcon size={size} color={color} />
+            <MaterialCommunityIcons name="map-outline" size={size} color={color} />
           ),
         }}
       />
@@ -47,7 +47,7 @@ export default function TabNavigator() {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <PintGlassIcon size={size} color={color} />
+            <MaterialCommunityIcons name="account-outline" size={size} color={color} />
           ),
         }}
       />

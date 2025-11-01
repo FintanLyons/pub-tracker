@@ -17,6 +17,7 @@ const LONDON = { latitude: 51.5074, longitude: -0.1278, latitudeDelta: 0.1, long
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
 const MEDIUM_GREY = '#757575';
+const AMBER = '#D4A017';
 
 export default function MapScreen() {
   const [pubs, setPubs] = useState([]);
@@ -62,7 +63,7 @@ export default function MapScreen() {
             <View style={styles.markerContainer}>
               <PintGlassIcon 
                 size={28} 
-                color={p.isVisited ? DARK_GREY : '#CC0000'} 
+                color={p.isVisited ? AMBER : MEDIUM_GREY} 
               />
             </View>
           </Marker>
