@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MOCK_PUBS from '../pubs_data.js';
+import MOCK_PUBS from '../pubs_data_short.js';
 
 // Try to find a sensible array inside whatever was parsed
 function coerceToPubArray(value) {

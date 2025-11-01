@@ -1,19 +1,44 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import PintGlassIcon from '../components/PintGlassIcon';
 
 const Tab = createBottomTabNavigator();
 
+const DARK_GREY = '#2C2C2C';
+const LIGHT_GREY = '#F5F5F5';
+const MEDIUM_GREY = '#757575';
+
 export default function TabNavigator() {
+  const insets = useSafeAreaInsets();
+  
   return (
-    <Tab.Navigator>
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: DARK_GREY,
+        tabBarInactiveTintColor: MEDIUM_GREY,
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopColor: LIGHT_GREY,
+          borderTopWidth: 1,
+          height: 60 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 8),
+          paddingTop: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
+      }}
+    >
       <Tab.Screen 
         name="Map" 
         component={MapScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="map" color={color} size={size} />
+            <PintGlassIcon size={size} color={color} />
           ),
         }}
       />
@@ -22,7 +47,7 @@ export default function TabNavigator() {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="account" color={color} size={size} />
+            <PintGlassIcon size={size} color={color} />
           ),
         }}
       />
