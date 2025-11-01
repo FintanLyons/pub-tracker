@@ -1,25 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const MOCK_PUBS = [
-	{
-		id: '1',
-		name: 'The Red Lion',
-		lat: 51.5074,
-		lon: -0.1278,
-		address: '48 Parliament Street, London',
-		features: ['Beer Garden', 'Dog Friendly', 'Live Music'],
-		photoUrl: 'https://placekitten.com/400/300',
-	},
-	{
-		id: '2',
-		name: 'The Crown',
-		lat: 51.5138,
-		lon: -0.1289,
-		address: '43 Monmouth Street, London',
-		features: ['Food Served', 'Historic Pub', 'Real Ale'],
-		photoUrl: 'https://placekitten.com/401/300',
-	},
-];
+import MOCK_PUBS from '../pubs_data.js';
 
 // Try to find a sensible array inside whatever was parsed
 function coerceToPubArray(value) {
