@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   View, 
   Dimensions, 
@@ -13,16 +13,14 @@ import { fetchLondonPubs, togglePubVisited } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import SearchBar from '../components/SearchBar';
 import DraggablePubCard from '../components/DraggablePubCard';
+import FilterScreen from './FilterScreen';
 
 const LONDON = { latitude: 51.5074, longitude: -0.1278, latitudeDelta: 0.1, longitudeDelta: 0.1 };
 
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
 const AMBER = '#D4A017';
+const MEDIUM_GREY = '#757575';
 const DARK_CHARCOAL = '#1C1C1C';
 
-// Custom map style with subtly lighter, more muted colors (halfway between original and muted)
 const customMapStyle = [
   {
     "elementType": "geometry",
@@ -125,30 +123,34 @@ const customMapStyle = [
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const [pubs, setPubs] = useState([]);
+  const [allPubs, setAllPubs] = useState([]); // Store unfiltered pubs
   const [selectedPub, setSelectedPub] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [mapRegion, setMapRegion] = useState(LONDON);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [heading, setHeading] = useState(0);
-  const [isCardExpanded, setIsCardExpanded] = useState(false);
+  const [showFilterScreen, setShowFilterScreen] = useState(false);
+  const [selectedFeatures, setSelectedFeatures] = useState([]);
   const mapRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
+  const isClosingCardRef = useRef(false);
+  const lockedRegionRef = useRef(null);
+  const isNavigatingRef = useRef(false); // Track when doing programmatic navigation
   const screenHeight = Dimensions.get('window').height;
   const cardHeight = screenHeight * 0.33;
-  const TAB_BAR_HEIGHT = 0; // Base height of tab bar
 
   useEffect(() => {
-    fetchLondonPubs().then(setPubs);
+    fetchLondonPubs().then((fetchedPubs) => {
+      setAllPubs(fetchedPubs);
+      setPubs(fetchedPubs);
+    });
     
-    // Request location permissions and start watching location
     const setupLocation = async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          // Enable location services
           await Location.enableNetworkProviderAsync();
           
-          // Get initial location
           const location = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
@@ -157,7 +159,6 @@ export default function MapScreen() {
             longitude: location.coords.longitude,
           });
           
-          // Watch position for updates
           locationSubscriptionRef.current = await Location.watchPositionAsync(
             {
               accuracy: Location.Accuracy.Balanced,
@@ -169,7 +170,6 @@ export default function MapScreen() {
                 latitude: location.coords.latitude,
                 longitude: location.coords.longitude,
               });
-              // Update heading if available
               if (location.coords.heading !== null && location.coords.heading !== undefined) {
                 setHeading(location.coords.heading);
               }
@@ -183,11 +183,8 @@ export default function MapScreen() {
     
     setupLocation();
     
-    // Cleanup on unmount
     return () => {
-      if (locationSubscriptionRef.current) {
-        locationSubscriptionRef.current.remove();
-      }
+      locationSubscriptionRef.current?.remove();
     };
   }, []);
 
@@ -198,20 +195,92 @@ export default function MapScreen() {
   const handleToggleVisited = async (pubId) => {
     await togglePubVisited(pubId);
     const updatedPubs = await fetchLondonPubs();
-    setPubs(updatedPubs);
-    // Update selected pub if it's the one we toggled
-    if (selectedPub && selectedPub.id === pubId) {
+    setAllPubs(updatedPubs);
+    applyFilters(updatedPubs, selectedFeatures);
+    if (selectedPub?.id === pubId) {
       const updatedPub = updatedPubs.find(p => p.id === pubId);
       if (updatedPub) setSelectedPub(updatedPub);
     }
   };
 
+  // Extract all unique features from pubs
+  const getAllFeatures = () => {
+    const featureSet = new Set();
+    allPubs.forEach(pub => {
+      if (pub.features && Array.isArray(pub.features)) {
+        pub.features.forEach(feature => featureSet.add(feature));
+      }
+    });
+    return Array.from(featureSet).sort();
+  };
+
+  // Apply filters to pubs
+  const applyFilters = (pubsToFilter, features) => {
+    if (!pubsToFilter || pubsToFilter.length === 0) {
+      // If no pubs to filter, just show empty or wait for data
+      return;
+    }
+    
+    if (!features || features.length === 0) {
+      setPubs([...pubsToFilter]); // Create new array to trigger re-render
+      return;
+    }
+
+    const filtered = pubsToFilter.filter(pub => {
+      if (!pub.features || !Array.isArray(pub.features)) return false;
+      // Pub must have ALL of the selected features (AND logic)
+      // Each selected feature must be present in the pub's features (case-sensitive exact match)
+      return features.every(selectedFeature => {
+        // Check if pub has this exact feature (case-sensitive matching)
+        return pub.features.includes(selectedFeature);
+      });
+    });
+    
+    setPubs([...filtered]); // Create new array to trigger re-render
+  };
+
+  const handleFilterApply = (features) => {
+    setSelectedFeatures(features);
+    // Apply filters immediately using current allPubs
+    // Get the latest allPubs value directly
+    const currentAllPubs = allPubs.length > 0 ? allPubs : [];
+    if (currentAllPubs.length > 0) {
+      applyFilters(currentAllPubs, features);
+    }
+  };
+
+  // Also update when allPubs or selectedFeatures changes (to handle initial load and filter changes)
+  useEffect(() => {
+    if (allPubs && allPubs.length > 0) {
+      if (selectedFeatures && selectedFeatures.length > 0) {
+        applyFilters(allPubs, selectedFeatures);
+      } else {
+        setPubs([...allPubs]);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allPubs, selectedFeatures]);
+
+  const handleFilterPress = () => {
+    setShowFilterScreen(true);
+  };
+
+  const handleFilterClose = () => {
+    setShowFilterScreen(false);
+  };
+
   const closeCard = () => {
+    // Lock the current region to prevent any map adjustments
+    lockedRegionRef.current = { ...mapRegion };
+    isClosingCardRef.current = true;
     setSelectedPub(null);
+    // Reset flag after animation completes
+    setTimeout(() => {
+      isClosingCardRef.current = false;
+      lockedRegionRef.current = null;
+    }, 300);
   };
   
-  // Image mapping for local assets - linked to JSON file photoUrl values
-  // This map should match the photoUrl values in pubs_data_short.js
   const imageMap = {
     'assets/PubPhotos/Abbey_Arms.jpeg': require('../assets/PubPhotos/Abbey_Arms.jpeg'),
     'assets/PubPhotos/Birchwood.jpeg': require('../assets/PubPhotos/Birchwood.jpeg'),
@@ -221,36 +290,19 @@ export default function MapScreen() {
     'assets/PubPhotos/Red_Lion_&_Pineapple.jpg': require('../assets/PubPhotos/Red_Lion_&_Pineapple.jpg'),
   };
   
-  // Placeholder image for pubs without photos in assets
   const placeholderImage = require('../assets/PubPhotos/Placeholder.jpg');
   
-  // Get image source for pub photo
-  // This function checks the imageMap using the photoUrl from JSON
-  // If not found, returns placeholder image
   const getImageSource = (photoUrl) => {
     if (!photoUrl) return placeholderImage;
     
-    // Check if it's a local asset path
     if (photoUrl.startsWith('assets/')) {
-      // Try exact match first (as it appears in JSON)
-      if (imageMap[photoUrl]) {
-        return imageMap[photoUrl];
-      }
-      // Try with .jpg extension if .jpeg was provided
+      if (imageMap[photoUrl]) return imageMap[photoUrl];
       const jpgUrl = photoUrl.replace('.jpeg', '.jpg');
-      if (imageMap[jpgUrl]) {
-        return imageMap[jpgUrl];
-      }
-      // Try with .jpeg extension if .jpg was provided
+      if (imageMap[jpgUrl]) return imageMap[jpgUrl];
       const jpegUrl = photoUrl.replace('.jpg', '.jpeg');
-      if (imageMap[jpegUrl]) {
-        return imageMap[jpegUrl];
-      }
-      // If local asset path but not in map, use placeholder
+      if (imageMap[jpegUrl]) return imageMap[jpegUrl];
       return placeholderImage;
     }
-    // External URL (like placekitten) - use placeholder instead
-    // since these pubs don't have photos in the assets folder
     return placeholderImage;
   };
 
@@ -258,34 +310,26 @@ export default function MapScreen() {
     if (!searchQuery.trim()) return;
 
     const query = searchQuery.trim().toLowerCase();
-
-    // First, search through pub names and areas
-    const matchingPub = pubs.find(pub => {
-      const nameMatch = pub.name?.toLowerCase().includes(query);
-      const areaMatch = pub.area?.toLowerCase().includes(query);
-      return nameMatch || areaMatch;
-    });
+    const matchingPub = pubs.find(pub => 
+      pub.name?.toLowerCase().includes(query) || pub.area?.toLowerCase().includes(query)
+    );
 
     if (matchingPub) {
-      // Found a pub match - zoom into that pub location (2x further out than before)
+      // Clear any region locks to allow search navigation
+      lockedRegionRef.current = null;
+      isClosingCardRef.current = false;
+      
       const newRegion = {
         latitude: matchingPub.lat,
         longitude: matchingPub.lon,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       };
-      
       setMapRegion(newRegion);
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(newRegion, 1000);
-      }
-      
-      // Open the pub card
+      mapRef.current?.animateToRegion(newRegion, 1000);
       setSelectedPub(matchingPub);
       return;
     }
-
-    // If no pub match, try geocoding for area/location search
     try {
       const encodedQuery = encodeURIComponent(`${searchQuery}, London, UK`);
       const response = await fetch(
@@ -300,6 +344,10 @@ export default function MapScreen() {
       const data = await response.json();
       
       if (data && data.length > 0) {
+        // Clear any region locks to allow search navigation
+        lockedRegionRef.current = null;
+        isClosingCardRef.current = false;
+        
         const location = data[0];
         const newRegion = {
           latitude: parseFloat(location.lat),
@@ -307,11 +355,8 @@ export default function MapScreen() {
           latitudeDelta: 0.02,
           longitudeDelta: 0.02,
         };
-        
         setMapRegion(newRegion);
-        if (mapRef.current) {
-          mapRef.current.animateToRegion(newRegion, 1000);
-        }
+        mapRef.current?.animateToRegion(newRegion, 1000);
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -319,24 +364,50 @@ export default function MapScreen() {
   };
 
   const clearSearch = () => {
+    // Clear any region locks to allow navigation
+    lockedRegionRef.current = null;
+    isClosingCardRef.current = false;
+    
     setSearchQuery('');
-    // Optionally reset map to original London view
     setMapRegion(LONDON);
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(LONDON, 1000);
-    }
+    mapRef.current?.animateToRegion(LONDON, 1000);
   };
 
   const handleCurrentLocation = async () => {
-    try {
-      // Request location permissions
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission denied');
-        return;
+    // Use cached location immediately for instant response
+    if (currentLocation) {
+      // Clear any region locks immediately
+      lockedRegionRef.current = null;
+      isClosingCardRef.current = false;
+      isNavigatingRef.current = true;
+      
+      const newRegion = {
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+      
+      // Update region state
+      setMapRegion(newRegion);
+      
+      // Animate immediately - no waiting for location fetch
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(newRegion, 1000);
       }
+      
+      // Clear navigation flag after animation completes
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 1050);
+      return;
+    }
+    
+    // Fallback: Only fetch if we don't have cached location (should rarely happen)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
 
-      // Get current location
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
@@ -348,16 +419,28 @@ export default function MapScreen() {
         longitudeDelta: 0.01,
       };
 
+      // Clear any region locks immediately
+      lockedRegionRef.current = null;
+      isClosingCardRef.current = false;
+      isNavigatingRef.current = true;
+      
+      // Update region state
       setMapRegion(newRegion);
+      
+      // Animate quickly - reduced duration for faster response 
       if (mapRef.current) {
         mapRef.current.animateToRegion(newRegion, 1000);
       }
+      
+      // Clear navigation flag after animation completes
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 1050);
     } catch (error) {
       console.error('Error getting location:', error);
+      isNavigatingRef.current = false;
     }
   };
-
-  const tabBarHeight = TAB_BAR_HEIGHT + insets.bottom;
 
   return (
     <View style={styles.container}>
@@ -366,14 +449,31 @@ export default function MapScreen() {
         setSearchQuery={setSearchQuery}
         onSearch={handleSearch}
         onClear={clearSearch}
+        onFilterPress={handleFilterPress}
+      />
+      
+      <FilterScreen
+        visible={showFilterScreen}
+        onClose={handleFilterClose}
+        allFeatures={getAllFeatures()}
+        selectedFeatures={selectedFeatures}
+        onApply={handleFilterApply}
       />
       
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         initialRegion={LONDON}
-        region={mapRegion}
-        onRegionChangeComplete={setMapRegion}
+        region={isClosingCardRef.current && lockedRegionRef.current ? lockedRegionRef.current : mapRegion}
+        onRegionChangeComplete={(region) => {
+          // Ignore region changes while closing the card
+          if (isClosingCardRef.current) {
+            return;
+          }
+          // Always update region state - this keeps it in sync
+          // During programmatic navigation, this syncs with the animated region
+          setMapRegion(region);
+        }}
         customMapStyle={customMapStyle}
         showsUserLocation={false}
         showsMyLocationButton={false}
@@ -383,17 +483,13 @@ export default function MapScreen() {
         showsPointsOfInterest={false}
         zoomControlEnabled={false}
         rotateEnabled={false}
-        scrollEnabled={true}
         pitchEnabled={false}
         toolbarEnabled={false}
         mapPadding={{
-          top: 0,
-          right: 0,
-          bottom: selectedPub ? (isCardExpanded ? screenHeight - insets.top : cardHeight) : 0,
-          left: 0,
+          // Keep padding constant to prevent map jumping
+          // The card overlays the map, so padding doesn't need to change
+          bottom: 0,
         }}
-        googleMapId=""
-        liteMode={false}
       >
         {currentLocation && (
           <Marker
@@ -428,7 +524,7 @@ export default function MapScreen() {
 
       <TouchableOpacity 
         style={[styles.locationButton, { 
-          bottom: tabBarHeight + (selectedPub ? cardHeight + 16 : 16)
+          bottom: insets.bottom + (selectedPub ? cardHeight + 0: 0)
         }]}
         onPress={handleCurrentLocation}
       >
@@ -440,25 +536,6 @@ export default function MapScreen() {
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
         getImageSource={getImageSource}
-        onCardStateChange={(expanded) => {
-          setIsCardExpanded(expanded);
-          // Update map padding to move Google controls above the card
-          if (mapRef.current && selectedPub) {
-            const padding = {
-              top: 0,
-              right: 0,
-              bottom: expanded ? screenHeight - insets.top: cardHeight,
-              left: 0,
-            };
-            // Use setCamera or animateCamera to update padding smoothly
-            try {
-              mapRef.current.setCamera({ padding });
-            } catch (e) {
-              // Fallback if setCamera doesn't work
-              console.log('Could not update map padding:', e);
-            }
-          }
-        }}
       />
     </View>
   );

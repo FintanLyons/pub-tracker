@@ -5,7 +5,8 @@ import {
   Animated, 
   PanResponder,
   TouchableOpacity,
-  StyleSheet
+  StyleSheet,
+  Easing
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,66 +14,60 @@ import PubCardContent from './PubCardContent';
 
 const MEDIUM_GREY = '#757575';
 
-const TAB_BAR_HEIGHT = 0; // Base height of tab bar (without safe area)
-
 export default function DraggablePubCard({ 
   pub, 
   onClose, 
   onToggleVisited,
-  getImageSource,
-  onCardStateChange 
+  getImageSource
 }) {
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
-  // Tab bar height is just the base height - React Navigation handles safe area
-  const tabBarHeight = TAB_BAR_HEIGHT;
   const cardHeight = screenHeight * 0.33;
   const fullHeight = screenHeight - insets.top;
   
-  // Animation values
   const translateY = useRef(new Animated.Value(cardHeight)).current;
   const panY = useRef(new Animated.Value(0)).current;
-  
-  // Card state: 'hidden', 'collapsed', 'expanded'
   const [cardState, setCardState] = React.useState('hidden');
   const cardStateRef = useRef('hidden');
+  const animationRef = useRef(null);
   
-  // Reset animation when pub changes
+  // Stop any ongoing animations
+  const stopAnimation = () => {
+    if (animationRef.current) {
+      animationRef.current.stop();
+      animationRef.current = null;
+    }
+    translateY.stopAnimation();
+  };
+  
   useEffect(() => {
     if (pub) {
+      stopAnimation();
       setCardState('collapsed');
       cardStateRef.current = 'collapsed';
       panY.setValue(0);
+      panY.setOffset(0);
       translateY.setValue(cardHeight);
       
-      if (onCardStateChange) {
-        onCardStateChange(false);
-      }
-      
-      // Use a small delay to ensure smooth animation
-      const timeoutId = setTimeout(() => {
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 11,
-        }).start();
-      }, 10);
-      
-      return () => clearTimeout(timeoutId);
+      animationRef.current = Animated.spring(translateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 30,
+        friction: 11,
+      });
+      animationRef.current.start(() => {
+        animationRef.current = null;
+      });
     } else {
+      stopAnimation();
       setCardState('hidden');
       cardStateRef.current = 'hidden';
-      translateY.setValue(cardHeight);
       panY.setValue(0);
-      
-      if (onCardStateChange) {
-        onCardStateChange(false);
-      }
+      panY.setOffset(0);
+      translateY.setValue(cardHeight);
     }
-  }, [pub?.id]);
+  }, [pub?.id, cardHeight]);
   
-  // Pan responder for drag gestures
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -81,36 +76,61 @@ export default function DraggablePubCard({
           return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
         },
         onPanResponderGrant: () => {
-          panY.setOffset(translateY._value);
-          panY.setValue(0);
+          // Stop any ongoing animations before starting gesture
+          stopAnimation();
+          // Get the current animated value and set it as offset
+          translateY.stopAnimation((value) => {
+            panY.setOffset(value);
+            panY.setValue(0);
+          });
         },
         onPanResponderMove: (_, gestureState) => {
           panY.setValue(gestureState.dy);
         },
         onPanResponderRelease: (_, gestureState) => {
-          panY.flattenOffset();
-          
-          const currentY = translateY._value + gestureState.dy;
           const velocity = gestureState.vy;
           
-          // Snap points - collapsed and expanded both at 0 (no translation needed)
-          // hidden position pushes card below visible area
-          const collapsedY = 0;
-          const expandedY = 0;
-          const hiddenY = cardHeight + tabBarHeight + insets.bottom;
+          // Get current positions before flattening
+          const panOffset = panY._offset || 0;
+          const panValue = panY._value || 0;
+          const currentPanY = panOffset + panValue;
           
-          let targetY;
-          let newState;
+          // Flatten offset and synchronize values properly
+          panY.flattenOffset();
+          translateY.stopAnimation((translateValue) => {
+            const currentY = translateValue + currentPanY;
+            
+            // Update translateY to the actual current position
+            translateY.setValue(currentY);
+            panY.setValue(0);
+            panY.setOffset(0);
           
-          // Use velocity to determine direction if significant
-          if (Math.abs(velocity) > 0.5) {
-            if (velocity < 0) {
-              // Swiping up - expand
-              targetY = expandedY;
-              newState = 'expanded';
+            const collapsedY = 0;
+            const expandedY = 0;
+            const hiddenY = cardHeight + insets.bottom;
+            
+            let targetY;
+            let newState;
+            
+            if (Math.abs(velocity) > 0.5) {
+              if (velocity < 0) {
+                targetY = expandedY;
+                newState = 'expanded';
+              } else {
+                if (cardStateRef.current === 'expanded') {
+                  targetY = collapsedY;
+                  newState = 'collapsed';
+                } else {
+                  targetY = hiddenY;
+                  newState = 'hidden';
+                }
+              }
             } else {
-              // Swiping down
-              if (cardStateRef.current === 'expanded') {
+              const midPoint = (collapsedY + expandedY) / 2;
+              if (currentY < midPoint) {
+                targetY = expandedY;
+                newState = 'expanded';
+              } else if (currentY < collapsedY + 50) {
                 targetY = collapsedY;
                 newState = 'collapsed';
               } else {
@@ -118,55 +138,76 @@ export default function DraggablePubCard({
                 newState = 'hidden';
               }
             }
-          } else {
-            // Use position to determine snap point
-            const midPoint = (collapsedY + expandedY) / 2;
-            if (currentY < midPoint) {
-              targetY = expandedY;
-              newState = 'expanded';
-            } else if (currentY < collapsedY + 50) {
-              targetY = collapsedY;
-              newState = 'collapsed';
-            } else {
-              targetY = hiddenY;
-              newState = 'hidden';
-            }
-          }
-          
-        setCardState(newState);
-        cardStateRef.current = newState;
-        
-        // Notify parent of state change
-        if (onCardStateChange) {
-          onCardStateChange(newState === 'expanded');
-        }
-        
-        Animated.spring(translateY, {
-          toValue: targetY,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 11,
-        }).start(() => {
-          if (newState === 'hidden') {
-            onClose();
-          }
-        });
+            
+            setCardState(newState);
+            cardStateRef.current = newState;
+            
+            animationRef.current = Animated.spring(translateY, {
+              toValue: targetY,
+              useNativeDriver: true,
+              tension: 65,
+              friction: 11,
+            });
+            animationRef.current.start((finished) => {
+              animationRef.current = null;
+              if (finished && newState === 'hidden') {
+                onClose();
+              }
+            });
+          });
+        },
+        onPanResponderTerminate: () => {
+          // Handle interruption (e.g., incoming call)
+          panY.flattenOffset();
+          translateY.stopAnimation((value) => {
+            translateY.setValue(value);
+            panY.setValue(0);
+            panY.setOffset(0);
+          });
         },
       }),
-    [tabBarHeight, cardHeight, onClose]
+    [cardHeight, insets.bottom, onClose]
   );
   
   const handleClose = () => {
-    const newState = 'hidden';
-    setCardState(newState);
-    cardStateRef.current = newState;
-    Animated.spring(translateY, {
-      toValue: cardHeight + tabBarHeight + insets.bottom,
+    // Stop any ongoing animations and gestures immediately
+    stopAnimation();
+    
+    // Get current position values synchronously
+    const panOffset = panY._offset || 0;
+    const panValue = panY._value || 0;
+    const currentPanY = panOffset + panValue;
+    const currentTranslateY = translateY._value || 0;
+    const currentY = currentTranslateY + currentPanY;
+    
+    // Flatten and reset pan values
+    panY.flattenOffset();
+    panY.setValue(0);
+    panY.setOffset(0);
+    
+    // Update translateY to current position to prevent jump
+    translateY.setValue(currentY);
+    
+    // Update state immediately for UI responsiveness
+    setCardState('hidden');
+    cardStateRef.current = 'hidden';
+    
+    const targetY = cardHeight + insets.bottom;
+    
+    // Use timing animation for faster, smoother closing
+    // Reduced duration and optimized easing for snappy feel
+    animationRef.current = Animated.timing(translateY, {
+      toValue: targetY,
+      duration: 200, // Fast and responsive
+      easing: Easing.out(Easing.quad), // Smooth but quick deceleration
       useNativeDriver: true,
-      tension: 65,
-      friction: 11,
-    }).start(() => {
-      onClose();
+    });
+    
+    animationRef.current.start((finished) => {
+      animationRef.current = null;
+      if (finished) {
+        onClose();
+      }
     });
   };
   
@@ -182,7 +223,7 @@ export default function DraggablePubCard({
         { 
           height: currentHeight,
           paddingTop: isExpanded ? insets.top + 8 : 12,
-          bottom: tabBarHeight, // Position above tab bar
+          bottom: 0,
           transform: [
             {
               translateY: Animated.add(translateY, panY)
@@ -192,7 +233,6 @@ export default function DraggablePubCard({
       ]}
       {...panResponder.panHandlers}
     >
-      {/* Close button in top gap when expanded */}
       {isExpanded && (
         <TouchableOpacity 
           style={[styles.closeButtonTop, { top: insets.top + 8 }]} 
@@ -206,7 +246,6 @@ export default function DraggablePubCard({
         <View style={styles.cardHandle} />
       </View>
       
-      {/* Close button for collapsed state */}
       {!isExpanded && (
         <TouchableOpacity 
           style={styles.closeButton} 

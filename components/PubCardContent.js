@@ -6,6 +6,40 @@ const DARK_GREY = '#2C2C2C';
 const MEDIUM_GREY = '#757575';
 const LIGHT_GREY = '#F5F5F5';
 
+// Feature icon mapping
+const getFeatureIcon = (feature) => {
+  const featureLower = feature.toLowerCase();
+  const iconMap = {
+    'live music': 'music',
+    'beer garden': 'tree',
+    'dog friendly': 'dog',
+    'food': 'food',
+    'wifi': 'wifi',
+    'parking': 'parking',
+    'quiz': 'book-open-variant',
+    'sports': 'soccer',
+    'pool': 'pool',
+    'darts': 'target',
+    'outdoor seating': 'table-chair',
+    'wheelchair accessible': 'wheelchair-accessibility',
+  };
+  
+  // Try exact match first
+  if (iconMap[featureLower]) {
+    return iconMap[featureLower];
+  }
+  
+  // Try partial matches
+  for (const [key, icon] of Object.entries(iconMap)) {
+    if (featureLower.includes(key) || key.includes(featureLower)) {
+      return icon;
+    }
+  }
+  
+  // Default icon
+  return 'star';
+};
+
 export default function PubCardContent({ 
   pub, 
   isExpanded, 
@@ -20,44 +54,14 @@ export default function PubCardContent({
     >
       <Text style={styles.pubName}>{pub.name}</Text>
       
-      {pub.area && (
-        <Text style={styles.area}>{pub.area}</Text>
-      )}
-      
-      {pub.photoUrl && (
-        <View style={styles.photoContainer}>
-          <Image 
-            source={getImageSource(pub.photoUrl)} 
-            style={styles.pubPhoto}
-            resizeMode="cover"
-          />
-        </View>
-      )}
-      
-      {pub.address && (
-        <View style={styles.infoRow}>
-          <MaterialCommunityIcons name="map-marker" size={16} color={MEDIUM_GREY} />
-          <Text style={styles.address}>{pub.address.replace(/\n+/g, ' ').trim()}</Text>
-        </View>
-      )}
-      
-      {pub.phone && (
-        <View style={styles.infoRow}>
-          <MaterialCommunityIcons name="phone" size={16} color={MEDIUM_GREY} />
-          <Text style={styles.phone}>{pub.phone}</Text>
-        </View>
-      )}
-      
-      {pub.ownership && (
-        <View style={styles.infoRow}>
-          <MaterialCommunityIcons name="office-building" size={16} color={MEDIUM_GREY} />
-          <Text style={styles.ownership}>{pub.ownership}</Text>
-        </View>
-      )}
-      
-      {pub.description && isExpanded && (
-        <Text style={styles.description}>{pub.description}</Text>
-      )}
+      <View style={styles.areaRow}>
+        {pub.area && (
+          <Text style={styles.area}>{pub.area}</Text>
+        )}
+        {pub.ownership && (
+          <Text style={styles.ownershipInline}>{pub.ownership}</Text>
+        )}
+      </View>
       
       <TouchableOpacity
         style={[
@@ -78,6 +82,59 @@ export default function PubCardContent({
           {pub.isVisited ? 'Visited' : 'Mark as Visited'}
         </Text>
       </TouchableOpacity>
+      
+      {pub.photoUrl && (
+        <View style={styles.photoContainer}>
+          <Image 
+            source={getImageSource(pub.photoUrl)} 
+            style={styles.pubPhoto}
+            resizeMode="cover"
+          />
+        </View>
+      )}
+      
+      {pub.features && pub.features.length > 0 && (
+        <View style={styles.featuresContainer}>
+          {pub.features.map((feature, index) => (
+            <View key={index} style={styles.featureItem}>
+              <MaterialCommunityIcons 
+                name={getFeatureIcon(feature)} 
+                size={18} 
+                color={MEDIUM_GREY} 
+              />
+              <Text style={styles.featureText}>{feature}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      
+      {pub.address && (
+        <View style={styles.infoRow}>
+          <MaterialCommunityIcons name="map-marker" size={16} color={MEDIUM_GREY} />
+          <Text style={styles.address}>{pub.address.replace(/\n+/g, ' ').trim()}</Text>
+        </View>
+      )}
+      
+      {pub.phone && (
+        <View style={styles.infoRow}>
+          <MaterialCommunityIcons name="phone" size={16} color={MEDIUM_GREY} />
+          <Text style={styles.phone}>{pub.phone}</Text>
+        </View>
+      )}
+      
+      {pub.founded && (
+        <View style={styles.infoRow}>
+          <MaterialCommunityIcons name="calendar" size={16} color={MEDIUM_GREY} />
+          <Text style={styles.founded}>Founded: {pub.founded}</Text>
+        </View>
+      )}
+      
+      {pub.history && (
+        <View style={styles.historyContainer}>
+          <MaterialCommunityIcons name="book-open-page-variant" size={16} color={MEDIUM_GREY} />
+          <Text style={styles.history}>{pub.history}</Text>
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -93,17 +150,53 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingRight: 40,
   },
+  areaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
   area: {
     fontSize: 14,
     color: MEDIUM_GREY,
-    marginBottom: 12,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    marginRight: 12,
+  },
+  ownershipInline: {
+    fontSize: 14,
+    color: MEDIUM_GREY,
+    fontWeight: '500',
+  },
+  visitedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: LIGHT_GREY,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: DARK_GREY,
+  },
+  visitedButtonActive: {
+    backgroundColor: DARK_GREY,
+    borderColor: DARK_GREY,
+  },
+  visitedButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: DARK_GREY,
+    marginLeft: 8,
+  },
+  visitedButtonTextActive: {
+    color: '#FFFFFF',
   },
   photoContainer: {
     width: '100%',
     height: 200,
-    marginVertical: 12,
+    marginBottom: 12,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: LIGHT_GREY,
@@ -111,6 +204,24 @@ const styles = StyleSheet.create({
   pubPhoto: {
     width: '100%',
     height: '100%',
+  },
+  featuresContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 16,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '50%',
+    marginBottom: 8,
+    paddingRight: 8,
+  },
+  featureText: {
+    fontSize: 14,
+    color: DARK_GREY,
+    marginLeft: 6,
+    flex: 1,
   },
   infoRow: {
     flexDirection: 'row',
@@ -128,42 +239,23 @@ const styles = StyleSheet.create({
     color: DARK_GREY,
     marginLeft: 8,
   },
-  ownership: {
+  founded: {
     fontSize: 14,
     color: DARK_GREY,
     marginLeft: 8,
   },
-  description: {
-    fontSize: 14,
-    color: DARK_GREY,
-    lineHeight: 20,
+  historyContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     marginTop: 8,
     marginBottom: 16,
   },
-  visitedButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: LIGHT_GREY,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginTop: 8,
-    borderWidth: 2,
-    borderColor: DARK_GREY,
-  },
-  visitedButtonActive: {
-    backgroundColor: DARK_GREY,
-    borderColor: DARK_GREY,
-  },
-  visitedButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  history: {
+    fontSize: 14,
     color: DARK_GREY,
     marginLeft: 8,
-  },
-  visitedButtonTextActive: {
-    color: '#FFFFFF',
+    flex: 1,
+    lineHeight: 20,
   },
 });
 

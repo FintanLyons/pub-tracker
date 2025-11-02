@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const AMBER = '#D4A017';
 const DARK_CHARCOAL = '#1C1C1C';
 
-export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onClear }) {
+export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onClear, onFilterPress }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -28,6 +28,9 @@ export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onCle
           </TouchableOpacity>
         )}
       </View>
+      <TouchableOpacity onPress={onFilterPress} style={styles.filterButton}>
+        <MaterialCommunityIcons name="filter-variant" size={20} color={AMBER} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -42,8 +45,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   searchBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: DARK_CHARCOAL,
@@ -68,6 +74,20 @@ const styles = StyleSheet.create({
   clearButton: {
     marginLeft: 8,
     padding: 4,
+  },
+  filterButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: DARK_CHARCOAL,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
 });
 
