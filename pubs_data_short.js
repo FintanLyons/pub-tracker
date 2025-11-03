@@ -13,6 +13,8 @@ const MOCK_PUBS = [
         founded: "1860",
         history: "The Abbey Arms was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Abbey Wood and is a Grade II listed building.",
         area: "Abbey Wood",
+        achievements: ["Pub of the Year 2024"],
+        points: 30,
     },
 	{
         id: '2',
@@ -28,6 +30,8 @@ const MOCK_PUBS = [
         founded: "1960",
         history: "The Birchwood was built in 1960 and was originally a private house. It was converted to a pub in 1965 and has been owned by the same family ever since. It is one of the oldest pubs in Abbey Wood and is a Grade II listed building.",
         area: "Abbey Wood",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '3',
@@ -43,6 +47,8 @@ const MOCK_PUBS = [
         founded: "1560",
         history: "The George & Dragon was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: ["Oldest Pub in London"],
+        points: 50,
     },
 	{
         id: '4',
@@ -58,6 +64,8 @@ const MOCK_PUBS = [
         founded: "1860",
         history: "The Red Lion & Pineapple was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '5',
@@ -73,6 +81,8 @@ const MOCK_PUBS = [
         founded: "1820",
         history: "The Rocket was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '6',
@@ -88,6 +98,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Shepherds Bush Cricket Club was built in 1882 and was originally a private club. It was converted to a pub in 1885 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '7',
@@ -103,6 +115,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Station House was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '8',
@@ -118,6 +132,8 @@ const MOCK_PUBS = [
         founded: "1782",
         history: "The West London Trades Union Club was built in 1860 and was originally a private house. It was converted to a pub in 1865 and has been owned by the same family ever since. It is one of the oldest pubs in Acton and is a Grade II listed building.",
         area: "Acton",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '9',
@@ -133,6 +149,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Bollo was built in 1885 and was originally a private house. It was converted to a pub in 1885 and has been owned by the same family ever since. It is one of the oldest pubs in Acton Green and is a Grade II listed building.",
         area: "Acton Green",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '10',
@@ -148,6 +166,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Duke of Sussex was built in 1840 and was originally a private house. It was converted to a pub in 1840 and has been owned by the same family ever since. It is one of the oldest pubs in Acton Green and is a Grade II listed building.",
         area: "Acton Green",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '11',
@@ -162,6 +182,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Swan was built in 1871 and was originally a private house. It was converted to a pub in 1871 and has been owned by the same family ever since. It is one of the oldest pubs in Acton Green and is a Grade II listed building.",
         area: "Acton Green",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '12',
@@ -177,6 +199,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Claret & Ale was built in 1860 and was originally a private house. It was converted to a pub in 1860 and has been owned by the same family ever since. It is one of the oldest pubs in Addiscombe and is a Grade II listed building.",
         area: "Addiscombe",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '13',
@@ -192,6 +216,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Cricketers was built in 1860 and was originally a private house. It was converted to a pub in 1860 and has been owned by the same family ever since. It is one of the oldest pubs in Addiscombe and is a Grade II listed building.",
         area: "Addiscombe",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '14',
@@ -206,6 +232,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Craft Beer Co. was built in 2015 and was originally a private house. It was converted to a pub in 2015 and has been owned by the same family ever since. It is one of the oldest pubs in Aldgate and is a Grade II listed building.",
         area: "Aldgate",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '15',
@@ -221,6 +249,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Hoop & Grapes was built in 1100 and was originally a private house. It was converted to a pub in 1920 and has been owned by the same family ever since. It is one of the oldest pubs in Aldgate and is a Grade II listed building.",
         area: "Aldgate",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '16',
@@ -236,6 +266,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Douglas Fir was built in 2016 and was originally a private house. It was converted to a pub in 2016 and has been owned by the same family ever since. It is one of the oldest pubs in Anerley and is a Grade II listed building.",
         area: "Anerley",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '17',
@@ -251,6 +283,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Ashtead Village Club was built in 1860 and was originally a private house. It was converted to a pub in 1860 and has been owned by the same family ever since. It is one of the oldest pubs in Ashtead and is a Grade II listed building.",
         area: "Ashtead",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '18',
@@ -266,6 +300,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Brewery Inn was built in 1860 and was originally a private house. It was converted to a pub in 1860 and has been owned by the same family ever since. It is one of the oldest pubs in Ashtead and is a Grade II listed building.",
         area: "Ashtead",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '19',
@@ -281,6 +317,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Leg of Mutton & Cauliflower was built in 1800 and was originally a private house. It was converted to a pub in 1800 and has been owned by the same family ever since. It is one of the oldest pubs in Ashtead and is a Grade II listed building.",
         area: "Ashtead",
+        achievements: [],
+        points: 10,
     },
 	{
         id: '20',
@@ -296,6 +334,8 @@ const MOCK_PUBS = [
         founded: "1882",
         history: "The Woodman was built in 1860 and was originally a private house. It was converted to a pub in 1860 and has been owned by the same family ever since. It is one of the oldest pubs in Ashtead and is a Grade II listed building.",
         area: "Ashtead",
+        achievements: [],
+        points: 10,
     }
 ];
 

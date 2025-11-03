@@ -52,8 +52,8 @@ export default function DraggablePubCard({
       animationRef.current = Animated.spring(translateY, {
         toValue: 0,
         useNativeDriver: true,
-        tension: 30,
-        friction: 11,
+        tension: 60,
+        friction: 30,
       });
       animationRef.current.start(() => {
         animationRef.current = null;
@@ -145,8 +145,8 @@ export default function DraggablePubCard({
             animationRef.current = Animated.spring(translateY, {
               toValue: targetY,
               useNativeDriver: true,
-              tension: 65,
-              friction: 11,
+              tension: 120,
+              friction: 60,
             });
             animationRef.current.start((finished) => {
               animationRef.current = null;
@@ -198,7 +198,7 @@ export default function DraggablePubCard({
     // Reduced duration and optimized easing for snappy feel
     animationRef.current = Animated.timing(translateY, {
       toValue: targetY,
-      duration: 200, // Fast and responsive
+      duration: 150, // Fast and responsive
       easing: Easing.out(Easing.quad), // Smooth but quick deceleration
       useNativeDriver: true,
     });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useContext } from 'react';
 import { 
   View, 
   Dimensions, 
@@ -7,17 +7,25 @@ import {
   Keyboard
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRoute, useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchLondonPubs, togglePubVisited } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
+import AreaIcon from '../components/AreaIcon';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
 import FilterScreen from './FilterScreen';
+import { LoadingContext } from '../contexts/LoadingContext';
 
 const LONDON = { latitude: 51.5074, longitude: -0.1278, latitudeDelta: 0.1, longitudeDelta: 0.1 };
+
+// Zoom threshold for switching between area markers and individual pub markers
+// When latitudeDelta > AREA_ZOOM_THRESHOLD, show area markers; otherwise show individual pubs
+// Higher values = individual pubs appear at more zoomed-out levels
+const AREA_ZOOM_THRESHOLD = 0.06; // Adjust this value to optimize zoom level switching
 
 const AMBER = '#D4A017';
 const MEDIUM_GREY = '#757575';
@@ -124,6 +132,9 @@ const customMapStyle = [
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
+  const route = useRoute();
+  const { isLocationLoaded, setIsLocationLoaded } = useContext(LoadingContext);
   const [pubs, setPubs] = useState([]);
   const [allPubs, setAllPubs] = useState([]); // Store unfiltered pubs
   const [selectedPub, setSelectedPub] = useState(null);
@@ -135,9 +146,11 @@ export default function MapScreen() {
   const [selectedFeatures, setSelectedFeatures] = useState([]);
   const [selectedOwnerships, setSelectedOwnerships] = useState([]);
   const [yearRange, setYearRange] = useState(null);
+  const [selectedArea, setSelectedArea] = useState(null); // Filter by area name
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTop, setKeyboardTop] = useState(0);
+  const clearedAreaRef = useRef(null); // Track which area was explicitly cleared (to prevent re-applying)
   const mapRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
   const isClosingCardRef = useRef(false);
@@ -156,16 +169,43 @@ export default function MapScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          await Location.enableNetworkProviderAsync();
-          
+          // Use Lowest accuracy for initial load to get cached location quickly
+          // This significantly speeds up the initial load time
           const location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
+            accuracy: Location.Accuracy.Lowest,
+            maximumAge: 60000, // Accept cached location up to 60 seconds old
           });
-          setCurrentLocation({
+          const userLocation = {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
-          });
+          };
+          setCurrentLocation(userLocation);
           
+          // Set initial map region to user's location
+          const initialRegion = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            latitudeDelta: 0.1,
+            longitudeDelta: 0.1,
+          };
+          setMapRegion(initialRegion);
+          
+          // Mark as navigating to prevent onRegionChangeComplete from overriding
+          isNavigatingRef.current = true;
+          
+          // Animate to user location to ensure map is centered
+          if (mapRef.current) {
+            mapRef.current.animateToRegion(initialRegion, 0);
+          }
+          
+          // Reset flag after brief delay
+          setTimeout(() => {
+            isNavigatingRef.current = false;
+          }, 200);
+          
+          setIsLocationLoaded(true);
+          
+          // Start watching position with better accuracy for updates
           locationSubscriptionRef.current = await Location.watchPositionAsync(
             {
               accuracy: Location.Accuracy.Balanced,
@@ -182,9 +222,14 @@ export default function MapScreen() {
               }
             }
           );
+        } else {
+          // Permission denied, use London as fallback
+          setIsLocationLoaded(true);
         }
       } catch (error) {
         console.error('Location setup error:', error);
+        // On error, use London as fallback
+        setIsLocationLoaded(true);
       }
     };
     
@@ -219,7 +264,7 @@ export default function MapScreen() {
     await togglePubVisited(pubId);
     const updatedPubs = await fetchLondonPubs();
     setAllPubs(updatedPubs);
-    applyFilters(updatedPubs, selectedFeatures, selectedOwnerships, yearRange);
+    applyFilters(updatedPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
     if (selectedPub?.id === pubId) {
       const updatedPub = updatedPubs.find(p => p.id === pubId);
       if (updatedPub) setSelectedPub(updatedPub);
@@ -268,8 +313,8 @@ export default function MapScreen() {
     };
   };
 
-  // Apply filters to pubs (features, ownerships, and year range)
-  const applyFilters = (pubsToFilter, features, ownerships, yearRangeFilter) => {
+  // Apply filters to pubs (features, ownerships, year range, and area)
+  const applyFilters = (pubsToFilter, features, ownerships, yearRangeFilter, areaFilter) => {
     if (!pubsToFilter || pubsToFilter.length === 0) {
       // If no pubs to filter, just show empty or wait for data
       return;
@@ -279,8 +324,9 @@ export default function MapScreen() {
     const hasFeaturesFilter = features && features.length > 0;
     const hasOwnershipsFilter = ownerships && ownerships.length > 0;
     const hasYearRangeFilter = yearRangeFilter && yearRangeFilter.min !== null && yearRangeFilter.max !== null;
+    const hasAreaFilter = areaFilter && areaFilter.trim().length > 0;
     
-    if (!hasFeaturesFilter && !hasOwnershipsFilter && !hasYearRangeFilter) {
+    if (!hasFeaturesFilter && !hasOwnershipsFilter && !hasYearRangeFilter && !hasAreaFilter) {
       setPubs([...pubsToFilter]); // Create new array to trigger re-render
       return;
     }
@@ -323,8 +369,18 @@ export default function MapScreen() {
         }
       }
 
+      // Check area filter
+      let matchesArea = true;
+      if (hasAreaFilter) {
+        if (!pub.area) {
+          matchesArea = false;
+        } else {
+          matchesArea = pub.area.trim().toLowerCase() === areaFilter.trim().toLowerCase();
+        }
+      }
+
       // Pub must match all active filters (AND logic across filter types)
-      return matchesFeatures && matchesOwnerships && matchesYearRange;
+      return matchesFeatures && matchesOwnerships && matchesYearRange && matchesArea;
     });
     
     setPubs([...filtered]); // Create new array to trigger re-render
@@ -342,17 +398,17 @@ export default function MapScreen() {
     // Apply filters immediately using current allPubs
     const currentAllPubs = allPubs.length > 0 ? allPubs : [];
     if (currentAllPubs.length > 0) {
-      applyFilters(currentAllPubs, features, ownerships, yearRangeFilter);
+      applyFilters(currentAllPubs, features, ownerships, yearRangeFilter, selectedArea);
     }
   };
 
-  // Also update when allPubs, selectedFeatures, selectedOwnerships, or yearRange changes
+  // Also update when allPubs, selectedFeatures, selectedOwnerships, yearRange, or selectedArea changes
   useEffect(() => {
     if (allPubs && allPubs.length > 0) {
-      applyFilters(allPubs, selectedFeatures, selectedOwnerships, yearRange);
+      applyFilters(allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allPubs, selectedFeatures, selectedOwnerships, yearRange]);
+  }, [allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea]);
 
   const handleFilterPress = () => {
     setShowFilterScreen(true);
@@ -475,9 +531,25 @@ export default function MapScreen() {
     isClosingCardRef.current = false;
     
     setSearchQuery('');
+    setSelectedArea(null); // Clear area filter when clearing search
     setMapRegion(LONDON);
     mapRef.current?.animateToRegion(LONDON, 1000);
     setShowSuggestions(false);
+    
+    // Track which area was cleared to prevent re-applying it if route params come back
+    const currentArea = route.params?.areaToSearch || processedAreaRef.current;
+    if (currentArea) {
+      clearedAreaRef.current = currentArea;
+    }
+    
+    // Clear route params permanently so they don't come back when navigating away and back
+    // Merge existing params and remove areaToSearch key to fully clear it
+    const currentParams = route.params || {};
+    const { areaToSearch, ...paramsWithoutArea } = currentParams;
+    navigation.setParams(paramsWithoutArea);
+    
+    // Reset processed area ref
+    processedAreaRef.current = null;
   };
 
   // Get unique areas from all pubs
@@ -489,6 +561,112 @@ export default function MapScreen() {
       }
     });
     return Array.from(areaSet).sort();
+  };
+
+  // Calculate area statistics: total pubs, visited pubs, and completion percentage
+  const calculateAreaStats = (areaName, pubsToAnalyze) => {
+    const pubsInArea = pubsToAnalyze.filter(pub => 
+      pub.area && pub.area.trim().toLowerCase() === areaName.toLowerCase()
+    );
+    
+    const totalPubs = pubsInArea.length;
+    const visitedPubs = pubsInArea.filter(pub => pub.isVisited).length;
+    const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
+    
+    return {
+      totalPubs,
+      visitedPubs,
+      completionPercentage,
+      pubs: pubsInArea
+    };
+  };
+
+  // Interpolate color from grey to amber based on completion percentage (0-100)
+  const interpolateColor = (percentage) => {
+    // Convert hex colors to RGB
+    const greyR = 0x75;
+    const greyG = 0x75;
+    const greyB = 0x75;
+    const amberR = 0xD4;
+    const amberG = 0xA0;
+    const amberB = 0x17;
+    
+    // Interpolate between grey and amber
+    const r = Math.round(greyR + (amberR - greyR) * (percentage / 100));
+    const g = Math.round(greyG + (amberG - greyG) * (percentage / 100));
+    const b = Math.round(greyB + (amberB - greyB) * (percentage / 100));
+    
+    // Convert back to hex
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  };
+
+  // Calculate center point of pubs in an area
+  const getAreaCenter = (pubsInArea) => {
+    const validPubs = pubsInArea.filter(pub => pub.lat && pub.lon);
+    if (validPubs.length === 0) return null;
+    
+    const sumLat = validPubs.reduce((sum, pub) => sum + parseFloat(pub.lat), 0);
+    const sumLon = validPubs.reduce((sum, pub) => sum + parseFloat(pub.lon), 0);
+    
+    return {
+      latitude: sumLat / validPubs.length,
+      longitude: sumLon / validPubs.length
+    };
+  };
+
+  // Determine if we should show area markers based on current zoom level
+  // Uses the maximum of latitudeDelta and longitudeDelta to ensure consistent behavior
+  const shouldShowAreaMarkers = () => {
+    if (!mapRegion || !mapRegion.latitudeDelta) return false;
+    // Use max delta to handle cases where deltas differ slightly
+    const maxDelta = Math.max(mapRegion.latitudeDelta, mapRegion.longitudeDelta || mapRegion.latitudeDelta);
+    return maxDelta > AREA_ZOOM_THRESHOLD;
+  };
+
+  // Handle area marker press on map - zoom in to show individual pubs in that area
+  const handleAreaMarkerPress = async (areaName) => {
+    const areaStats = calculateAreaStats(areaName, pubs);
+    if (areaStats.pubs.length === 0) return;
+    
+    const center = getAreaCenter(areaStats.pubs);
+    if (!center) return;
+    
+    // Calculate bounds for the area
+    const lats = areaStats.pubs.map(pub => parseFloat(pub.lat));
+    const lons = areaStats.pubs.map(pub => parseFloat(pub.lon));
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    
+    const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01);
+    const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
+    
+    // Clear any region locks to allow navigation
+    lockedRegionRef.current = null;
+    isClosingCardRef.current = false;
+    isNavigatingRef.current = true;
+    
+    const newRegion = {
+      latitude: center.latitude,
+      longitude: center.longitude,
+      latitudeDelta: Math.min(latDelta, AREA_ZOOM_THRESHOLD - 0.01), // Zoom in just below threshold
+      longitudeDelta: Math.min(lonDelta, AREA_ZOOM_THRESHOLD - 0.01),
+    };
+    
+    setMapRegion(newRegion);
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(newRegion, 1000);
+      
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 1050);
+    } else {
+      isNavigatingRef.current = false;
+    }
+    
+    // Don't set selectedPub - just zoom in
+    setSelectedPub(null);
   };
 
   // Filter areas based on search query
@@ -533,7 +711,8 @@ export default function MapScreen() {
   };
 
   // Shared function to search for an area using pub coordinates
-  const searchArea = async (areaName) => {
+  // If applyAreaFilter is true, also filter pubs to only show pubs in that area
+  const searchArea = async (areaName, applyAreaFilter = false) => {
     // Calculate center point from actual pubs in this area instead of geocoding
     // This ensures we zoom to the correct location based on actual pub data
     // and avoids issues with duplicate place names (e.g., multiple "Ashford" locations)
@@ -589,6 +768,12 @@ export default function MapScreen() {
         
         // Explicitly don't set selectedPub - no pub card should appear
         setSelectedPub(null);
+        
+        // Apply area filter if requested
+        if (applyAreaFilter) {
+          setSelectedArea(areaName);
+        }
+        
         return true; // Success
       }
     }
@@ -695,6 +880,37 @@ export default function MapScreen() {
     // Use shared searchArea function
     await searchArea(area);
   };
+
+  // Handle route params when navigating from ProfileScreen with an area to search
+  const processedAreaRef = useRef(null);
+  useFocusEffect(
+    useCallback(() => {
+      const areaToSearch = route.params?.areaToSearch;
+      
+      // Only process area search if:
+      // 1. We have a valid area to search (non-empty string)
+      // 2. It's different from what we've already processed
+      // 3. Pubs are loaded
+      // 4. It was NOT explicitly cleared by the user (don't re-apply cleared areas)
+      if (areaToSearch && 
+          typeof areaToSearch === 'string' && 
+          areaToSearch.trim().length > 0 &&
+          areaToSearch !== processedAreaRef.current && 
+          allPubs.length > 0 &&
+          areaToSearch !== clearedAreaRef.current) {
+        // This is a new area search from ProfileScreen - process it
+        processedAreaRef.current = areaToSearch;
+        clearedAreaRef.current = null; // Reset cleared area since this is a new search
+        // Search the area and apply filter
+        searchArea(areaToSearch, true);
+        setSearchQuery(areaToSearch);
+      } else if (!areaToSearch) {
+        // Route params were cleared/removed - reset processed ref
+        processedAreaRef.current = null;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [route.params?.areaToSearch, allPubs.length])
+  );
 
   const handlePubSuggestionPress = async (pub) => {
     setSearchQuery(pub.name);
@@ -812,7 +1028,7 @@ export default function MapScreen() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={LONDON}
+        initialRegion={mapRegion}
         region={isClosingCardRef.current && lockedRegionRef.current ? lockedRegionRef.current : mapRegion}
         onRegionChangeComplete={(region) => {
           // Ignore region changes while closing the card or during programmatic navigation
@@ -855,20 +1071,59 @@ export default function MapScreen() {
           </Marker>
         )}
         
-        {pubs.map((p) => (
-          <Marker
-            key={p.id}
-            coordinate={{ latitude: p.lat, longitude: p.lon }}
-            onPress={() => handlePubPress(p)}
-          >
-            <View style={styles.markerContainer}>
-              <PintGlassIcon 
-                size={28} 
-                color={p.isVisited ? AMBER : MEDIUM_GREY} 
-              />
-            </View>
-          </Marker>
-        ))}
+        {shouldShowAreaMarkers() ? (
+          // Show area markers when zoomed out
+          (() => {
+            // Get unique areas from filtered pubs only
+            const areaSet = new Set();
+            pubs.forEach(pub => {
+              if (pub.area && pub.area.trim()) {
+                areaSet.add(pub.area.trim());
+              }
+            });
+            const visibleAreas = Array.from(areaSet);
+            
+            return visibleAreas.map((areaName) => {
+              const areaStats = calculateAreaStats(areaName, pubs);
+              const center = getAreaCenter(areaStats.pubs);
+              
+              if (!center || areaStats.totalPubs === 0) return null;
+            
+            const areaColor = interpolateColor(areaStats.completionPercentage);
+            
+            return (
+              <Marker
+                key={`area-${areaName}`}
+                coordinate={center}
+                onPress={() => handleAreaMarkerPress(areaName)}
+              >
+                <View style={styles.markerContainer}>
+                  <AreaIcon 
+                    size={36} 
+                    color={areaColor}
+                  />
+                </View>
+              </Marker>
+            );
+            });
+          })()
+        ) : (
+          // Show individual pub markers when zoomed in
+          pubs.map((p) => (
+            <Marker
+              key={p.id}
+              coordinate={{ latitude: p.lat, longitude: p.lon }}
+              onPress={() => handlePubPress(p)}
+            >
+              <View style={styles.markerContainer}>
+                <PintGlassIcon 
+                  size={28} 
+                  color={p.isVisited ? AMBER : MEDIUM_GREY} 
+                />
+              </View>
+            </Marker>
+          ))
+        )}
       </MapView>
 
       <TouchableOpacity 
