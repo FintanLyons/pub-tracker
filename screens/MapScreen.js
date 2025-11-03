@@ -3,7 +3,8 @@ import {
   View, 
   Dimensions, 
   TouchableOpacity, 
-  StyleSheet
+  StyleSheet,
+  Keyboard
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -12,6 +13,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchLondonPubs, togglePubVisited } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import SearchBar from '../components/SearchBar';
+import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
 import FilterScreen from './FilterScreen';
 
@@ -131,6 +133,11 @@ export default function MapScreen() {
   const [heading, setHeading] = useState(0);
   const [showFilterScreen, setShowFilterScreen] = useState(false);
   const [selectedFeatures, setSelectedFeatures] = useState([]);
+  const [selectedOwnerships, setSelectedOwnerships] = useState([]);
+  const [yearRange, setYearRange] = useState(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardTop, setKeyboardTop] = useState(0);
   const mapRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
   const isClosingCardRef = useRef(false);
@@ -182,9 +189,25 @@ export default function MapScreen() {
     };
     
     setupLocation();
+
+    // Keyboard event listeners
+    const keyboardWillShow = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      // Use screenY if available, otherwise calculate from screen height
+      const top = e.endCoordinates.screenY !== undefined 
+        ? e.endCoordinates.screenY 
+        : Dimensions.get('window').height - e.endCoordinates.height;
+      setKeyboardTop(top);
+    });
+    const keyboardWillHide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      setKeyboardTop(0);
+    });
     
     return () => {
       locationSubscriptionRef.current?.remove();
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
     };
   }, []);
 
@@ -196,7 +219,7 @@ export default function MapScreen() {
     await togglePubVisited(pubId);
     const updatedPubs = await fetchLondonPubs();
     setAllPubs(updatedPubs);
-    applyFilters(updatedPubs, selectedFeatures);
+    applyFilters(updatedPubs, selectedFeatures, selectedOwnerships, yearRange);
     if (selectedPub?.id === pubId) {
       const updatedPub = updatedPubs.find(p => p.id === pubId);
       if (updatedPub) setSelectedPub(updatedPub);
@@ -214,52 +237,122 @@ export default function MapScreen() {
     return Array.from(featureSet).sort();
   };
 
-  // Apply filters to pubs
-  const applyFilters = (pubsToFilter, features) => {
+  // Extract all unique ownerships from pubs
+  const getAllOwnerships = () => {
+    const ownershipSet = new Set();
+    allPubs.forEach(pub => {
+      if (pub.ownership && pub.ownership.trim()) {
+        ownershipSet.add(pub.ownership);
+      }
+    });
+    return Array.from(ownershipSet).sort();
+  };
+
+  // Get min and max founded years from pubs
+  const getYearRange = () => {
+    const years = [];
+    allPubs.forEach(pub => {
+      if (pub.founded) {
+        const year = parseInt(pub.founded, 10);
+        if (!isNaN(year)) {
+          years.push(year);
+        }
+      }
+    });
+    if (years.length === 0) {
+      return { min: 1800, max: 2025 };
+    }
+    return {
+      min: Math.min(...years),
+      max: Math.max(...years)
+    };
+  };
+
+  // Apply filters to pubs (features, ownerships, and year range)
+  const applyFilters = (pubsToFilter, features, ownerships, yearRangeFilter) => {
     if (!pubsToFilter || pubsToFilter.length === 0) {
       // If no pubs to filter, just show empty or wait for data
       return;
     }
     
-    if (!features || features.length === 0) {
+    // If no filters selected, show all pubs
+    const hasFeaturesFilter = features && features.length > 0;
+    const hasOwnershipsFilter = ownerships && ownerships.length > 0;
+    const hasYearRangeFilter = yearRangeFilter && yearRangeFilter.min !== null && yearRangeFilter.max !== null;
+    
+    if (!hasFeaturesFilter && !hasOwnershipsFilter && !hasYearRangeFilter) {
       setPubs([...pubsToFilter]); // Create new array to trigger re-render
       return;
     }
 
     const filtered = pubsToFilter.filter(pub => {
-      if (!pub.features || !Array.isArray(pub.features)) return false;
-      // Pub must have ALL of the selected features (AND logic)
-      // Each selected feature must be present in the pub's features (case-sensitive exact match)
-      return features.every(selectedFeature => {
-        // Check if pub has this exact feature (case-sensitive matching)
-        return pub.features.includes(selectedFeature);
-      });
+      // Check features filter (ALL must match - AND logic)
+      let matchesFeatures = true;
+      if (hasFeaturesFilter) {
+        if (!pub.features || !Array.isArray(pub.features)) {
+          matchesFeatures = false;
+        } else {
+          matchesFeatures = features.every(selectedFeature => {
+            return pub.features.includes(selectedFeature);
+          });
+        }
+      }
+
+      // Check ownerships filter (ANY must match - OR logic, since a pub can only have one ownership)
+      let matchesOwnerships = true;
+      if (hasOwnershipsFilter) {
+        if (!pub.ownership) {
+          matchesOwnerships = false;
+        } else {
+          matchesOwnerships = ownerships.includes(pub.ownership);
+        }
+      }
+
+      // Check year range filter
+      let matchesYearRange = true;
+      if (hasYearRangeFilter) {
+        if (!pub.founded) {
+          matchesYearRange = false;
+        } else {
+          const foundedYear = parseInt(pub.founded, 10);
+          if (isNaN(foundedYear)) {
+            matchesYearRange = false;
+          } else {
+            matchesYearRange = foundedYear >= yearRangeFilter.min && foundedYear <= yearRangeFilter.max;
+          }
+        }
+      }
+
+      // Pub must match all active filters (AND logic across filter types)
+      return matchesFeatures && matchesOwnerships && matchesYearRange;
     });
     
     setPubs([...filtered]); // Create new array to trigger re-render
   };
 
-  const handleFilterApply = (features) => {
+  const handleFilterApply = (filters) => {
+    const features = filters.features || [];
+    const ownerships = filters.ownerships || [];
+    const yearRangeFilter = filters.yearRange || null;
+    
     setSelectedFeatures(features);
+    setSelectedOwnerships(ownerships);
+    setYearRange(yearRangeFilter);
+    
     // Apply filters immediately using current allPubs
-    // Get the latest allPubs value directly
     const currentAllPubs = allPubs.length > 0 ? allPubs : [];
     if (currentAllPubs.length > 0) {
-      applyFilters(currentAllPubs, features);
+      applyFilters(currentAllPubs, features, ownerships, yearRangeFilter);
     }
   };
 
-  // Also update when allPubs or selectedFeatures changes (to handle initial load and filter changes)
+  // Also update when allPubs, selectedFeatures, selectedOwnerships, or yearRange changes
   useEffect(() => {
     if (allPubs && allPubs.length > 0) {
-      if (selectedFeatures && selectedFeatures.length > 0) {
-        applyFilters(allPubs, selectedFeatures);
-      } else {
-        setPubs([...allPubs]);
-      }
+      applyFilters(allPubs, selectedFeatures, selectedOwnerships, yearRange);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allPubs, selectedFeatures]);
+  }, [allPubs, selectedFeatures, selectedOwnerships, yearRange]);
 
   const handleFilterPress = () => {
     setShowFilterScreen(true);
@@ -306,32 +399,43 @@ export default function MapScreen() {
     return placeholderImage;
   };
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleSearch = async (queryOverride = null) => {
+    const queryToUse = queryOverride !== null ? queryOverride : searchQuery;
+    if (!queryToUse.trim()) return;
 
-    const query = searchQuery.trim().toLowerCase();
-    const matchingPub = pubs.find(pub => 
-      pub.name?.toLowerCase().includes(query) || pub.area?.toLowerCase().includes(query)
+    setShowSuggestions(false);
+    Keyboard.dismiss();
+    const query = queryToUse.trim().toLowerCase();
+    
+    // First check if query matches an area - if so, zoom to area (no card)
+    const areas = getAllAreas();
+    const matchingArea = areas.find(area => 
+      area.toLowerCase().includes(query)
     );
 
-    if (matchingPub) {
-      // Clear any region locks to allow search navigation
-      lockedRegionRef.current = null;
-      isClosingCardRef.current = false;
-      
-      const newRegion = {
-        latitude: matchingPub.lat,
-        longitude: matchingPub.lon,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      };
-      setMapRegion(newRegion);
-      mapRef.current?.animateToRegion(newRegion, 1000);
-      setSelectedPub(matchingPub);
+    if (matchingArea) {
+      // Use shared searchArea function
+      await searchArea(matchingArea);
       return;
     }
+
+    // If no area match, check if query exactly matches a pub name - if so, zoom to pub and show card
+    // Search in allPubs (not filtered pubs) so we can find any pub regardless of filters
+    // Only match exact pub names to avoid conflicts with area names
+    const matchingPubByName = allPubs.find(pub => 
+      pub.name?.toLowerCase().trim() === query
+    );
+
+    if (matchingPubByName) {
+      // Use shared searchPub function
+      searchPub(matchingPubByName);
+      return;
+    }
+
+    // If neither pub name nor area match, do general geocoding search
+    // Search the whole UK, not just London
     try {
-      const encodedQuery = encodeURIComponent(`${searchQuery}, London, UK`);
+      const encodedQuery = encodeURIComponent(`${queryToUse}, UK`);
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodedQuery}&format=json&limit=1`,
         {
@@ -357,6 +461,8 @@ export default function MapScreen() {
         };
         setMapRegion(newRegion);
         mapRef.current?.animateToRegion(newRegion, 1000);
+        // Don't set selectedPub for general searches - no pub card
+        setSelectedPub(null);
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -371,6 +477,232 @@ export default function MapScreen() {
     setSearchQuery('');
     setMapRegion(LONDON);
     mapRef.current?.animateToRegion(LONDON, 1000);
+    setShowSuggestions(false);
+  };
+
+  // Get unique areas from all pubs
+  const getAllAreas = () => {
+    const areaSet = new Set();
+    allPubs.forEach(pub => {
+      if (pub.area && pub.area.trim()) {
+        areaSet.add(pub.area.trim());
+      }
+    });
+    return Array.from(areaSet).sort();
+  };
+
+  // Filter areas based on search query
+  const getAreaSuggestions = () => {
+    const areas = getAllAreas();
+    if (!searchQuery.trim()) {
+      // Return first 3 alphabetical areas when no query
+      return areas.slice(0, 3);
+    }
+    const query = searchQuery.trim().toLowerCase();
+    return areas.filter(area => 
+      area.toLowerCase().includes(query)
+    ).slice(0, 3); // Limit to 3 suggestions
+  };
+
+  // Filter pub names based on search query
+  const getPubSuggestions = () => {
+    if (!searchQuery.trim()) {
+      // Return first 3 alphabetical pub names when no query
+      const sortedPubs = [...allPubs].sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      return sortedPubs.slice(0, 3);
+    }
+    const query = searchQuery.trim().toLowerCase();
+    return allPubs.filter(pub => 
+      pub.name?.toLowerCase().includes(query)
+    ).slice(0, 3); // Limit to 3 suggestions
+  };
+
+  const handleSearchFocus = () => {
+    setShowSuggestions(true);
+  };
+
+  const handleSearchBlur = () => {
+    // Delay hiding to allow suggestion tap to register
+    setTimeout(() => {
+      setShowSuggestions(false);
+    }, 200);
+  };
+
+  // Shared function to search for an area using pub coordinates
+  const searchArea = async (areaName) => {
+    // Calculate center point from actual pubs in this area instead of geocoding
+    // This ensures we zoom to the correct location based on actual pub data
+    // and avoids issues with duplicate place names (e.g., multiple "Ashford" locations)
+    const pubsInArea = allPubs.filter(pub => 
+      pub.area && pub.area.trim().toLowerCase() === areaName.toLowerCase()
+    );
+    
+    if (pubsInArea.length > 0) {
+      // Calculate the center point of all pubs in this area
+      const validPubs = pubsInArea.filter(pub => pub.lat && pub.lon);
+      
+      if (validPubs.length > 0) {
+        const sumLat = validPubs.reduce((sum, pub) => sum + parseFloat(pub.lat), 0);
+        const sumLon = validPubs.reduce((sum, pub) => sum + parseFloat(pub.lon), 0);
+        const centerLat = sumLat / validPubs.length;
+        const centerLon = sumLon / validPubs.length;
+        
+        // Calculate bounds to determine appropriate zoom level
+        const lats = validPubs.map(pub => parseFloat(pub.lat));
+        const lons = validPubs.map(pub => parseFloat(pub.lon));
+        const minLat = Math.min(...lats);
+        const maxLat = Math.max(...lats);
+        const minLon = Math.min(...lons);
+        const maxLon = Math.max(...lons);
+        
+        // Calculate appropriate deltas to show all pubs in the area
+        const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01); // At least 0.01, but scale if pubs spread out
+        const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
+        
+        // Clear any region locks to allow search navigation
+        lockedRegionRef.current = null;
+        isClosingCardRef.current = false;
+        isNavigatingRef.current = true;
+        
+        const newRegion = {
+          latitude: centerLat,
+          longitude: centerLon,
+          latitudeDelta: Math.min(latDelta, 0.05), // Cap at reasonable zoom level
+          longitudeDelta: Math.min(lonDelta, 0.05),
+        };
+        
+        setMapRegion(newRegion);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(newRegion, 1000);
+          
+          // Reset navigation flag after animation completes
+          setTimeout(() => {
+            isNavigatingRef.current = false;
+          }, 1050);
+        } else {
+          isNavigatingRef.current = false;
+        }
+        
+        // Explicitly don't set selectedPub - no pub card should appear
+        setSelectedPub(null);
+        return true; // Success
+      }
+    }
+    
+    // Fallback to geocoding if no pubs found in area (shouldn't happen, but safety net)
+    // Search the whole UK, not just London
+    try {
+      const encodedQuery = encodeURIComponent(`${areaName}, UK`);
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodedQuery}&format=json&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'PubTrackerApp/1.0'
+          }
+        }
+      );
+      
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        // Clear any region locks to allow search navigation
+        lockedRegionRef.current = null;
+        isClosingCardRef.current = false;
+        isNavigatingRef.current = true;
+        
+        const location = data[0];
+        const newRegion = {
+          latitude: parseFloat(location.lat),
+          longitude: parseFloat(location.lon),
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02,
+        };
+        
+        setMapRegion(newRegion);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion(newRegion, 1000);
+          
+          setTimeout(() => {
+            isNavigatingRef.current = false;
+          }, 1050);
+        } else {
+          isNavigatingRef.current = false;
+        }
+        
+        // Explicitly don't set selectedPub - no pub card should appear
+        setSelectedPub(null);
+        return true; // Success
+      }
+    } catch (error) {
+      console.error('Area search error:', error);
+      isNavigatingRef.current = false;
+    }
+    
+    return false; // Failed
+  };
+
+  // Shared function to search for a pub
+  const searchPub = (pub) => {
+    // Clear any region locks to allow search navigation
+    lockedRegionRef.current = null;
+    isClosingCardRef.current = false;
+    isNavigatingRef.current = true;
+    
+    // Ensure we have valid coordinates
+    if (pub.lat && pub.lon) {
+      // Zoom to the pub and show the pub card
+      const newRegion = {
+        latitude: parseFloat(pub.lat),
+        longitude: parseFloat(pub.lon),
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+      
+      // Update region state first
+      setMapRegion(newRegion);
+      
+      // Then animate the map
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(newRegion, 1000);
+        
+        // Reset navigation flag after animation completes
+        setTimeout(() => {
+          isNavigatingRef.current = false;
+        }, 1050);
+      } else {
+        isNavigatingRef.current = false;
+      }
+      
+      // Set the selected pub
+      setSelectedPub(pub);
+      return true; // Success
+    } else {
+      console.error('Pub missing coordinates:', pub);
+      isNavigatingRef.current = false;
+      return false; // Failed
+    }
+  };
+
+  const handleAreaPress = async (area) => {
+    setSearchQuery(area);
+    setShowSuggestions(false);
+    Keyboard.dismiss();
+    
+    // Use shared searchArea function
+    await searchArea(area);
+  };
+
+  const handlePubSuggestionPress = async (pub) => {
+    setSearchQuery(pub.name);
+    setShowSuggestions(false);
+    Keyboard.dismiss();
+    
+    // Use shared searchPub function
+    searchPub(pub);
   };
 
   const handleCurrentLocation = async () => {
@@ -450,6 +782,18 @@ export default function MapScreen() {
         onSearch={handleSearch}
         onClear={clearSearch}
         onFilterPress={handleFilterPress}
+        onFocus={handleSearchFocus}
+        onBlur={handleSearchBlur}
+      />
+      <SearchSuggestions
+        visible={showSuggestions}
+        searchQuery={searchQuery}
+        areaSuggestions={getAreaSuggestions()}
+        pubSuggestions={getPubSuggestions()}
+        onAreaPress={handleAreaPress}
+        onPubPress={handlePubSuggestionPress}
+        keyboardHeight={keyboardHeight}
+        keyboardTop={keyboardTop}
       />
       
       <FilterScreen
@@ -457,6 +801,11 @@ export default function MapScreen() {
         onClose={handleFilterClose}
         allFeatures={getAllFeatures()}
         selectedFeatures={selectedFeatures}
+        allOwnerships={getAllOwnerships()}
+        selectedOwnerships={selectedOwnerships}
+        yearRange={yearRange}
+        minYear={getYearRange().min}
+        maxYear={getYearRange().max}
         onApply={handleFilterApply}
       />
       
@@ -466,8 +815,8 @@ export default function MapScreen() {
         initialRegion={LONDON}
         region={isClosingCardRef.current && lockedRegionRef.current ? lockedRegionRef.current : mapRegion}
         onRegionChangeComplete={(region) => {
-          // Ignore region changes while closing the card
-          if (isClosingCardRef.current) {
+          // Ignore region changes while closing the card or during programmatic navigation
+          if (isClosingCardRef.current || isNavigatingRef.current) {
             return;
           }
           // Always update region state - this keeps it in sync
@@ -524,7 +873,7 @@ export default function MapScreen() {
 
       <TouchableOpacity 
         style={[styles.locationButton, { 
-          bottom: insets.bottom + (selectedPub ? cardHeight + 0: 0)
+          bottom: insets.bottom - 24 + (selectedPub ? cardHeight + 0: 0)
         }]}
         onPress={handleCurrentLocation}
       >

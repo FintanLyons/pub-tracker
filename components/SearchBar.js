@@ -6,8 +6,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const AMBER = '#D4A017';
 const DARK_CHARCOAL = '#1C1C1C';
 
-export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onClear, onFilterPress }) {
+export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onClear, onFilterPress, onFocus, onBlur }) {
   const insets = useSafeAreaInsets();
+
+  const handleSubmit = () => {
+    // Pass the current searchQuery value explicitly to ensure it's used
+    if (searchQuery && searchQuery.trim()) {
+      onSearch(searchQuery.trim());
+    }
+  };
 
   return (
     <View style={[styles.searchContainer, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
@@ -19,8 +26,10 @@ export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onCle
           placeholderTextColor={AMBER}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          onSubmitEditing={onSearch}
+          onSubmitEditing={handleSubmit}
           returnKeyType="search"
+          onFocus={onFocus}
+          onBlur={onBlur}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={onClear} style={styles.clearButton}>
@@ -41,7 +50,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 1,
+    zIndex: 2,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 8,

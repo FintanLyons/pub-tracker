@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import RangeSlider from '../components/RangeSlider';
 
 const AMBER = '#D4A017';
 const DARK_CHARCOAL = '#1C1C1C';
@@ -50,15 +51,25 @@ export default function FilterScreen({
   visible, 
   onClose, 
   allFeatures, 
-  selectedFeatures, 
+  selectedFeatures,
+  allOwnerships,
+  selectedOwnerships,
+  yearRange,
+  minYear,
+  maxYear,
   onApply 
 }) {
   const insets = useSafeAreaInsets();
+  const defaultYearRange = { min: minYear || 1800, max: maxYear || 2025 };
   const [localSelectedFeatures, setLocalSelectedFeatures] = useState(new Set(selectedFeatures));
+  const [localSelectedOwnerships, setLocalSelectedOwnerships] = useState(new Set(selectedOwnerships || []));
+  const [localYearRange, setLocalYearRange] = useState(yearRange || defaultYearRange);
 
   useEffect(() => {
     setLocalSelectedFeatures(new Set(selectedFeatures));
-  }, [selectedFeatures, visible]);
+    setLocalSelectedOwnerships(new Set(selectedOwnerships || []));
+    setLocalYearRange(yearRange || defaultYearRange);
+  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, visible]);
 
   const toggleFeature = (feature) => {
     const newSet = new Set(localSelectedFeatures);
@@ -70,12 +81,34 @@ export default function FilterScreen({
     setLocalSelectedFeatures(newSet);
   };
 
+  const toggleOwnership = (ownership) => {
+    const newSet = new Set(localSelectedOwnerships);
+    if (newSet.has(ownership)) {
+      newSet.delete(ownership);
+    } else {
+      newSet.add(ownership);
+    }
+    setLocalSelectedOwnerships(newSet);
+  };
+
   const handleClear = () => {
     setLocalSelectedFeatures(new Set());
+    setLocalSelectedOwnerships(new Set());
+    setLocalYearRange(defaultYearRange);
+  };
+
+  const handleYearRangeChange = (range) => {
+    setLocalYearRange(range);
   };
 
   const handleApply = () => {
-    onApply(Array.from(localSelectedFeatures));
+    // Only apply year filter if range is not the full range (user has actually filtered)
+    const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || 2025);
+    onApply({
+      features: Array.from(localSelectedFeatures),
+      ownerships: Array.from(localSelectedOwnerships),
+      yearRange: isFullRange ? null : localYearRange
+    });
     onClose();
   };
 
@@ -130,6 +163,51 @@ export default function FilterScreen({
                 );
               })}
             </View>
+
+            <Text style={styles.sectionTitle}>Ownership</Text>
+            <View style={styles.featuresList}>
+              {allOwnerships && allOwnerships.map((ownership) => {
+                const isSelected = localSelectedOwnerships.has(ownership);
+                return (
+                  <TouchableOpacity
+                    key={ownership}
+                    style={[
+                      styles.featureItem,
+                      isSelected && styles.featureItemSelected
+                    ]}
+                    onPress={() => toggleOwnership(ownership)}
+                  >
+                    <MaterialCommunityIcons 
+                      name="office-building" 
+                      size={20} 
+                      color={isSelected ? AMBER : MEDIUM_GREY} 
+                    />
+                    <Text style={[
+                      styles.featureText,
+                      isSelected && styles.featureTextSelected
+                    ]}>
+                      {ownership}
+                    </Text>
+                    <MaterialCommunityIcons 
+                      name={isSelected ? 'check-circle' : 'checkbox-blank-circle-outline'} 
+                      size={24} 
+                      color={isSelected ? AMBER : MEDIUM_GREY} 
+                      style={styles.checkIcon}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.sectionTitle}>Founded Year</Text>
+            <RangeSlider
+              min={minYear || 1800}
+              max={maxYear || 2025}
+              minValue={localYearRange.min}
+              maxValue={localYearRange.max}
+              onValueChange={handleYearRangeChange}
+              step={1}
+            />
           </ScrollView>
 
           <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
