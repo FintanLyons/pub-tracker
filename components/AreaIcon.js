@@ -1,10 +1,10 @@
 import React from 'react';
 import { Image, StyleSheet } from 'react-native';
 
-export default function PintGlassIcon({ size = 24, color = '#2C2C2C', style }) {
+export default function AreaIcon({ size = 32, color = '#757575', style }) {
   return (
     <Image 
-      source={require('../assets/pub_icon.png')}
+      source={require('../assets/area_icon.png')}
       style={[
         styles.icon,
         { 
@@ -24,3 +24,4 @@ const styles = StyleSheet.create({
     // Additional styling if needed
   },
 });
+

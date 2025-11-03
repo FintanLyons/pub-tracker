@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { fetchLondonPubs } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
 
@@ -10,11 +11,64 @@ const LIGHT_GREY = '#F5F5F5';
 const MEDIUM_GREY = '#757575';
 const ACCENT_GREY = '#424242';
 
+const SORT_MODES = {
+  LOCATION: 'location',
+  ALPHABETICAL: 'alphabetical',
+  MOST_VISITED: 'most_visited',
+  PERCENTAGE: 'percentage',
+};
+
 export default function ProfileScreen() {
+  const navigation = useNavigation();
   const [pubs, setPubs] = useState([]);
   const [visitedCount, setVisitedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [areaStats, setAreaStats] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const isFirstRender = useRef(true);
+
+  const handleAreaPress = (areaName) => {
+    // Navigate to Map tab and pass the area name as a parameter
+    navigation.navigate('Map', { areaToSearch: areaName });
+  };
+
+  // Calculate distance between two coordinates using Haversine formula (in km)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // Get user's current location
+  const getCurrentLocation = useCallback(async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        return null;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      return {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      };
+    } catch (error) {
+      console.error('Error getting location:', error);
+      return null;
+    }
+  }, []);
 
   const loadStats = useCallback(async () => {
     const allPubs = await fetchLondonPubs();
@@ -23,29 +77,111 @@ export default function ProfileScreen() {
     const visited = allPubs.filter(p => p.isVisited);
     setVisitedCount(visited.length);
 
+    // Get current location if we don't have it and location sorting is needed
+    // Make sure location is fetched BEFORE calculating area breakdown when sorting by location
+    let userLocation = currentLocation;
+    if (!userLocation && sortMode === SORT_MODES.LOCATION) {
+      userLocation = await getCurrentLocation();
+      if (userLocation) {
+        setCurrentLocation(userLocation);
+      }
+    }
+
     // Calculate area breakdown
     const areaMap = {};
+    const areaCoordinates = {}; // Store coordinates for each area to calculate center
+    
     allPubs.forEach(pub => {
       const area = pub.area || 'Unknown';
       if (!areaMap[area]) {
         areaMap[area] = { total: 0, visited: 0 };
+        areaCoordinates[area] = [];
       }
       areaMap[area].total++;
       if (pub.isVisited) {
         areaMap[area].visited++;
       }
+      if (pub.lat && pub.lon) {
+        areaCoordinates[area].push({
+          lat: parseFloat(pub.lat),
+          lon: parseFloat(pub.lon),
+        });
+      }
     });
 
-    const stats = Object.entries(areaMap)
-      .map(([area, counts]) => ({
-        area,
-        ...counts,
-        percentage: counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0,
-      }))
-      .sort((a, b) => b.visited - a.visited || b.total - a.total);
+    // Calculate center coordinates for each area
+    const areaCenters = {};
+    Object.keys(areaCoordinates).forEach(area => {
+      const coords = areaCoordinates[area];
+      if (coords.length > 0) {
+        const sumLat = coords.reduce((sum, c) => sum + c.lat, 0);
+        const sumLon = coords.reduce((sum, c) => sum + c.lon, 0);
+        areaCenters[area] = {
+          lat: sumLat / coords.length,
+          lon: sumLon / coords.length,
+        };
+      }
+    });
+
+    // Create stats with distance if location is available
+    let stats = Object.entries(areaMap)
+      .map(([area, counts]) => {
+        const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
+        let distance = null;
+        
+        // Only calculate distance if we have both userLocation and area center
+        if (userLocation && areaCenters[area]) {
+          try {
+            distance = calculateDistance(
+              userLocation.latitude,
+              userLocation.longitude,
+              areaCenters[area].lat,
+              areaCenters[area].lon
+            );
+          } catch (error) {
+            console.error(`Error calculating distance for area ${area}:`, error);
+            distance = null;
+          }
+        }
+
+        return {
+          area,
+          ...counts,
+          percentage,
+          distance,
+        };
+      });
+
+    // Sort based on sort mode
+    switch (sortMode) {
+      case SORT_MODES.LOCATION:
+        stats = stats.sort((a, b) => {
+          // If both have distances, sort by distance
+          if (a.distance !== null && b.distance !== null) {
+            return a.distance - b.distance;
+          }
+          // If only one has distance, prioritize it
+          if (a.distance !== null && b.distance === null) return -1;
+          if (a.distance === null && b.distance !== null) return 1;
+          // If neither has distance, sort alphabetically
+          return a.area.localeCompare(b.area);
+        });
+        break;
+      case SORT_MODES.ALPHABETICAL:
+        stats = stats.sort((a, b) => a.area.localeCompare(b.area));
+        break;
+      case SORT_MODES.MOST_VISITED:
+        stats = stats.sort((a, b) => b.visited - a.visited || b.total - a.total);
+        break;
+      case SORT_MODES.PERCENTAGE:
+        stats = stats.sort((a, b) => b.percentage - a.percentage || b.visited - a.visited);
+        break;
+      default:
+        break;
+    }
 
     setAreaStats(stats);
-  }, []);
+  }, [currentLocation, sortMode, getCurrentLocation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -53,6 +189,41 @@ export default function ProfileScreen() {
     }, [loadStats])
   );
 
+  // Reload stats when sort mode changes (but not on initial mount)
+  useEffect(() => {
+    // Skip initial mount - useFocusEffect handles that
+    if (totalCount > 0) {
+      loadStats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortMode]);
+
+  // Animate modal content slide
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    
+    if (showFilterModal) {
+      // Reset to bottom position and animate up
+      slideAnim.setValue(300);
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 65,
+        friction: 11,
+      }).start();
+    } else {
+      // Animate down when closing
+      Animated.timing(slideAnim, {
+        toValue: 300,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFilterModal]);
 
   const progressPercentage = totalCount > 0 ? Math.round((visitedCount / totalCount) * 100) : 0;
 
@@ -81,12 +252,25 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Breakdown by Area</Text>
+        <View style={styles.sectionTitleContainer}>
+          <Text style={styles.sectionTitle}>Breakdown by Area</Text>
+          <TouchableOpacity 
+            onPress={() => setShowFilterModal(true)}
+            style={styles.filterButton}
+          >
+            <MaterialCommunityIcons name="filter-variant" size={20} color={DARK_GREY} />
+          </TouchableOpacity>
+        </View>
         {areaStats.length === 0 ? (
           <Text style={styles.emptyText}>No areas found</Text>
         ) : (
           areaStats.map((stat, index) => (
-            <View key={index} style={styles.areaCard}>
+            <TouchableOpacity 
+              key={index} 
+              style={styles.areaCard}
+              onPress={() => handleAreaPress(stat.area)}
+              activeOpacity={0.7}
+            >
               <View style={styles.areaHeader}>
                 <Text style={styles.areaName}>{stat.area}</Text>
                 <Text style={styles.areaCount}>
@@ -104,10 +288,127 @@ export default function ProfileScreen() {
                 </View>
                 <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </View>
+
+      <Modal
+        visible={showFilterModal}
+        animationType="none"
+        transparent={true}
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowFilterModal(false)}
+          />
+          <Animated.View 
+            style={[
+              styles.modalContent,
+              {
+                transform: [{ translateY: slideAnim }],
+              },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Sort by</Text>
+              <TouchableOpacity 
+                onPress={() => setShowFilterModal(false)}
+                style={styles.modalCloseButton}
+              >
+                <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                sortMode === SORT_MODES.LOCATION && styles.filterOptionSelected
+              ]}
+              onPress={() => {
+                setSortMode(SORT_MODES.LOCATION);
+                setShowFilterModal(false);
+              }}
+            >
+              <Text style={[
+                styles.filterOptionText,
+                sortMode === SORT_MODES.LOCATION && styles.filterOptionTextSelected
+              ]}>
+                Location (Distance)
+              </Text>
+              {sortMode === SORT_MODES.LOCATION && (
+                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                sortMode === SORT_MODES.ALPHABETICAL && styles.filterOptionSelected
+              ]}
+              onPress={() => {
+                setSortMode(SORT_MODES.ALPHABETICAL);
+                setShowFilterModal(false);
+              }}
+            >
+              <Text style={[
+                styles.filterOptionText,
+                sortMode === SORT_MODES.ALPHABETICAL && styles.filterOptionTextSelected
+              ]}>
+                Alphabetical
+              </Text>
+              {sortMode === SORT_MODES.ALPHABETICAL && (
+                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                sortMode === SORT_MODES.MOST_VISITED && styles.filterOptionSelected
+              ]}
+              onPress={() => {
+                setSortMode(SORT_MODES.MOST_VISITED);
+                setShowFilterModal(false);
+              }}
+            >
+              <Text style={[
+                styles.filterOptionText,
+                sortMode === SORT_MODES.MOST_VISITED && styles.filterOptionTextSelected
+              ]}>
+                Most Pubs Visited
+              </Text>
+              {sortMode === SORT_MODES.MOST_VISITED && (
+                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                sortMode === SORT_MODES.PERCENTAGE && styles.filterOptionSelected
+              ]}
+              onPress={() => {
+                setSortMode(SORT_MODES.PERCENTAGE);
+                setShowFilterModal(false);
+              }}
+            >
+              <Text style={[
+                styles.filterOptionText,
+                sortMode === SORT_MODES.PERCENTAGE && styles.filterOptionTextSelected
+              ]}>
+                Percentage Visited
+              </Text>
+              {sortMode === SORT_MODES.PERCENTAGE && (
+                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -194,11 +495,22 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 20,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: DARK_GREY,
-    marginBottom: 16,
+    flex: 1,
+  },
+  filterButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: LIGHT_GREY,
   },
   emptyText: {
     fontSize: 14,
@@ -257,5 +569,57 @@ const styles = StyleSheet.create({
     color: MEDIUM_GREY,
     minWidth: 45,
     textAlign: 'right',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 40,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: LIGHT_GREY,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: DARK_GREY,
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  filterOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: LIGHT_GREY,
+  },
+  filterOptionSelected: {
+    backgroundColor: LIGHT_GREY,
+  },
+  filterOptionText: {
+    fontSize: 16,
+    color: DARK_GREY,
+  },
+  filterOptionTextSelected: {
+    fontWeight: '600',
   },
 });
