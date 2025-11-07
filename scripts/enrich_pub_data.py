@@ -8,11 +8,12 @@ This script uses Google Gemini AI to enrich pub data from Supabase:
 
 Setup:
 1. Install dependencies: pip install supabase google-generativeai python-dotenv
-2. Get Google Gemini API key: https://aistudio.google.com/app/apikey (FREE!)
+2. Get Google API key: https://aistudio.google.com/app/apikey (FREE!)
+   (Same key works for both Gemini AI and Custom Search)
 3. Create .env file in scripts/ directory or project root with:
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your_service_role_key (for writes)
-   GEMINI_API_KEY=your_gemini_api_key
+   GOOGLE_API_KEY=your_google_api_key
 
 ⚠️  SECURITY: Never commit API keys to git! The .env file is in .gitignore.
 """
@@ -34,11 +35,11 @@ load_dotenv()
 #     Create a .env file in the scripts/ directory or project root with:
 #     SUPABASE_URL=https://your-project.supabase.co
 #     SUPABASE_KEY=your_service_role_key
-#     GEMINI_API_KEY=your_gemini_api_key
+#     GOOGLE_API_KEY=your_google_api_key (same key used for Gemini AI and Custom Search)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # Validate that all required environment variables are set
 missing_keys = []
@@ -46,8 +47,8 @@ if not SUPABASE_URL:
     missing_keys.append('SUPABASE_URL')
 if not SUPABASE_KEY:
     missing_keys.append('SUPABASE_KEY')
-if not GEMINI_API_KEY:
-    missing_keys.append('GEMINI_API_KEY')
+if not GOOGLE_API_KEY:
+    missing_keys.append('GOOGLE_API_KEY')
 
 if missing_keys:
     print("❌ Error: Missing required environment variables!")
@@ -55,14 +56,14 @@ if missing_keys:
     print("\n   Please create a .env file in the scripts/ directory or project root with:")
     print("   SUPABASE_URL=https://your-project.supabase.co")
     print("   SUPABASE_KEY=your_service_role_key")
-    print("   GEMINI_API_KEY=your_gemini_api_key")
-    print("   Get Gemini API key: https://aistudio.google.com/app/apikey")
+    print("   GOOGLE_API_KEY=your_google_api_key")
+    print("   Get Google API key: https://aistudio.google.com/app/apikey")
     print("\n   Note: The .env file is already in .gitignore and will not be committed.")
     sys.exit(1)
 
 # Initialize clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 def get_pub_enrichment(pub_name: str, area: str, address: str = "") -> tuple:
     """
