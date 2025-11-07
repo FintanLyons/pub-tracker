@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MOCK_PUBS from '../pubs_data_short.js';
+import { getSupabaseUrl, getSupabaseHeaders } from '../config/supabase';
 
 // Try to find a sensible array inside whatever was parsed
 function coerceToPubArray(value) {
@@ -23,6 +24,7 @@ function coerceToPubArray(value) {
 
 export const fetchLondonPubs = async () => {
 	try {
+		// Get visited pubs from local storage
 		const rawVisited = await AsyncStorage.getItem('visitedPubs');
 		const visitedSet = new Set();
 		if (rawVisited) {
@@ -41,7 +43,83 @@ export const fetchLondonPubs = async () => {
 			}
 		}
 
-		// Load base pubs (mock). In a real app, fetch from an API here.
+		// Try to fetch from Supabase
+		const supabaseUrl = getSupabaseUrl();
+		const headers = getSupabaseHeaders();
+		
+		if (supabaseUrl && headers) {
+			try {
+				// Fetch pubs with their features and achievements
+				const pubsResponse = await fetch(
+					`${supabaseUrl}/pubs?select=*`,
+					{ headers }
+				);
+				
+				if (!pubsResponse.ok) {
+					throw new Error(`Supabase error: ${pubsResponse.status}`);
+				}
+				
+				const pubs = await pubsResponse.json();
+				
+				// Fetch features for all pubs
+				const featuresResponse = await fetch(
+					`${supabaseUrl}/pub_features?select=pub_id,feature`,
+					{ headers }
+				);
+				const allFeatures = await featuresResponse.json();
+				
+				// Fetch achievements for all pubs
+				const achievementsResponse = await fetch(
+					`${supabaseUrl}/pub_achievements?select=pub_id,achievement`,
+					{ headers }
+				);
+				const allAchievements = await achievementsResponse.json();
+				
+				// Group features and achievements by pub_id
+				const featuresMap = {};
+				allFeatures.forEach(f => {
+					if (!featuresMap[f.pub_id]) featuresMap[f.pub_id] = [];
+					featuresMap[f.pub_id].push(f.feature);
+				});
+				
+				const achievementsMap = {};
+				allAchievements.forEach(a => {
+					if (!achievementsMap[a.pub_id]) achievementsMap[a.pub_id] = [];
+					achievementsMap[a.pub_id].push(a.achievement);
+				});
+				
+				// Combine and format pubs
+				const formattedPubs = pubs.map(pub => ({
+					id: pub.id,
+					name: pub.name,
+					lat: parseFloat(pub.lat),
+					lon: parseFloat(pub.lon),
+					address: pub.address,
+					phone: pub.phone,
+					description: pub.description,
+					founded: pub.founded,
+					history: pub.history,
+					area: pub.area,
+					ownership: pub.ownership,
+					photoUrl: pub.photo_url, // Map photo_url to photoUrl for compatibility
+					points: pub.points || 10,
+					features: featuresMap[pub.id] || [],
+					achievements: achievementsMap[pub.id] || [],
+					isVisited: visitedSet.has(pub.id),
+				}));
+				
+				console.log(`✅ Fetched ${formattedPubs.length} pubs from Supabase`);
+				return formattedPubs;
+				
+			} catch (supabaseError) {
+				console.error('Supabase fetch error:', supabaseError);
+				console.log('⚠️  Falling back to mock data');
+				// Fall through to mock data fallback
+			}
+		}
+		
+		// Fallback to mock data if Supabase is not configured or fails
+		console.log('📦 Using mock data (Supabase not configured or unavailable)');
 		const pubs = MOCK_PUBS.map(pub => ({
 			...pub,
 			isVisited: visitedSet.has(pub.id),
@@ -50,6 +128,7 @@ export const fetchLondonPubs = async () => {
 		return pubs;
 	} catch (error) {
 		console.error('fetchLondonPubs error:', error);
+		// Final fallback
 		return MOCK_PUBS.map(pub => ({ ...pub, isVisited: false }));
 	}
 };

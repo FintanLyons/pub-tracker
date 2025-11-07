@@ -444,6 +444,7 @@ export default function MapScreen() {
   const getImageSource = (photoUrl) => {
     if (!photoUrl) return placeholderImage;
     
+    // Handle local assets (assets/...)
     if (photoUrl.startsWith('assets/')) {
       if (imageMap[photoUrl]) return imageMap[photoUrl];
       const jpgUrl = photoUrl.replace('.jpeg', '.jpg');
@@ -452,6 +453,13 @@ export default function MapScreen() {
       if (imageMap[jpegUrl]) return imageMap[jpegUrl];
       return placeholderImage;
     }
+    
+    // Handle remote URLs (http:// or https://)
+    if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
+      return { uri: photoUrl };
+    }
+    
+    // Fallback to placeholder for unknown formats
     return placeholderImage;
   };
 
@@ -1110,18 +1118,18 @@ export default function MapScreen() {
         ) : (
           // Show individual pub markers when zoomed in
           pubs.map((p) => (
-            <Marker
-              key={p.id}
-              coordinate={{ latitude: p.lat, longitude: p.lon }}
-              onPress={() => handlePubPress(p)}
-            >
-              <View style={styles.markerContainer}>
-                <PintGlassIcon 
-                  size={28} 
-                  color={p.isVisited ? AMBER : MEDIUM_GREY} 
-                />
-              </View>
-            </Marker>
+          <Marker
+            key={p.id}
+            coordinate={{ latitude: p.lat, longitude: p.lon }}
+            onPress={() => handlePubPress(p)}
+          >
+            <View style={styles.markerContainer}>
+              <PintGlassIcon 
+                size={28} 
+                color={p.isVisited ? AMBER : MEDIUM_GREY} 
+              />
+            </View>
+          </Marker>
           ))
         )}
       </MapView>

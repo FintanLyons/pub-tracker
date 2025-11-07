@@ -38,16 +38,23 @@
       "package": "com.yourcompany.pubtracker",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "config": {
         "googleMaps": {
-          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+          "apiKey": "AIzaSyB4oWR7RXyPpDpVFghD6BE9uVNbnvOIBIc"
         }
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "cd970f03-6d5e-4e0d-bd04-ffc7afa5a1ed"
+      }
     }
   }
 }
