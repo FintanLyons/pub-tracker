@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchLondonPubs } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
+import { getLevelProgress } from '../utils/levelSystem';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -14,7 +15,6 @@ const AMBER = '#D4A017';
 export default function AchievementsScreen() {
   const [pubs, setPubs] = useState([]);
   const [currentScore, setCurrentScore] = useState(0);
-  const [totalPossibleScore, setTotalPossibleScore] = useState(0);
   const [trophies, setTrophies] = useState([]);
 
   const loadAchievements = useCallback(async () => {
@@ -45,16 +45,10 @@ export default function AchievementsScreen() {
     
     const areaBonusPoints = completedAreas.length * 50;
 
-    // Calculate total possible points
-    const totalPubPoints = allPubs.reduce((sum, pub) => sum + (pub.points || 0), 0);
-    const totalAreaBonusPoints = Object.keys(areaMap).length * 50;
-    const totalPossible = totalPubPoints + totalAreaBonusPoints;
-
     // Current score = visited pub points + area bonuses
     const currentTotalScore = pointsFromPubs + areaBonusPoints;
 
     setCurrentScore(currentTotalScore);
-    setTotalPossibleScore(totalPossible);
 
     // Generate trophies
     const trophyList = [];
@@ -131,9 +125,8 @@ export default function AchievementsScreen() {
     }, [loadAchievements])
   );
 
-  const scorePercentage = totalPossibleScore > 0 
-    ? Math.round((currentScore / totalPossibleScore) * 100) 
-    : 0;
+  // Calculate level progress
+  const levelProgress = getLevelProgress(currentScore);
 
   // Group trophies into rows of 3
   const trophyRows = [];
@@ -149,20 +142,17 @@ export default function AchievementsScreen() {
       </View>
 
       <View style={styles.statsCard}>
-        <View style={styles.mainStat}>
-          <Text style={styles.scoreNumber}>{currentScore}</Text>
-          <Text style={styles.totalNumber}>/ {totalPossibleScore}</Text>
-        </View>
-        <Text style={styles.statLabel}>Total Score</Text>
+        <Text style={styles.levelLabel}>Level {levelProgress.level}</Text>
         
         <View style={styles.progressBarContainer}>
           <View style={styles.progressBarBackground}>
             <View 
-              style={[styles.progressBarFill, { width: `${scorePercentage}%` }]} 
+              style={[styles.progressBarFill, { width: `${levelProgress.progressPercentage}%` }]} 
             />
           </View>
-          <Text style={styles.progressText}>{scorePercentage}%</Text>
         </View>
+        
+        <Text style={styles.scoreText}>Total Score: {currentScore}</Text>
       </View>
 
       <View style={styles.section}>
@@ -247,33 +237,24 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  mainStat: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 8,
-  },
-  scoreNumber: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: DARK_GREY,
-  },
-  totalNumber: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: MEDIUM_GREY,
-    marginLeft: 4,
-  },
-  statLabel: {
-    fontSize: 16,
+  levelLabel: {
+    fontSize: 18,
     color: MEDIUM_GREY,
     marginBottom: 20,
     textTransform: 'uppercase',
     letterSpacing: 1,
+    textAlign: 'center',
   },
   progressBarContainer: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 16,
+  },
+  scoreText: {
+    fontSize: 14,
+    color: MEDIUM_GREY,
+    textAlign: 'center',
   },
   progressBarBackground: {
     flex: 1,
@@ -281,19 +262,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0E0E0',
     borderRadius: 6,
     overflow: 'hidden',
-    marginRight: 12,
   },
   progressBarFill: {
     height: '100%',
     backgroundColor: AMBER,
     borderRadius: 6,
-  },
-  progressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: DARK_GREY,
-    minWidth: 50,
-    textAlign: 'right',
   },
   section: {
     marginBottom: 20,

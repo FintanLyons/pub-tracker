@@ -35,6 +35,10 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
+      "navigationBar": {
+        "backgroundColor": "#1C1C1C",
+        "barStyle": "light-content"
+      },
       "package": "com.yourcompany.pubtracker",
       "permissions": [
         "ACCESS_COARSE_LOCATION",

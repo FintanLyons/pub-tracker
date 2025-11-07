@@ -40,17 +40,19 @@ const getFeatureIcon = (feature) => {
   return 'star';
 };
 
-export default function PubCardContent({ 
-  pub, 
-  isExpanded, 
+export default function PubCardContent({
+  pub,
+  isExpanded,
   onToggleVisited,
-  getImageSource 
+  getImageSource,
+  pointerEvents
 }) {
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.cardContent}
       showsVerticalScrollIndicator={false}
       scrollEnabled={isExpanded}
+      pointerEvents={pointerEvents}
     >
       <Text style={styles.pubName}>{pub.name}</Text>
       
@@ -69,6 +71,7 @@ export default function PubCardContent({
           pub.isVisited && styles.visitedButtonActive
         ]}
         onPress={() => onToggleVisited(pub.id)}
+        pointerEvents="auto"
       >
         <MaterialCommunityIcons
           name={pub.isVisited ? 'check-circle' : 'checkbox-blank-circle-outline'}

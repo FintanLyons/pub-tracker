@@ -67,13 +67,34 @@ const customMapStyle = [
     "elementType": "all",
     "stylers": [
       {
-        "saturation": -15
-      },
+        "visibility": "off"
+      }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "all",
+    "stylers": [
       {
-        "lightness": 15
-      },
+        "visibility": "on"
+      }
+    ]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.text",
+    "stylers": [
       {
-        "visibility": "simplified"
+        "visibility": "on"
+      }
+    ]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.icon",
+    "stylers": [
+      {
+        "visibility": "on"
       }
     ]
   },
@@ -153,8 +174,6 @@ export default function MapScreen() {
   const clearedAreaRef = useRef(null); // Track which area was explicitly cleared (to prevent re-applying)
   const mapRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
-  const isClosingCardRef = useRef(false);
-  const lockedRegionRef = useRef(null);
   const isNavigatingRef = useRef(false); // Track when doing programmatic navigation
   const screenHeight = Dimensions.get('window').height;
   const cardHeight = screenHeight * 0.33;
@@ -261,13 +280,45 @@ export default function MapScreen() {
   };
 
   const handleToggleVisited = async (pubId) => {
-    await togglePubVisited(pubId);
-    const updatedPubs = await fetchLondonPubs();
-    setAllPubs(updatedPubs);
-    applyFilters(updatedPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+    // Store original state for potential rollback
+    const originalPubs = [...allPubs];
+    const originalSelectedPub = selectedPub ? { ...selectedPub } : null;
+    
+    // Optimistically update UI immediately for instant feedback
+    const pubToUpdate = allPubs.find(p => p.id === pubId);
+    const newVisitedState = !pubToUpdate?.isVisited;
+    
+    // Update selectedPub immediately if it's the one being toggled
     if (selectedPub?.id === pubId) {
-      const updatedPub = updatedPubs.find(p => p.id === pubId);
-      if (updatedPub) setSelectedPub(updatedPub);
+      setSelectedPub({ ...selectedPub, isVisited: newVisitedState });
+    }
+    
+    // Update allPubs immediately
+    const updatedAllPubs = allPubs.map(p => 
+      p.id === pubId ? { ...p, isVisited: newVisitedState } : p
+    );
+    setAllPubs(updatedAllPubs);
+    applyFilters(updatedAllPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+    
+    // Perform async operations in the background
+    try {
+      await togglePubVisited(pubId);
+      // Fetch fresh data to ensure consistency (but don't block UI)
+      const freshPubs = await fetchLondonPubs();
+      setAllPubs(freshPubs);
+      applyFilters(freshPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+      if (selectedPub?.id === pubId) {
+        const updatedPub = freshPubs.find(p => p.id === pubId);
+        if (updatedPub) setSelectedPub(updatedPub);
+      }
+    } catch (error) {
+      console.error('Error toggling visited status:', error);
+      // Revert optimistic update on error
+      setAllPubs(originalPubs);
+      applyFilters(originalPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+      if (originalSelectedPub?.id === pubId) {
+        setSelectedPub(originalSelectedPub);
+      }
     }
   };
 
@@ -419,15 +470,7 @@ export default function MapScreen() {
   };
 
   const closeCard = () => {
-    // Lock the current region to prevent any map adjustments
-    lockedRegionRef.current = { ...mapRegion };
-    isClosingCardRef.current = true;
     setSelectedPub(null);
-    // Reset flag after animation completes
-    setTimeout(() => {
-      isClosingCardRef.current = false;
-      lockedRegionRef.current = null;
-    }, 300);
   };
   
   const imageMap = {
@@ -513,8 +556,6 @@ export default function MapScreen() {
       
       if (data && data.length > 0) {
         // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         
         const location = data[0];
         const newRegion = {
@@ -534,10 +575,6 @@ export default function MapScreen() {
   };
 
   const clearSearch = () => {
-    // Clear any region locks to allow navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
-    
     setSearchQuery('');
     setSelectedArea(null); // Clear area filter when clearing search
     setMapRegion(LONDON);
@@ -650,10 +687,7 @@ export default function MapScreen() {
     const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01);
     const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
     
-    // Clear any region locks to allow navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
-    isNavigatingRef.current = true;
+        isNavigatingRef.current = true;
     
     const newRegion = {
       latitude: center.latitude,
@@ -750,9 +784,6 @@ export default function MapScreen() {
         const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01); // At least 0.01, but scale if pubs spread out
         const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
         
-        // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         isNavigatingRef.current = true;
         
         const newRegion = {
@@ -802,9 +833,6 @@ export default function MapScreen() {
       const data = await response.json();
       
       if (data && data.length > 0) {
-        // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         isNavigatingRef.current = true;
         
         const location = data[0];
@@ -840,9 +868,6 @@ export default function MapScreen() {
 
   // Shared function to search for a pub
   const searchPub = (pub) => {
-    // Clear any region locks to allow search navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
     isNavigatingRef.current = true;
     
     // Ensure we have valid coordinates
@@ -932,9 +957,6 @@ export default function MapScreen() {
   const handleCurrentLocation = async () => {
     // Use cached location immediately for instant response
     if (currentLocation) {
-      // Clear any region locks immediately
-      lockedRegionRef.current = null;
-      isClosingCardRef.current = false;
       isNavigatingRef.current = true;
       
       const newRegion = {
@@ -975,9 +997,6 @@ export default function MapScreen() {
         longitudeDelta: 0.01,
       };
 
-      // Clear any region locks immediately
-      lockedRegionRef.current = null;
-      isClosingCardRef.current = false;
       isNavigatingRef.current = true;
       
       // Update region state
@@ -1036,11 +1055,11 @@ export default function MapScreen() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={mapRegion}
-        region={isClosingCardRef.current && lockedRegionRef.current ? lockedRegionRef.current : mapRegion}
+        initialRegion={LONDON}
+        region={mapRegion}
         onRegionChangeComplete={(region) => {
-          // Ignore region changes while closing the card or during programmatic navigation
-          if (isClosingCardRef.current || isNavigatingRef.current) {
+          // Ignore region changes during programmatic navigation
+          if (isNavigatingRef.current) {
             return;
           }
           // Always update region state - this keeps it in sync
