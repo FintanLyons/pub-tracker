@@ -10,12 +10,14 @@ Use --url flag: Store image URLs directly in database (not recommended)
 Setup:
 1. Install dependencies: pip install supabase google-api-python-client requests python-dotenv pillow
 2. Get Google Custom Search API key and CX
-3. Create .env file with:
+3. Create .env file in scripts/ directory or project root with:
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your_service_role_key
    GOOGLE_API_KEY=your_google_api_key
    GOOGLE_CX=your_search_engine_id
 4. Create 'pub-photos' bucket in Supabase Storage (make it PUBLIC)
+
+⚠️  SECURITY: Never commit API keys to git! The .env file is in .gitignore.
 """
 
 import os
@@ -28,32 +30,44 @@ import time
 from urllib.parse import urlparse
 import mimetypes
 
-# Load environment variables (optional - you can also hardcode below)
+# Load environment variables from .env file
 load_dotenv()
 
 # ============================================================================
-# API CONFIGURATION - Set your keys here or in .env file
+# API CONFIGURATION - Load from environment variables only
 # ============================================================================
-SUPABASE_URL = os.getenv('SUPABASE_URL') or 'https://ddfdwxrnouneqqzactus.supabase.co'
-SUPABASE_KEY = os.getenv('SUPABASE_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZmR3eHJub3VuZXFxemFjdHVzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjE4MDY4NSwiZXhwIjoyMDc3NzU2Njg1fQ.1gsFB_2bPoOUUMsOsH-XM74OjauXahlEBfBe8rQDgAY'  # Use service_role key
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') or 'AIzaSyAGc7eqGA9iSUZSHdH7O5Gdn5M3M27VHng'  # From Google Cloud Console
-GOOGLE_CX = os.getenv('GOOGLE_CX') or '0390b4b429a834d06'  # From cse.google.com
+# ⚠️  SECURITY: Never hardcode API keys in this file!
+#     Create a .env file in the scripts/ directory or project root with:
+#     SUPABASE_URL=https://your-project.supabase.co
+#     SUPABASE_KEY=your_service_role_key
+#     GOOGLE_API_KEY=your_google_api_key
+#     GOOGLE_CX=your_search_engine_id
 
-# ⚠️  SECURITY NOTE: If hardcoding keys above, make sure this file is in .gitignore
-#     Never commit API keys to version control!
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_CX = os.getenv('GOOGLE_CX')
 
-if any([key == f'YOUR_{name}_HERE' for key, name in [
-    (SUPABASE_KEY, 'SERVICE_ROLE_KEY'),
-    (GOOGLE_API_KEY, 'GOOGLE_API_KEY'),
-    (GOOGLE_CX, 'GOOGLE_CX')
-]]):
-    print("❌ Error: Please set your API keys!")
-    print("   Option 1: Edit this file and replace YOUR_*_HERE above")
-    print("   Option 2: Create .env file with:")
+# Validate that all required environment variables are set
+missing_keys = []
+if not SUPABASE_URL:
+    missing_keys.append('SUPABASE_URL')
+if not SUPABASE_KEY:
+    missing_keys.append('SUPABASE_KEY')
+if not GOOGLE_API_KEY:
+    missing_keys.append('GOOGLE_API_KEY')
+if not GOOGLE_CX:
+    missing_keys.append('GOOGLE_CX')
+
+if missing_keys:
+    print("❌ Error: Missing required environment variables!")
+    print(f"   Missing: {', '.join(missing_keys)}")
+    print("\n   Please create a .env file in the scripts/ directory or project root with:")
     print("   SUPABASE_URL=https://your-project.supabase.co")
     print("   SUPABASE_KEY=your_service_role_key")
     print("   GOOGLE_API_KEY=your_google_api_key")
     print("   GOOGLE_CX=your_search_engine_id")
+    print("\n   Note: The .env file is already in .gitignore and will not be committed.")
     sys.exit(1)
 
 # Initialize clients

@@ -35,9 +35,6 @@ yarn-error.*
 .env
 scripts/.env
 
-# Python scripts with hardcoded keys (if you choose to hardcode)
-# scripts/*.py
-
 # typescript
 *.tsbuildinfo
 

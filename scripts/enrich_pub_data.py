@@ -9,12 +9,12 @@ This script uses Google Gemini AI to enrich pub data from Supabase:
 Setup:
 1. Install dependencies: pip install supabase google-generativeai python-dotenv
 2. Get Google Gemini API key: https://aistudio.google.com/app/apikey (FREE!)
-3. Set API keys (choose one):
-   Option A: Edit this file and replace YOUR_GEMINI_API_KEY_HERE with your key
-   Option B: Create .env file with:
-     SUPABASE_URL=https://your-project.supabase.co
-     SUPABASE_KEY=your_service_role_key (for writes)
-     GEMINI_API_KEY=your_gemini_api_key
+3. Create .env file in scripts/ directory or project root with:
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_KEY=your_service_role_key (for writes)
+   GEMINI_API_KEY=your_gemini_api_key
+
+⚠️  SECURITY: Never commit API keys to git! The .env file is in .gitignore.
 """
 
 import os
@@ -24,27 +24,40 @@ from supabase import create_client, Client
 from google import genai
 import time
 
-# Load environment variables (optional - you can also hardcode below)
+# Load environment variables from .env file
 load_dotenv()
 
 # ============================================================================
-# API CONFIGURATION - Set your keys here or in .env file
+# API CONFIGURATION - Load from environment variables only
 # ============================================================================
-SUPABASE_URL = os.getenv('SUPABASE_URL') or 'https://ddfdwxrnouneqqzactus.supabase.co'
-SUPABASE_KEY = os.getenv('SUPABASE_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZmR3eHJub3VuZXFxemFjdHVzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjE4MDY4NSwiZXhwIjoyMDc3NzU2Njg1fQ.1gsFB_2bPoOUUMsOsH-XM74OjauXahlEBfBe8rQDgAY'  # Use service_role key for writes
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY') or 'AIzaSyC1apy-CNQb4LlHUFLqXOhl1ufpif0Ymt8'
+# ⚠️  SECURITY: Never hardcode API keys in this file!
+#     Create a .env file in the scripts/ directory or project root with:
+#     SUPABASE_URL=https://your-project.supabase.co
+#     SUPABASE_KEY=your_service_role_key
+#     GEMINI_API_KEY=your_gemini_api_key
 
-# ⚠️  SECURITY NOTE: If hardcoding keys above, make sure this file is in .gitignore
-#     Never commit API keys to version control!
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-if SUPABASE_KEY == 'YOUR_SERVICE_ROLE_KEY_HERE' or GEMINI_API_KEY == 'YOUR_GEMINI_API_KEY_HERE':
-    print("❌ Error: Please set your API keys!")
-    print("   Option 1: Edit this file and replace YOUR_*_KEY_HERE above")
-    print("   Option 2: Create .env file with:")
+# Validate that all required environment variables are set
+missing_keys = []
+if not SUPABASE_URL:
+    missing_keys.append('SUPABASE_URL')
+if not SUPABASE_KEY:
+    missing_keys.append('SUPABASE_KEY')
+if not GEMINI_API_KEY:
+    missing_keys.append('GEMINI_API_KEY')
+
+if missing_keys:
+    print("❌ Error: Missing required environment variables!")
+    print(f"   Missing: {', '.join(missing_keys)}")
+    print("\n   Please create a .env file in the scripts/ directory or project root with:")
     print("   SUPABASE_URL=https://your-project.supabase.co")
     print("   SUPABASE_KEY=your_service_role_key")
     print("   GEMINI_API_KEY=your_gemini_api_key")
     print("   Get Gemini API key: https://aistudio.google.com/app/apikey")
+    print("\n   Note: The .env file is already in .gitignore and will not be committed.")
     sys.exit(1)
 
 # Initialize clients
