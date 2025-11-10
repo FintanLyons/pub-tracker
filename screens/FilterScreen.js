@@ -16,36 +16,17 @@ const DARK_CHARCOAL = '#1C1C1C';
 const MEDIUM_GREY = '#757575';
 const LIGHT_GREY = '#F5F5F5';
 
-// Feature icon mapping (reused from PubCardContent)
-const getFeatureIcon = (feature) => {
-  const featureLower = feature.toLowerCase();
-  const iconMap = {
-    'live music': 'music',
-    'beer garden': 'tree',
-    'dog friendly': 'dog',
-    'food': 'food',
-    'wifi': 'wifi',
-    'parking': 'parking',
-    'quiz': 'book-open-variant',
-    'sports': 'soccer',
-    'pool': 'pool',
-    'darts': 'target',
-    'outdoor seating': 'table-chair',
-    'wheelchair accessible': 'wheelchair-accessibility',
-  };
-  
-  if (iconMap[featureLower]) {
-    return iconMap[featureLower];
-  }
-  
-  for (const [key, icon] of Object.entries(iconMap)) {
-    if (featureLower.includes(key) || key.includes(featureLower)) {
-      return icon;
-    }
-  }
-  
-  return 'star';
-};
+// All possible features with their icons (in display order)
+const ALL_FEATURES_WITH_ICONS = [
+  { name: 'Pub garden', icon: 'tree' },
+  { name: 'Live music', icon: 'music' },
+  { name: 'Food available', icon: 'silverware-fork-knife' },
+  { name: 'Dog friendly', icon: 'dog' },
+  { name: 'Pool/darts', icon: 'billiards' },
+  { name: 'Parking', icon: 'parking' },
+  { name: 'Accommodation', icon: 'bed' },
+  { name: 'Cask/real ale', icon: 'barrel' },
+];
 
 export default function FilterScreen({ 
   visible, 
@@ -57,6 +38,8 @@ export default function FilterScreen({
   yearRange,
   minYear,
   maxYear,
+  showOnlyFavorites,
+  showOnlyAchievements,
   onApply 
 }) {
   const insets = useSafeAreaInsets();
@@ -64,12 +47,16 @@ export default function FilterScreen({
   const [localSelectedFeatures, setLocalSelectedFeatures] = useState(new Set(selectedFeatures));
   const [localSelectedOwnerships, setLocalSelectedOwnerships] = useState(new Set(selectedOwnerships || []));
   const [localYearRange, setLocalYearRange] = useState(yearRange || defaultYearRange);
+  const [localShowOnlyFavorites, setLocalShowOnlyFavorites] = useState(showOnlyFavorites || false);
+  const [localShowOnlyAchievements, setLocalShowOnlyAchievements] = useState(showOnlyAchievements || false);
 
   useEffect(() => {
     setLocalSelectedFeatures(new Set(selectedFeatures));
     setLocalSelectedOwnerships(new Set(selectedOwnerships || []));
     setLocalYearRange(yearRange || defaultYearRange);
-  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, visible]);
+    setLocalShowOnlyFavorites(showOnlyFavorites || false);
+    setLocalShowOnlyAchievements(showOnlyAchievements || false);
+  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, visible]);
 
   const toggleFeature = (feature) => {
     const newSet = new Set(localSelectedFeatures);
@@ -95,6 +82,8 @@ export default function FilterScreen({
     setLocalSelectedFeatures(new Set());
     setLocalSelectedOwnerships(new Set());
     setLocalYearRange(defaultYearRange);
+    setLocalShowOnlyFavorites(false);
+    setLocalShowOnlyAchievements(false);
   };
 
   const handleYearRangeChange = (range) => {
@@ -107,7 +96,9 @@ export default function FilterScreen({
     onApply({
       features: Array.from(localSelectedFeatures),
       ownerships: Array.from(localSelectedOwnerships),
-      yearRange: isFullRange ? null : localYearRange
+      yearRange: isFullRange ? null : localYearRange,
+      showOnlyFavorites: localShowOnlyFavorites,
+      showOnlyAchievements: localShowOnlyAchievements
     });
     onClose();
   };
@@ -129,75 +120,93 @@ export default function FilterScreen({
           </View>
 
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+            {/* Quick Filters */}
+            <View style={styles.quickFiltersGrid}>
+              <TouchableOpacity
+                style={[
+                  styles.featureBox,
+                  localShowOnlyFavorites && styles.featureBoxSelected
+                ]}
+                onPress={() => setLocalShowOnlyFavorites(!localShowOnlyFavorites)}
+              >
+                <Text style={[
+                  styles.featureBoxText,
+                  localShowOnlyFavorites && styles.featureBoxTextSelected
+                ]}>
+                  Favourite
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.featureBox,
+                  localShowOnlyAchievements && styles.featureBoxSelected
+                ]}
+                onPress={() => setLocalShowOnlyAchievements(!localShowOnlyAchievements)}
+              >
+                <Text style={[
+                  styles.featureBoxText,
+                  localShowOnlyAchievements && styles.featureBoxTextSelected
+                ]}>
+                  Achievements
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.sectionTitle}>Features</Text>
-            <View style={styles.featuresList}>
-              {allFeatures.map((feature) => {
-                const isSelected = localSelectedFeatures.has(feature);
+            <View style={styles.featuresGrid}>
+              {ALL_FEATURES_WITH_ICONS.map((feature) => {
+                const isSelected = localSelectedFeatures.has(feature.name);
                 return (
                   <TouchableOpacity
-                    key={feature}
+                    key={feature.name}
                     style={[
-                      styles.featureItem,
-                      isSelected && styles.featureItemSelected
+                      styles.featureBox,
+                      isSelected && styles.featureBoxSelected
                     ]}
-                    onPress={() => toggleFeature(feature)}
+                    onPress={() => toggleFeature(feature.name)}
                   >
-                    <MaterialCommunityIcons 
-                      name={getFeatureIcon(feature)} 
-                      size={20} 
-                      color={isSelected ? AMBER : MEDIUM_GREY} 
-                    />
                     <Text style={[
-                      styles.featureText,
-                      isSelected && styles.featureTextSelected
+                      styles.featureBoxText,
+                      isSelected && styles.featureBoxTextSelected
                     ]}>
-                      {feature}
+                      {feature.name}
                     </Text>
-                    <MaterialCommunityIcons 
-                      name={isSelected ? 'check-circle' : 'checkbox-blank-circle-outline'} 
-                      size={24} 
-                      color={isSelected ? AMBER : MEDIUM_GREY} 
-                      style={styles.checkIcon}
-                    />
                   </TouchableOpacity>
                 );
               })}
             </View>
 
             <Text style={styles.sectionTitle}>Ownership</Text>
-            <View style={styles.featuresList}>
-              {allOwnerships && allOwnerships.map((ownership) => {
-                const isSelected = localSelectedOwnerships.has(ownership);
-                return (
-                  <TouchableOpacity
-                    key={ownership}
-                    style={[
-                      styles.featureItem,
-                      isSelected && styles.featureItemSelected
-                    ]}
-                    onPress={() => toggleOwnership(ownership)}
-                  >
-                    <MaterialCommunityIcons 
-                      name="office-building" 
-                      size={20} 
-                      color={isSelected ? AMBER : MEDIUM_GREY} 
-                    />
-                    <Text style={[
-                      styles.featureText,
-                      isSelected && styles.featureTextSelected
-                    ]}>
-                      {ownership}
-                    </Text>
-                    <MaterialCommunityIcons 
-                      name={isSelected ? 'check-circle' : 'checkbox-blank-circle-outline'} 
-                      size={24} 
-                      color={isSelected ? AMBER : MEDIUM_GREY} 
-                      style={styles.checkIcon}
-                    />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.ownershipScrollContainer}
+              contentContainerStyle={styles.ownershipScrollContent}
+            >
+              <View style={styles.ownershipGrid}>
+                {allOwnerships && allOwnerships.map((ownership) => {
+                  const isSelected = localSelectedOwnerships.has(ownership);
+                  return (
+                    <TouchableOpacity
+                      key={ownership}
+                      style={[
+                        styles.ownershipBox,
+                        isSelected && styles.ownershipBoxSelected
+                      ]}
+                      onPress={() => toggleOwnership(ownership)}
+                    >
+                      <Text style={[
+                        styles.ownershipBoxText,
+                        isSelected && styles.ownershipBoxTextSelected
+                      ]}>
+                        {ownership}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
 
             <Text style={styles.sectionTitle}>Founded Year</Text>
             <RangeSlider
@@ -264,6 +273,13 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  quickFiltersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+    paddingTop: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -272,33 +288,76 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 12,
   },
-  featuresList: {
-    paddingHorizontal: 20,
-  },
-  featureItem: {
+  featuresGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+  },
+  featureBox: {
+    width: '48%',
     backgroundColor: LIGHT_GREY,
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
   },
-  featureItemSelected: {
+  featureBoxSelected: {
     backgroundColor: '#FFF8E7',
     borderColor: AMBER,
   },
-  featureText: {
-    fontSize: 16,
+  featureBoxText: {
+    fontSize: 11,
     color: DARK_CHARCOAL,
-    marginLeft: 12,
-    flex: 1,
+    textAlign: 'center',
+    fontWeight: '500',
   },
-  featureTextSelected: {
+  featureBoxTextSelected: {
     color: DARK_CHARCOAL,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  ownershipScrollContainer: {
+    paddingLeft: 12,
+    marginBottom: 0,
+  },
+  ownershipScrollContent: {
+    paddingRight: 12,
+  },
+  ownershipGrid: {
+    flexDirection: 'column', // Column direction to stack vertically
+    flexWrap: 'wrap', // Wrap to create multiple columns
+    height: 192, // 4 rows * ~48px per row (padding + text + border + margin)
+  },
+  ownershipBox: {
+    width: 165, // Same as features boxes for consistency
+    backgroundColor: LIGHT_GREY,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginRight: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  ownershipBoxSelected: {
+    backgroundColor: '#FFF8E7',
+    borderColor: AMBER,
+  },
+  ownershipBoxText: {
+    fontSize: 11,
+    color: DARK_CHARCOAL,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  ownershipBoxTextSelected: {
+    color: DARK_CHARCOAL,
+    fontWeight: '700',
   },
   checkIcon: {
     marginLeft: 'auto',

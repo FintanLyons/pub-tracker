@@ -5,27 +5,27 @@ import {
   Animated, 
   PanResponder,
   TouchableOpacity,
-  StyleSheet
+  StyleSheet,
+  Alert
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
+import ReportModal from './ReportModal';
+import { submitReport } from '../services/ReportService';
 
 const MEDIUM_GREY = '#757575';
+const AMBER = '#D4A017';
 
 /**
  * DraggablePubCard - A bottom sheet card with three states: hidden, collapsed, expanded
- * 
- * Key design decisions:
- * - Uses a single Animated.Value for Y position (no setOffset/flattenOffset complexity)
- * - Tracks drag start position separately to calculate relative movement
- * - Snap behavior is based on velocity and distance thresholds
- * - All animations use native driver for smooth 60fps performance
+ * Features Google Maps-style behavior: drag down to collapse from anywhere when scrolled to top
  */
 export default function DraggablePubCard({ 
   pub, 
   onClose, 
   onToggleVisited,
+  onToggleFavorite,
   getImageSource
 }) {
   const insets = useSafeAreaInsets();
@@ -43,24 +43,61 @@ export default function DraggablePubCard({
   
   // State management
   const [isExpanded, setIsExpanded] = useState(false);
+  const isExpandedRef = useRef(false); // Ref for PanResponder to access current value
   const dragStartY = useRef(HIDDEN_Y); // Track where drag started
   const currentPosition = useRef(HIDDEN_Y); // Track current position
+  const scrollY = useRef(0); // Track scroll position
+  const [scrollEnabled, setScrollEnabled] = useState(true); // Control ScrollView scrolling
+  const scrollEnabledRef = useRef(true); // Ref for PanResponder to access current value
+  const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
   
-  /**
-   * Pan responder handles all touch gestures
-   * Simplified approach: track absolute positions, no offset/flatten
-   */
+  // Keep refs in sync with state
+  useEffect(() => {
+    isExpandedRef.current = isExpanded;
+    scrollEnabledRef.current = scrollEnabled;
+  }, [isExpanded, scrollEnabled]);
+  
+  // Handle scroll events - dynamically manage scroll enable/disable
+  const handleScroll = (event) => {
+    const newScrollY = event.nativeEvent.contentOffset.y;
+    scrollY.current = newScrollY;
+    
+    // When at top, disable scrolling so parent can intercept downward drags
+    if (isExpandedRef.current) {
+      if (newScrollY <= 0 && scrollEnabled) {
+        setScrollEnabled(false);
+      } else if (newScrollY > 0 && !scrollEnabled) {
+        setScrollEnabled(true);
+      }
+    }
+  };
+
+  // Pan responder - handles all touch gestures
   const panResponder = useRef(
     PanResponder.create({
-      // Only activate on vertical movements
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
+      onStartShouldSetPanResponderCapture: () => false,
+      
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        // When expanded, at top, and dragging down - intercept before ScrollView claims it
         const isDraggingVertically = Math.abs(gestureState.dy) > 5;
-        const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
-        return isDraggingVertically && isMoreVerticalThanHorizontal;
+        const isDraggingDown = gestureState.dy > 5;
+        return (
+          isExpandedRef.current &&
+          !scrollEnabledRef.current &&
+          isDraggingDown &&
+          isDraggingVertically
+        );
       },
       
-      // Gesture started - record starting position
+      onStartShouldSetPanResponder: () => false,
+      
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Handle drags when collapsed
+        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
+        const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        return !isExpandedRef.current && isDraggingVertically && isMoreVerticalThanHorizontal;
+      },
+      
       onPanResponderGrant: () => {
         translateY.stopAnimation(value => {
           dragStartY.current = value;
@@ -68,9 +105,7 @@ export default function DraggablePubCard({
         });
       },
       
-      // Gesture moving - update position
       onPanResponderMove: (_, gestureState) => {
-        // Calculate new position based on drag start + gesture delta
         let newY = dragStartY.current + gestureState.dy;
         
         // Clamp to valid range with rubber-band effect at edges
@@ -88,138 +123,143 @@ export default function DraggablePubCard({
         translateY.setValue(newY);
       },
       
-      // Gesture ended - snap to nearest position
       onPanResponderRelease: (_, gestureState) => {
         const velocity = gestureState.vy;
         const dragDistance = gestureState.dy;
         const finalPosition = currentPosition.current;
         
-        // Determine target snap position
         let targetY = COLLAPSED_Y;
         let willBeExpanded = false;
         
         // High velocity swipe - use velocity to determine direction
-        if (Math.abs(velocity) > 0.8) {
+        if (Math.abs(velocity) > 0.7) {
           if (velocity < 0) {
-            // Fast swipe up - go to expanded
             targetY = EXPANDED_Y;
             willBeExpanded = true;
           } else {
-            // Fast swipe down
             if (dragStartY.current < COLLAPSED_Y * 0.5) {
-              // Swipe down from expanded area -> collapse
               targetY = COLLAPSED_Y;
-              willBeExpanded = false;
             } else {
-              // Swipe down from collapsed area -> hide
               targetY = HIDDEN_Y;
-              willBeExpanded = false;
             }
           }
-        } 
-        // Slow drag - use distance and position to determine snap
-        else {
-          // Calculate which position we're closest to
+        } else {
+          // Slow drag - snap to nearest position
           const distToExpanded = Math.abs(finalPosition - EXPANDED_Y);
           const distToCollapsed = Math.abs(finalPosition - COLLAPSED_Y);
           const distToHidden = Math.abs(finalPosition - HIDDEN_Y);
-          
           const minDist = Math.min(distToExpanded, distToCollapsed, distToHidden);
           
-          // Prefer not hiding unless explicitly dragged far down
           if (minDist === distToHidden && dragDistance > cardHeight * 0.3) {
             targetY = HIDDEN_Y;
-            willBeExpanded = false;
           } else if (minDist === distToExpanded) {
             targetY = EXPANDED_Y;
             willBeExpanded = true;
           } else {
             targetY = COLLAPSED_Y;
-            willBeExpanded = false;
           }
         }
         
-        // Update state
         setIsExpanded(willBeExpanded);
         dragStartY.current = targetY;
         currentPosition.current = targetY;
         
-        // Animate to target with spring physics
+        // Enable scrolling when expanding (auto-disabled when reaching top)
+        if (willBeExpanded) {
+          setScrollEnabled(true);
+        }
+        
+        // Smoother, faster animation
         Animated.spring(translateY, {
           toValue: targetY,
           velocity: velocity,
-          tension: 68, // Bounciness
-          friction: 12, // Speed
+          tension: 85,
+          friction: 10,
           useNativeDriver: true,
         }).start(({ finished }) => {
           if (finished && targetY === HIDDEN_Y) {
-            // Card was dismissed
             onClose();
           }
         });
       },
       
-      // Gesture cancelled by system - reset to last stable position
+      onPanResponderTerminationRequest: () => false,
+      
       onPanResponderTerminate: () => {
-        const lastStablePosition = dragStartY.current;
         Animated.spring(translateY, {
-          toValue: lastStablePosition,
+          toValue: dragStartY.current,
+          tension: 85,
+          friction: 10,
           useNativeDriver: true,
         }).start();
       },
     })
   ).current;
   
-  /**
-   * Show/hide card when pub changes
-   */
+  // Show/hide card when pub changes
   useEffect(() => {
     if (pub) {
-      // New pub selected - show in collapsed state
       setIsExpanded(false);
       dragStartY.current = COLLAPSED_Y;
       currentPosition.current = COLLAPSED_Y;
+      scrollY.current = 0;
+      setScrollEnabled(false);
       
       translateY.stopAnimation();
-      
-      // Animate in from bottom
       Animated.spring(translateY, {
         toValue: COLLAPSED_Y,
-        tension: 100,
-        friction: 12,
+        tension: 120,
+        friction: 10,
         useNativeDriver: true,
       }).start();
     } else {
-      // Pub cleared - animate out
       Animated.spring(translateY, {
         toValue: HIDDEN_Y,
-        tension: 100,
-        friction: 12,
+        tension: 120,
+        friction: 10,
         useNativeDriver: true,
       }).start(() => {
         dragStartY.current = HIDDEN_Y;
         currentPosition.current = HIDDEN_Y;
+        scrollY.current = 0;
       });
     }
   }, [pub?.id]);
   
-  /**
-   * Close button handler
-   */
   const handleClose = () => {
     setIsExpanded(false);
     translateY.stopAnimation();
     
     Animated.spring(translateY, {
       toValue: HIDDEN_Y,
-      tension: 100,
-      friction: 12,
+      tension: 120,
+      friction: 10,
       useNativeDriver: true,
     }).start(() => {
       dragStartY.current = HIDDEN_Y;
       currentPosition.current = HIDDEN_Y;
       onClose();
     });
+  };
+
+  const handleSendReport = async (reportText) => {
+    try {
+      await submitReport(pub.id, pub.name, pub.area, reportText);
+      
+      Alert.alert(
+        'Report Submitted',
+        'Thank you! Your report has been submitted successfully.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      
+      Alert.alert(
+        'Report Failed',
+        'Failed to submit report. Please check your internet connection and try again.',
+        [{ text: 'OK' }]
+      );
+    }
   };
   
   // Don't render if no pub (must be after all hooks)
@@ -237,23 +277,71 @@ export default function DraggablePubCard({
       ]}
       {...panResponder.panHandlers}
     >
-      {/* Close button - positioned differently based on state */}
+      {/* Report, Favorite and Close buttons - positioned differently based on state */}
       {isExpanded ? (
-        <TouchableOpacity
-          style={[styles.closeButtonTop, { top: insets.top + 8 }]}
-          onPress={handleClose}
-          activeOpacity={0.7}
-        >
-          <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={[styles.reportButtonTop, { top: insets.top + 8 }]}
+            onPress={() => setReportModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name="flag-outline" 
+              size={24} 
+              color={MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteButtonTop, { top: insets.top + 8 }]}
+            onPress={() => onToggleFavorite(pub.id)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name={pub.isFavorite ? "star" : "star-outline"} 
+              size={24} 
+              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.closeButtonTop, { top: insets.top + 8 }]}
+            onPress={handleClose}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+          </TouchableOpacity>
+        </>
       ) : (
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={handleClose}
-          activeOpacity={0.7}
-        >
-          <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={styles.reportButton}
+            onPress={() => setReportModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name="flag-outline" 
+              size={24} 
+              color={MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.favoriteButton}
+            onPress={() => onToggleFavorite(pub.id)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name={pub.isFavorite ? "star" : "star-outline"} 
+              size={24} 
+              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={handleClose}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+          </TouchableOpacity>
+        </>
       )}
       
       {/* Drag handle indicator */}
@@ -276,6 +364,17 @@ export default function DraggablePubCard({
         onToggleVisited={onToggleVisited}
         getImageSource={getImageSource}
         pointerEvents={!isExpanded ? 'none' : 'auto'}
+        onScroll={handleScroll}
+        scrollEnabled={scrollEnabled}
+      />
+
+      {/* Report Modal */}
+      <ReportModal
+        visible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        onSend={handleSendReport}
+        pubName={pub.name}
+        pubArea={pub.area}
       />
     </Animated.View>
   );
@@ -311,6 +410,46 @@ const styles = StyleSheet.create({
     backgroundColor: MEDIUM_GREY,
     borderRadius: 2,
     opacity: 0.5,
+  },
+  reportButton: {
+    position: 'absolute',
+    top: 12,
+    right: 92,
+    zIndex: 10,
+    padding: 4,
+  },
+  reportButtonTop: {
+    position: 'absolute',
+    right: 112,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 12,
+    right: 54,
+    zIndex: 10,
+    padding: 4,
+  },
+  favoriteButtonTop: {
+    position: 'absolute',
+    right: 64,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   closeButton: {
     position: 'absolute',

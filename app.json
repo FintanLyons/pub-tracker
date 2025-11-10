@@ -19,7 +19,8 @@
           "locationAlwaysAndWhenInUsePermission": "Allow Pub Tracker to access your location to show nearby pubs",
           "locationWhenInUsePermission": "Allow Pub Tracker to access your location to show nearby pubs"
         }
-      ]
+      ],
+      "expo-mail-composer"
     ],
     "ios": {
       "supportsTablet": true,
