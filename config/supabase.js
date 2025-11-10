@@ -20,15 +20,19 @@ export const getSupabaseUrl = () => {
 };
 
 // Helper function to get headers for Supabase requests
-export const getSupabaseHeaders = () => {
+// Pass accessToken for authenticated requests (needed for RLS)
+export const getSupabaseHeaders = (accessToken = null) => {
   if (!SUPABASE_CONFIG.anonKey) {
     console.error('⚠️  Supabase API key not configured!');
     return null;
   }
   
+  // Use the provided access token if available, otherwise use anon key
+  const authToken = accessToken || SUPABASE_CONFIG.anonKey;
+  
   return {
     'apikey': SUPABASE_CONFIG.anonKey,
-    'Authorization': `Bearer ${SUPABASE_CONFIG.anonKey}`,
+    'Authorization': `Bearer ${authToken}`,
     'Content-Type': 'application/json',
     'Prefer': 'return=representation',
   };
