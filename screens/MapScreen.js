@@ -11,7 +11,7 @@ import { useRoute, useFocusEffect, useNavigation } from '@react-navigation/nativ
 import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { fetchLondonPubs, togglePubVisited } from '../services/PubService';
+import { fetchLondonPubs, togglePubVisited, togglePubFavorite } from '../services/PubService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import AreaIcon from '../components/AreaIcon';
 import SearchBar from '../components/SearchBar';
@@ -67,13 +67,34 @@ const customMapStyle = [
     "elementType": "all",
     "stylers": [
       {
-        "saturation": -15
-      },
+        "visibility": "off"
+      }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "all",
+    "stylers": [
       {
-        "lightness": 15
-      },
+        "visibility": "on"
+      }
+    ]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.text",
+    "stylers": [
       {
-        "visibility": "simplified"
+        "visibility": "on"
+      }
+    ]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.icon",
+    "stylers": [
+      {
+        "visibility": "on"
       }
     ]
   },
@@ -147,14 +168,14 @@ export default function MapScreen() {
   const [selectedOwnerships, setSelectedOwnerships] = useState([]);
   const [yearRange, setYearRange] = useState(null);
   const [selectedArea, setSelectedArea] = useState(null); // Filter by area name
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  const [showOnlyAchievements, setShowOnlyAchievements] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTop, setKeyboardTop] = useState(0);
   const clearedAreaRef = useRef(null); // Track which area was explicitly cleared (to prevent re-applying)
   const mapRef = useRef(null);
   const locationSubscriptionRef = useRef(null);
-  const isClosingCardRef = useRef(false);
-  const lockedRegionRef = useRef(null);
   const isNavigatingRef = useRef(false); // Track when doing programmatic navigation
   const screenHeight = Dimensions.get('window').height;
   const cardHeight = screenHeight * 0.33;
@@ -261,13 +282,72 @@ export default function MapScreen() {
   };
 
   const handleToggleVisited = async (pubId) => {
-    await togglePubVisited(pubId);
-    const updatedPubs = await fetchLondonPubs();
-    setAllPubs(updatedPubs);
-    applyFilters(updatedPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+    // Store original state for potential rollback
+    const originalPubs = [...allPubs];
+    const originalSelectedPub = selectedPub ? { ...selectedPub } : null;
+    
+    // Optimistically update UI immediately for instant feedback
+    const pubToUpdate = allPubs.find(p => p.id === pubId);
+    const newVisitedState = !pubToUpdate?.isVisited;
+    
+    // Update selectedPub immediately if it's the one being toggled
     if (selectedPub?.id === pubId) {
-      const updatedPub = updatedPubs.find(p => p.id === pubId);
-      if (updatedPub) setSelectedPub(updatedPub);
+      setSelectedPub({ ...selectedPub, isVisited: newVisitedState });
+    }
+    
+    // Update allPubs immediately
+    const updatedAllPubs = allPubs.map(p => 
+      p.id === pubId ? { ...p, isVisited: newVisitedState } : p
+    );
+    setAllPubs(updatedAllPubs);
+    applyFilters(updatedAllPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements);
+    
+    // Persist to storage in the background (no need to refetch all pubs)
+    try {
+      await togglePubVisited(pubId);
+    } catch (error) {
+      console.error('Error toggling visited status:', error);
+      // Revert optimistic update on error
+      setAllPubs(originalPubs);
+      applyFilters(originalPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements);
+      if (originalSelectedPub?.id === pubId) {
+        setSelectedPub(originalSelectedPub);
+      }
+    }
+  };
+
+  const handleToggleFavorite = async (pubId) => {
+    // Store original state for potential rollback
+    const originalPubs = [...allPubs];
+    const originalSelectedPub = selectedPub ? { ...selectedPub } : null;
+    
+    // Optimistically update UI immediately for instant feedback
+    const pubToUpdate = allPubs.find(p => p.id === pubId);
+    const newFavoriteState = !pubToUpdate?.isFavorite;
+    
+    // Update selectedPub immediately if it's the one being toggled
+    if (selectedPub?.id === pubId) {
+      setSelectedPub({ ...selectedPub, isFavorite: newFavoriteState });
+    }
+    
+    // Update allPubs immediately
+    const updatedAllPubs = allPubs.map(p => 
+      p.id === pubId ? { ...p, isFavorite: newFavoriteState } : p
+    );
+    setAllPubs(updatedAllPubs);
+    applyFilters(updatedAllPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements);
+    
+    // Persist to storage in the background (no need to refetch all pubs)
+    try {
+      await togglePubFavorite(pubId);
+    } catch (error) {
+      console.error('Error toggling favorite status:', error);
+      // Revert optimistic update on error
+      setAllPubs(originalPubs);
+      applyFilters(originalPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements);
+      if (originalSelectedPub?.id === pubId) {
+        setSelectedPub(originalSelectedPub);
+      }
     }
   };
 
@@ -282,15 +362,25 @@ export default function MapScreen() {
     return Array.from(featureSet).sort();
   };
 
-  // Extract all unique ownerships from pubs
+  // Extract all unique ownerships from pubs, sorted by count (most to least)
   const getAllOwnerships = () => {
-    const ownershipSet = new Set();
+    const ownershipCounts = {};
     allPubs.forEach(pub => {
       if (pub.ownership && pub.ownership.trim()) {
-        ownershipSet.add(pub.ownership);
+        const ownership = pub.ownership;
+        ownershipCounts[ownership] = (ownershipCounts[ownership] || 0) + 1;
       }
     });
-    return Array.from(ownershipSet).sort();
+    
+    // Sort by count (descending), then alphabetically
+    return Object.entries(ownershipCounts)
+      .sort((a, b) => {
+        if (b[1] !== a[1]) {
+          return b[1] - a[1]; // Sort by count descending
+        }
+        return a[0].localeCompare(b[0]); // Then alphabetically
+      })
+      .map(([ownership]) => ownership);
   };
 
   // Get min and max founded years from pubs
@@ -313,8 +403,8 @@ export default function MapScreen() {
     };
   };
 
-  // Apply filters to pubs (features, ownerships, year range, and area)
-  const applyFilters = (pubsToFilter, features, ownerships, yearRangeFilter, areaFilter) => {
+  // Apply filters to pubs (features, ownerships, year range, area, and favorites)
+  const applyFilters = (pubsToFilter, features, ownerships, yearRangeFilter, areaFilter, favoritesFilter, achievementsFilter) => {
     if (!pubsToFilter || pubsToFilter.length === 0) {
       // If no pubs to filter, just show empty or wait for data
       return;
@@ -325,8 +415,10 @@ export default function MapScreen() {
     const hasOwnershipsFilter = ownerships && ownerships.length > 0;
     const hasYearRangeFilter = yearRangeFilter && yearRangeFilter.min !== null && yearRangeFilter.max !== null;
     const hasAreaFilter = areaFilter && areaFilter.trim().length > 0;
+    const hasFavoritesFilter = favoritesFilter === true;
+    const hasAchievementsFilter = achievementsFilter === true;
     
-    if (!hasFeaturesFilter && !hasOwnershipsFilter && !hasYearRangeFilter && !hasAreaFilter) {
+    if (!hasFeaturesFilter && !hasOwnershipsFilter && !hasYearRangeFilter && !hasAreaFilter && !hasFavoritesFilter && !hasAchievementsFilter) {
       setPubs([...pubsToFilter]); // Create new array to trigger re-render
       return;
     }
@@ -379,8 +471,20 @@ export default function MapScreen() {
         }
       }
 
+      // Check favorites filter
+      let matchesFavorites = true;
+      if (hasFavoritesFilter) {
+        matchesFavorites = pub.isFavorite === true;
+      }
+
+      // Check achievements filter
+      let matchesAchievements = true;
+      if (hasAchievementsFilter) {
+        matchesAchievements = pub.achievements && pub.achievements.length > 0;
+      }
+
       // Pub must match all active filters (AND logic across filter types)
-      return matchesFeatures && matchesOwnerships && matchesYearRange && matchesArea;
+      return matchesFeatures && matchesOwnerships && matchesYearRange && matchesArea && matchesFavorites && matchesAchievements;
     });
     
     setPubs([...filtered]); // Create new array to trigger re-render
@@ -390,25 +494,29 @@ export default function MapScreen() {
     const features = filters.features || [];
     const ownerships = filters.ownerships || [];
     const yearRangeFilter = filters.yearRange || null;
+    const favoritesFilter = filters.showOnlyFavorites || false;
+    const achievementsFilter = filters.showOnlyAchievements || false;
     
     setSelectedFeatures(features);
     setSelectedOwnerships(ownerships);
     setYearRange(yearRangeFilter);
+    setShowOnlyFavorites(favoritesFilter);
+    setShowOnlyAchievements(achievementsFilter);
     
     // Apply filters immediately using current allPubs
     const currentAllPubs = allPubs.length > 0 ? allPubs : [];
     if (currentAllPubs.length > 0) {
-      applyFilters(currentAllPubs, features, ownerships, yearRangeFilter, selectedArea);
+      applyFilters(currentAllPubs, features, ownerships, yearRangeFilter, selectedArea, favoritesFilter, achievementsFilter);
     }
   };
 
-  // Also update when allPubs, selectedFeatures, selectedOwnerships, yearRange, or selectedArea changes
+  // Also update when allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, or showOnlyAchievements changes
   useEffect(() => {
     if (allPubs && allPubs.length > 0) {
-      applyFilters(allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea);
+      applyFilters(allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea]);
+  }, [allPubs, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements]);
 
   const handleFilterPress = () => {
     setShowFilterScreen(true);
@@ -419,15 +527,7 @@ export default function MapScreen() {
   };
 
   const closeCard = () => {
-    // Lock the current region to prevent any map adjustments
-    lockedRegionRef.current = { ...mapRegion };
-    isClosingCardRef.current = true;
     setSelectedPub(null);
-    // Reset flag after animation completes
-    setTimeout(() => {
-      isClosingCardRef.current = false;
-      lockedRegionRef.current = null;
-    }, 300);
   };
   
   const imageMap = {
@@ -513,8 +613,6 @@ export default function MapScreen() {
       
       if (data && data.length > 0) {
         // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         
         const location = data[0];
         const newRegion = {
@@ -534,10 +632,6 @@ export default function MapScreen() {
   };
 
   const clearSearch = () => {
-    // Clear any region locks to allow navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
-    
     setSearchQuery('');
     setSelectedArea(null); // Clear area filter when clearing search
     setMapRegion(LONDON);
@@ -650,10 +744,7 @@ export default function MapScreen() {
     const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01);
     const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
     
-    // Clear any region locks to allow navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
-    isNavigatingRef.current = true;
+        isNavigatingRef.current = true;
     
     const newRegion = {
       latitude: center.latitude,
@@ -750,9 +841,6 @@ export default function MapScreen() {
         const latDelta = Math.max((maxLat - minLat) * 2.5, 0.01); // At least 0.01, but scale if pubs spread out
         const lonDelta = Math.max((maxLon - minLon) * 2.5, 0.01);
         
-        // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         isNavigatingRef.current = true;
         
         const newRegion = {
@@ -802,9 +890,6 @@ export default function MapScreen() {
       const data = await response.json();
       
       if (data && data.length > 0) {
-        // Clear any region locks to allow search navigation
-        lockedRegionRef.current = null;
-        isClosingCardRef.current = false;
         isNavigatingRef.current = true;
         
         const location = data[0];
@@ -840,9 +925,6 @@ export default function MapScreen() {
 
   // Shared function to search for a pub
   const searchPub = (pub) => {
-    // Clear any region locks to allow search navigation
-    lockedRegionRef.current = null;
-    isClosingCardRef.current = false;
     isNavigatingRef.current = true;
     
     // Ensure we have valid coordinates
@@ -932,9 +1014,6 @@ export default function MapScreen() {
   const handleCurrentLocation = async () => {
     // Use cached location immediately for instant response
     if (currentLocation) {
-      // Clear any region locks immediately
-      lockedRegionRef.current = null;
-      isClosingCardRef.current = false;
       isNavigatingRef.current = true;
       
       const newRegion = {
@@ -975,9 +1054,6 @@ export default function MapScreen() {
         longitudeDelta: 0.01,
       };
 
-      // Clear any region locks immediately
-      lockedRegionRef.current = null;
-      isClosingCardRef.current = false;
       isNavigatingRef.current = true;
       
       // Update region state
@@ -1030,17 +1106,19 @@ export default function MapScreen() {
         yearRange={yearRange}
         minYear={getYearRange().min}
         maxYear={getYearRange().max}
+        showOnlyFavorites={showOnlyFavorites}
+        showOnlyAchievements={showOnlyAchievements}
         onApply={handleFilterApply}
       />
       
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={mapRegion}
-        region={isClosingCardRef.current && lockedRegionRef.current ? lockedRegionRef.current : mapRegion}
+        initialRegion={LONDON}
+        region={mapRegion}
         onRegionChangeComplete={(region) => {
-          // Ignore region changes while closing the card or during programmatic navigation
-          if (isClosingCardRef.current || isNavigatingRef.current) {
+          // Ignore region changes during programmatic navigation
+          if (isNavigatingRef.current) {
             return;
           }
           // Always update region state - this keeps it in sync
@@ -1147,6 +1225,7 @@ export default function MapScreen() {
         pub={selectedPub}
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
+        onToggleFavorite={handleToggleFavorite}
         getImageSource={getImageSource}
       />
     </View>

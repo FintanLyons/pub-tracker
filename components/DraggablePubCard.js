@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { 
   View, 
   Dimensions, 
@@ -6,18 +6,26 @@ import {
   PanResponder,
   TouchableOpacity,
   StyleSheet,
-  Easing
+  Alert
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
+import ReportModal from './ReportModal';
+import { submitReport } from '../services/ReportService';
 
 const MEDIUM_GREY = '#757575';
+const AMBER = '#D4A017';
 
+/**
+ * DraggablePubCard - A bottom sheet card with three states: hidden, collapsed, expanded
+ * Features Google Maps-style behavior: drag down to collapse from anywhere when scrolled to top
+ */
 export default function DraggablePubCard({ 
   pub, 
   onClose, 
   onToggleVisited,
+  onToggleFavorite,
   getImageSource
 }) {
   const insets = useSafeAreaInsets();
@@ -25,241 +33,348 @@ export default function DraggablePubCard({
   const cardHeight = screenHeight * 0.33;
   const fullHeight = screenHeight - insets.top;
   
-  const translateY = useRef(new Animated.Value(cardHeight)).current;
-  const panY = useRef(new Animated.Value(0)).current;
-  const [cardState, setCardState] = React.useState('hidden');
-  const cardStateRef = useRef('hidden');
-  const animationRef = useRef(null);
+  // Snap positions - these define where the card can rest
+  const EXPANDED_Y = 0; // Full screen (top aligns with screen top, padding creates safe area)
+  const COLLAPSED_Y = screenHeight - cardHeight; // Peek from bottom
+  const HIDDEN_Y = screenHeight; // Completely hidden below screen
   
-  // Stop any ongoing animations
-  const stopAnimation = () => {
-    if (animationRef.current) {
-      animationRef.current.stop();
-      animationRef.current = null;
+  // Single source of truth for card position
+  const translateY = useRef(new Animated.Value(HIDDEN_Y)).current;
+  
+  // State management
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isExpandedRef = useRef(false); // Ref for PanResponder to access current value
+  const dragStartY = useRef(HIDDEN_Y); // Track where drag started
+  const currentPosition = useRef(HIDDEN_Y); // Track current position
+  const scrollY = useRef(0); // Track scroll position
+  const [scrollEnabled, setScrollEnabled] = useState(true); // Control ScrollView scrolling
+  const scrollEnabledRef = useRef(true); // Ref for PanResponder to access current value
+  const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    isExpandedRef.current = isExpanded;
+    scrollEnabledRef.current = scrollEnabled;
+  }, [isExpanded, scrollEnabled]);
+  
+  // Handle scroll events - dynamically manage scroll enable/disable
+  const handleScroll = (event) => {
+    const newScrollY = event.nativeEvent.contentOffset.y;
+    scrollY.current = newScrollY;
+    
+    // When at top, disable scrolling so parent can intercept downward drags
+    if (isExpandedRef.current) {
+      if (newScrollY <= 0 && scrollEnabled) {
+        setScrollEnabled(false);
+      } else if (newScrollY > 0 && !scrollEnabled) {
+        setScrollEnabled(true);
+      }
     }
-    translateY.stopAnimation();
   };
+
+  // Pan responder - handles all touch gestures
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponderCapture: () => false,
+      
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        // When expanded, at top, and dragging down - intercept before ScrollView claims it
+        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
+        const isDraggingDown = gestureState.dy > 5;
+        return (
+          isExpandedRef.current &&
+          !scrollEnabledRef.current &&
+          isDraggingDown &&
+          isDraggingVertically
+        );
+      },
+      
+      onStartShouldSetPanResponder: () => false,
+      
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Handle drags when collapsed
+        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
+        const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        return !isExpandedRef.current && isDraggingVertically && isMoreVerticalThanHorizontal;
+      },
+      
+      onPanResponderGrant: () => {
+        translateY.stopAnimation(value => {
+          dragStartY.current = value;
+          currentPosition.current = value;
+        });
+      },
+      
+      onPanResponderMove: (_, gestureState) => {
+        let newY = dragStartY.current + gestureState.dy;
+        
+        // Clamp to valid range with rubber-band effect at edges
+        if (newY < EXPANDED_Y) {
+          // Rubber band at top
+          const overflow = EXPANDED_Y - newY;
+          newY = EXPANDED_Y - overflow * 0.3; // Resistance factor
+        } else if (newY > HIDDEN_Y) {
+          // Rubber band at bottom
+          const overflow = newY - HIDDEN_Y;
+          newY = HIDDEN_Y + overflow * 0.3; // Resistance factor
+        }
+        
+        currentPosition.current = newY;
+        translateY.setValue(newY);
+      },
+      
+      onPanResponderRelease: (_, gestureState) => {
+        const velocity = gestureState.vy;
+        const dragDistance = gestureState.dy;
+        const finalPosition = currentPosition.current;
+        
+        let targetY = COLLAPSED_Y;
+        let willBeExpanded = false;
+        
+        // High velocity swipe - use velocity to determine direction
+        if (Math.abs(velocity) > 0.7) {
+          if (velocity < 0) {
+            targetY = EXPANDED_Y;
+            willBeExpanded = true;
+          } else {
+            if (dragStartY.current < COLLAPSED_Y * 0.5) {
+              targetY = COLLAPSED_Y;
+            } else {
+              targetY = HIDDEN_Y;
+            }
+          }
+        } else {
+          // Slow drag - snap to nearest position
+          const distToExpanded = Math.abs(finalPosition - EXPANDED_Y);
+          const distToCollapsed = Math.abs(finalPosition - COLLAPSED_Y);
+          const distToHidden = Math.abs(finalPosition - HIDDEN_Y);
+          const minDist = Math.min(distToExpanded, distToCollapsed, distToHidden);
+          
+          if (minDist === distToHidden && dragDistance > cardHeight * 0.3) {
+            targetY = HIDDEN_Y;
+          } else if (minDist === distToExpanded) {
+            targetY = EXPANDED_Y;
+            willBeExpanded = true;
+          } else {
+            targetY = COLLAPSED_Y;
+          }
+        }
+        
+        setIsExpanded(willBeExpanded);
+        dragStartY.current = targetY;
+        currentPosition.current = targetY;
+        
+        // Enable scrolling when expanding (auto-disabled when reaching top)
+        if (willBeExpanded) {
+          setScrollEnabled(true);
+        }
+        
+        // Smoother, faster animation
+        Animated.spring(translateY, {
+          toValue: targetY,
+          velocity: velocity,
+          tension: 85,
+          friction: 10,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished && targetY === HIDDEN_Y) {
+            onClose();
+          }
+        });
+      },
+      
+      onPanResponderTerminationRequest: () => false,
+      
+      onPanResponderTerminate: () => {
+        Animated.spring(translateY, {
+          toValue: dragStartY.current,
+          tension: 85,
+          friction: 10,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
   
+  // Show/hide card when pub changes
   useEffect(() => {
     if (pub) {
-      stopAnimation();
-      setCardState('collapsed');
-      cardStateRef.current = 'collapsed';
-      panY.setValue(0);
-      panY.setOffset(0);
-      translateY.setValue(cardHeight);
+      setIsExpanded(false);
+      dragStartY.current = COLLAPSED_Y;
+      currentPosition.current = COLLAPSED_Y;
+      scrollY.current = 0;
+      setScrollEnabled(false);
       
-      animationRef.current = Animated.spring(translateY, {
-        toValue: 0,
+      translateY.stopAnimation();
+      Animated.spring(translateY, {
+        toValue: COLLAPSED_Y,
+        tension: 120,
+        friction: 10,
         useNativeDriver: true,
-        tension: 60,
-        friction: 30,
-      });
-      animationRef.current.start(() => {
-        animationRef.current = null;
-      });
+      }).start();
     } else {
-      stopAnimation();
-      setCardState('hidden');
-      cardStateRef.current = 'hidden';
-      panY.setValue(0);
-      panY.setOffset(0);
-      translateY.setValue(cardHeight);
+      Animated.spring(translateY, {
+        toValue: HIDDEN_Y,
+        tension: 120,
+        friction: 10,
+        useNativeDriver: true,
+      }).start(() => {
+        dragStartY.current = HIDDEN_Y;
+        currentPosition.current = HIDDEN_Y;
+        scrollY.current = 0;
+      });
     }
-  }, [pub?.id, cardHeight]);
-  
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
-        },
-        onPanResponderGrant: () => {
-          // Stop any ongoing animations before starting gesture
-          stopAnimation();
-          // Get the current animated value and set it as offset
-          translateY.stopAnimation((value) => {
-            panY.setOffset(value);
-            panY.setValue(0);
-          });
-        },
-        onPanResponderMove: (_, gestureState) => {
-          panY.setValue(gestureState.dy);
-        },
-        onPanResponderRelease: (_, gestureState) => {
-          const velocity = gestureState.vy;
-          
-          // Get current positions before flattening
-          const panOffset = panY._offset || 0;
-          const panValue = panY._value || 0;
-          const currentPanY = panOffset + panValue;
-          
-          // Flatten offset and synchronize values properly
-          panY.flattenOffset();
-          translateY.stopAnimation((translateValue) => {
-            const currentY = translateValue + currentPanY;
-            
-            // Update translateY to the actual current position
-            translateY.setValue(currentY);
-            panY.setValue(0);
-            panY.setOffset(0);
-          
-            const collapsedY = 0;
-            const expandedY = 0;
-            const hiddenY = cardHeight + insets.bottom;
-            
-            let targetY;
-            let newState;
-            
-            if (Math.abs(velocity) > 0.5) {
-              if (velocity < 0) {
-                targetY = expandedY;
-                newState = 'expanded';
-              } else {
-                if (cardStateRef.current === 'expanded') {
-                  targetY = collapsedY;
-                  newState = 'collapsed';
-                } else {
-                  targetY = hiddenY;
-                  newState = 'hidden';
-                }
-              }
-            } else {
-              const midPoint = (collapsedY + expandedY) / 2;
-              if (currentY < midPoint) {
-                targetY = expandedY;
-                newState = 'expanded';
-              } else if (currentY < collapsedY + 50) {
-                targetY = collapsedY;
-                newState = 'collapsed';
-              } else {
-                targetY = hiddenY;
-                newState = 'hidden';
-              }
-            }
-            
-            setCardState(newState);
-            cardStateRef.current = newState;
-            
-            animationRef.current = Animated.spring(translateY, {
-              toValue: targetY,
-              useNativeDriver: true,
-              tension: 120,
-              friction: 60,
-            });
-            animationRef.current.start((finished) => {
-              animationRef.current = null;
-              if (finished && newState === 'hidden') {
-                onClose();
-              }
-            });
-          });
-        },
-        onPanResponderTerminate: () => {
-          // Handle interruption (e.g., incoming call)
-          panY.flattenOffset();
-          translateY.stopAnimation((value) => {
-            translateY.setValue(value);
-            panY.setValue(0);
-            panY.setOffset(0);
-          });
-        },
-      }),
-    [cardHeight, insets.bottom, onClose]
-  );
+  }, [pub?.id]);
   
   const handleClose = () => {
-    // Stop any ongoing animations and gestures immediately
-    stopAnimation();
+    setIsExpanded(false);
+    translateY.stopAnimation();
     
-    // Get current position values synchronously
-    const panOffset = panY._offset || 0;
-    const panValue = panY._value || 0;
-    const currentPanY = panOffset + panValue;
-    const currentTranslateY = translateY._value || 0;
-    const currentY = currentTranslateY + currentPanY;
-    
-    // Flatten and reset pan values
-    panY.flattenOffset();
-    panY.setValue(0);
-    panY.setOffset(0);
-    
-    // Update translateY to current position to prevent jump
-    translateY.setValue(currentY);
-    
-    // Update state immediately for UI responsiveness
-    setCardState('hidden');
-    cardStateRef.current = 'hidden';
-    
-    const targetY = cardHeight + insets.bottom;
-    
-    // Use timing animation for faster, smoother closing
-    // Reduced duration and optimized easing for snappy feel
-    animationRef.current = Animated.timing(translateY, {
-      toValue: targetY,
-      duration: 150, // Fast and responsive
-      easing: Easing.out(Easing.quad), // Smooth but quick deceleration
+    Animated.spring(translateY, {
+      toValue: HIDDEN_Y,
+      tension: 120,
+      friction: 10,
       useNativeDriver: true,
-    });
-    
-    animationRef.current.start((finished) => {
-      animationRef.current = null;
-      if (finished) {
-        onClose();
-      }
+    }).start(() => {
+      dragStartY.current = HIDDEN_Y;
+      currentPosition.current = HIDDEN_Y;
+      onClose();
     });
   };
+
+  const handleSendReport = async (reportText) => {
+    try {
+      await submitReport(pub.id, pub.name, pub.area, reportText);
+      
+      Alert.alert(
+        'Report Submitted',
+        'Thank you! Your report has been submitted successfully.',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      
+      Alert.alert(
+        'Report Failed',
+        'Failed to submit report. Please check your internet connection and try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
   
+  // Don't render if no pub (must be after all hooks)
   if (!pub) return null;
-  
-  const isExpanded = cardState === 'expanded';
-  const currentHeight = isExpanded ? fullHeight : cardHeight;
   
   return (
     <Animated.View 
       style={[
         styles.cardContainer, 
         { 
-          height: currentHeight,
+          height: fullHeight,
           paddingTop: isExpanded ? insets.top + 8 : 12,
-          bottom: 0,
-          transform: [
-            {
-              translateY: Animated.add(translateY, panY)
-            }
-          ]
+          transform: [{ translateY }]
         }
       ]}
       {...panResponder.panHandlers}
     >
-      {isExpanded && (
-        <TouchableOpacity 
-          style={[styles.closeButtonTop, { top: insets.top + 8 }]} 
-          onPress={handleClose}
-        >
-          <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
-        </TouchableOpacity>
+      {/* Report, Favorite and Close buttons - positioned differently based on state */}
+      {isExpanded ? (
+        <>
+          <TouchableOpacity
+            style={[styles.reportButtonTop, { top: insets.top + 8 }]}
+            onPress={() => setReportModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name="flag-outline" 
+              size={24} 
+              color={MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteButtonTop, { top: insets.top + 8 }]}
+            onPress={() => onToggleFavorite(pub.id)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name={pub.isFavorite ? "star" : "star-outline"} 
+              size={24} 
+              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.closeButtonTop, { top: insets.top + 8 }]}
+            onPress={handleClose}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={styles.reportButton}
+            onPress={() => setReportModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name="flag-outline" 
+              size={24} 
+              color={MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.favoriteButton}
+            onPress={() => onToggleFavorite(pub.id)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons 
+              name={pub.isFavorite ? "star" : "star-outline"} 
+              size={24} 
+              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={handleClose}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+          </TouchableOpacity>
+        </>
       )}
       
+      {/* Drag handle indicator */}
       <View style={styles.cardHandleContainer}>
         <View style={styles.cardHandle} />
       </View>
-      
+
+      {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
       {!isExpanded && (
-        <TouchableOpacity 
-          style={styles.closeButton} 
-          onPress={handleClose}
-        >
-          <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
-        </TouchableOpacity>
+        <View 
+          style={styles.draggableOverlay} 
+          pointerEvents="box-only" 
+        />
       )}
-      
-      <PubCardContent 
+
+      {/* Card content */}
+      <PubCardContent
         pub={pub}
         isExpanded={isExpanded}
         onToggleVisited={onToggleVisited}
         getImageSource={getImageSource}
+        pointerEvents={!isExpanded ? 'none' : 'auto'}
+        onScroll={handleScroll}
+        scrollEnabled={scrollEnabled}
+      />
+
+      {/* Report Modal */}
+      <ReportModal
+        visible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        onSend={handleSendReport}
+        pubName={pub.name}
+        pubArea={pub.area}
       />
     </Animated.View>
   );
@@ -270,6 +385,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+    bottom: 0,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -293,18 +409,19 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: MEDIUM_GREY,
     borderRadius: 2,
+    opacity: 0.5,
   },
-  closeButton: {
+  reportButton: {
     position: 'absolute',
     top: 12,
-    right: 16,
-    zIndex: 1,
+    right: 92,
+    zIndex: 10,
     padding: 4,
   },
-  closeButtonTop: {
+  reportButtonTop: {
     position: 'absolute',
-    right: 16,
-    zIndex: 1,
+    right: 112,
+    zIndex: 10,
     padding: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 20,
@@ -314,5 +431,53 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
+  favoriteButton: {
+    position: 'absolute',
+    top: 12,
+    right: 54,
+    zIndex: 10,
+    padding: 4,
+  },
+  favoriteButtonTop: {
+    position: 'absolute',
+    right: 64,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 12,
+    right: 16,
+    zIndex: 10,
+    padding: 4,
+  },
+  closeButtonTop: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  draggableOverlay: {
+    position: 'absolute',
+    top: 40, // Below handle
+    left: 0,
+    right: 0,
+    bottom: 50, // Above visited button area
+    zIndex: 5,
+    backgroundColor: 'transparent',
+  },
 });
-

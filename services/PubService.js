@@ -43,13 +43,32 @@ export const fetchLondonPubs = async () => {
 			}
 		}
 
+		// Get favorite pubs from local storage
+		const rawFavorites = await AsyncStorage.getItem('favoritePubs');
+		const favoritesSet = new Set();
+		if (rawFavorites) {
+			try {
+				const parsed = JSON.parse(rawFavorites);
+				const arr = coerceToPubArray(parsed) || (Array.isArray(parsed) ? parsed : []);
+				// If parsed is array of ids, use them; otherwise ignore
+				if (Array.isArray(parsed) && parsed.every(i => typeof i === 'string')) {
+					parsed.forEach(id => favoritesSet.add(id));
+				} else if (Array.isArray(arr) && arr.every(x => typeof x === 'string')) {
+					arr.forEach(id => favoritesSet.add(id));
+				}
+			} catch (e) {
+				console.warn('favoritePubs in AsyncStorage is malformed, clearing it', e);
+				await AsyncStorage.removeItem('favoritePubs');
+			}
+		}
+
 		// Try to fetch from Supabase
 		const supabaseUrl = getSupabaseUrl();
 		const headers = getSupabaseHeaders();
 		
 		if (supabaseUrl && headers) {
 			try {
-				// Fetch pubs with their features and achievements
+				// Fetch pubs with all columns (including feature columns and achievement)
 				const pubsResponse = await fetch(
 					`${supabaseUrl}/pubs?select=*`,
 					{ headers }
@@ -61,32 +80,19 @@ export const fetchLondonPubs = async () => {
 				
 				const pubs = await pubsResponse.json();
 				
-				// Fetch features for all pubs
-				const featuresResponse = await fetch(
-					`${supabaseUrl}/pub_features?select=pub_id,feature`,
-					{ headers }
-				);
-				const allFeatures = await featuresResponse.json();
-				
-				// Fetch achievements for all pubs
-				const achievementsResponse = await fetch(
-					`${supabaseUrl}/pub_achievements?select=pub_id,achievement`,
-					{ headers }
-				);
-				const allAchievements = await achievementsResponse.json();
-				
-				// Group features and achievements by pub_id
-				const featuresMap = {};
-				allFeatures.forEach(f => {
-					if (!featuresMap[f.pub_id]) featuresMap[f.pub_id] = [];
-					featuresMap[f.pub_id].push(f.feature);
-				});
-				
-				const achievementsMap = {};
-				allAchievements.forEach(a => {
-					if (!achievementsMap[a.pub_id]) achievementsMap[a.pub_id] = [];
-					achievementsMap[a.pub_id].push(a.achievement);
-				});
+				// Convert boolean feature columns to features array
+				const convertFeaturesToArray = (pub) => {
+					const features = [];
+					if (pub.has_pub_garden) features.push('Pub garden');
+					if (pub.has_live_music) features.push('Live music');
+					if (pub.has_food_available) features.push('Food available');
+					if (pub.has_dog_friendly) features.push('Dog friendly');
+					if (pub.has_pool_darts) features.push('Pool/darts');
+					if (pub.has_parking) features.push('Parking');
+					if (pub.has_accommodation) features.push('Accommodation');
+					if (pub.has_cask_real_ale) features.push('Cask/real ale');
+					return features;
+				};
 				
 				// Combine and format pubs
 				const formattedPubs = pubs.map(pub => ({
@@ -103,9 +109,11 @@ export const fetchLondonPubs = async () => {
 					ownership: pub.ownership,
 					photoUrl: pub.photo_url, // Map photo_url to photoUrl for compatibility
 					points: pub.points || 10,
-					features: featuresMap[pub.id] || [],
-					achievements: achievementsMap[pub.id] || [],
+					features: convertFeaturesToArray(pub),
+					// Convert single achievement column to array for backward compatibility
+					achievements: pub.achievement ? [pub.achievement] : [],
 					isVisited: visitedSet.has(pub.id),
+					isFavorite: favoritesSet.has(pub.id),
 				}));
 				
 				console.log(`✅ Fetched ${formattedPubs.length} pubs from Supabase`);
@@ -123,13 +131,14 @@ export const fetchLondonPubs = async () => {
 		const pubs = MOCK_PUBS.map(pub => ({
 			...pub,
 			isVisited: visitedSet.has(pub.id),
+			isFavorite: favoritesSet.has(pub.id),
 		}));
 
 		return pubs;
 	} catch (error) {
 		console.error('fetchLondonPubs error:', error);
 		// Final fallback
-		return MOCK_PUBS.map(pub => ({ ...pub, isVisited: false }));
+		return MOCK_PUBS.map(pub => ({ ...pub, isVisited: false, isFavorite: false }));
 	}
 };
 
@@ -157,6 +166,34 @@ export const togglePubVisited = async (pubId) => {
 		return visited;
 	} catch (error) {
 		console.error('togglePubVisited error:', error);
+		throw error;
+	}
+};
+
+export const togglePubFavorite = async (pubId) => {
+	if (!pubId) throw new Error('togglePubFavorite called without pubId');
+	try {
+		const raw = await AsyncStorage.getItem('favoritePubs');
+		let favorites = new Set();
+		if (raw) {
+			try {
+				const parsed = JSON.parse(raw);
+				// Expecting array of ids
+				const arr = Array.isArray(parsed) ? parsed : coerceToPubArray(parsed);
+				arr.forEach(id => { if (typeof id === 'string') favorites.add(id); });
+			} catch (e) {
+				console.warn('Corrupted favoritePubs; resetting', e);
+				favorites = new Set();
+			}
+		}
+
+		if (favorites.has(pubId)) favorites.delete(pubId);
+		else favorites.add(pubId);
+
+		await AsyncStorage.setItem('favoritePubs', JSON.stringify([...favorites]));
+		return favorites;
+	} catch (error) {
+		console.error('togglePubFavorite error:', error);
 		throw error;
 	}
 };

@@ -89,36 +89,29 @@ export default function ProfileScreen() {
 
     // Calculate area breakdown
     const areaMap = {};
-    const areaCoordinates = {}; // Store coordinates for each area to calculate center
+    const areaRepresentativePub = {}; // Store one pub per area for distance calculation
     
     allPubs.forEach(pub => {
       const area = pub.area || 'Unknown';
       if (!areaMap[area]) {
         areaMap[area] = { total: 0, visited: 0 };
-        areaCoordinates[area] = [];
+        // Store the first pub with valid coordinates as representative for this area
+        if (pub.lat && pub.lon) {
+          areaRepresentativePub[area] = {
+            lat: parseFloat(pub.lat),
+            lon: parseFloat(pub.lon),
+          };
+        }
       }
       areaMap[area].total++;
       if (pub.isVisited) {
         areaMap[area].visited++;
       }
-      if (pub.lat && pub.lon) {
-        areaCoordinates[area].push({
+      // If we don't have a representative pub yet for this area, use this one if it has coordinates
+      if (!areaRepresentativePub[area] && pub.lat && pub.lon) {
+        areaRepresentativePub[area] = {
           lat: parseFloat(pub.lat),
           lon: parseFloat(pub.lon),
-        });
-      }
-    });
-
-    // Calculate center coordinates for each area
-    const areaCenters = {};
-    Object.keys(areaCoordinates).forEach(area => {
-      const coords = areaCoordinates[area];
-      if (coords.length > 0) {
-        const sumLat = coords.reduce((sum, c) => sum + c.lat, 0);
-        const sumLon = coords.reduce((sum, c) => sum + c.lon, 0);
-        areaCenters[area] = {
-          lat: sumLat / coords.length,
-          lon: sumLon / coords.length,
         };
       }
     });
@@ -129,14 +122,14 @@ export default function ProfileScreen() {
         const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
         let distance = null;
         
-        // Only calculate distance if we have both userLocation and area center
-        if (userLocation && areaCenters[area]) {
+        // Only calculate distance if we have both userLocation and a representative pub for this area
+        if (userLocation && areaRepresentativePub[area]) {
           try {
             distance = calculateDistance(
               userLocation.latitude,
               userLocation.longitude,
-              areaCenters[area].lat,
-              areaCenters[area].lon
+              areaRepresentativePub[area].lat,
+              areaRepresentativePub[area].lon
             );
           } catch (error) {
             console.error(`Error calculating distance for area ${area}:`, error);

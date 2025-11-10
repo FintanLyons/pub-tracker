@@ -5,52 +5,45 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 const DARK_GREY = '#2C2C2C';
 const MEDIUM_GREY = '#757575';
 const LIGHT_GREY = '#F5F5F5';
+const AMBER = '#D4A017';
 
-// Feature icon mapping
-const getFeatureIcon = (feature) => {
-  const featureLower = feature.toLowerCase();
-  const iconMap = {
-    'live music': 'music',
-    'beer garden': 'tree',
-    'dog friendly': 'dog',
-    'food': 'food',
-    'wifi': 'wifi',
-    'parking': 'parking',
-    'quiz': 'book-open-variant',
-    'sports': 'soccer',
-    'pool': 'pool',
-    'darts': 'target',
-    'outdoor seating': 'table-chair',
-    'wheelchair accessible': 'wheelchair-accessibility',
-  };
+// All possible features with their icons (in display order)
+const ALL_FEATURES = [
+  { name: 'Pub garden', icon: 'tree' },
+  { name: 'Live music', icon: 'music' },
+  { name: 'Food available', icon: 'silverware-fork-knife' },
+  { name: 'Dog friendly', icon: 'dog' },
+  { name: 'Pool/darts', icon: 'billiards' },
+  { name: 'Parking', icon: 'parking' },
+  { name: 'Accommodation', icon: 'bed' },
+  { name: 'Cask/real ale', icon: 'barrel' },
+];
   
-  // Try exact match first
-  if (iconMap[featureLower]) {
-    return iconMap[featureLower];
-  }
-  
-  // Try partial matches
-  for (const [key, icon] of Object.entries(iconMap)) {
-    if (featureLower.includes(key) || key.includes(featureLower)) {
-      return icon;
-    }
-  }
-  
-  // Default icon
-  return 'star';
+// Check if a feature is active for this pub
+const hasFeature = (pubFeatures, featureName) => {
+  if (!pubFeatures || !Array.isArray(pubFeatures)) return false;
+  return pubFeatures.some(f => f.toLowerCase() === featureName.toLowerCase());
 };
 
-export default function PubCardContent({ 
-  pub, 
-  isExpanded, 
+export default function PubCardContent({
+  pub,
+  isExpanded,
   onToggleVisited,
-  getImageSource 
+  getImageSource,
+  pointerEvents,
+  onScroll,
+  scrollEnabled
 }) {
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.cardContent}
       showsVerticalScrollIndicator={false}
-      scrollEnabled={isExpanded}
+      scrollEnabled={scrollEnabled !== undefined ? scrollEnabled : isExpanded}
+      pointerEvents={pointerEvents}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+      bounces={false}
+      directionalLockEnabled={true}
     >
       <Text style={styles.pubName}>{pub.name}</Text>
       
@@ -69,6 +62,7 @@ export default function PubCardContent({
           pub.isVisited && styles.visitedButtonActive
         ]}
         onPress={() => onToggleVisited(pub.id)}
+        pointerEvents="auto"
       >
         <MaterialCommunityIcons
           name={pub.isVisited ? 'check-circle' : 'checkbox-blank-circle-outline'}
@@ -93,45 +87,77 @@ export default function PubCardContent({
         </View>
       )}
       
-      {pub.features && pub.features.length > 0 && (
-        <View style={styles.featuresContainer}>
-          {pub.features.map((feature, index) => (
-            <View key={index} style={styles.featureItem}>
+      {/* Features - Always show all 8 feature icons */}
+      <View style={styles.featuresContainer}>
+        {ALL_FEATURES.map((feature, index) => {
+          const isActive = hasFeature(pub.features, feature.name);
+          return (
+            <View key={index} style={styles.featureIconWrapper}>
               <MaterialCommunityIcons 
-                name={getFeatureIcon(feature)} 
-                size={18} 
-                color={MEDIUM_GREY} 
+                name={feature.icon}
+                size={24} 
+                color={isActive ? AMBER : MEDIUM_GREY}
+                style={[styles.featureIcon, !isActive && styles.featureIconInactive]}
               />
-              <Text style={styles.featureText}>{feature}</Text>
             </View>
-          ))}
+          );
+        })}
+      </View>
+      
+      {/* Achievement - if present */}
+      {pub.achievements && pub.achievements.length > 0 && (
+        <View style={styles.achievementContainer}>
+          <MaterialCommunityIcons 
+            name="trophy" 
+            size={16} 
+            color={AMBER} 
+          />
+          <Text style={styles.achievementText}>
+            {pub.achievements[0]}
+          </Text>
         </View>
       )}
       
       {pub.address && (
         <View style={styles.infoRow}>
           <MaterialCommunityIcons name="map-marker" size={16} color={MEDIUM_GREY} />
-          <Text style={styles.address}>{pub.address.replace(/\n+/g, ' ').trim()}</Text>
+          <Text style={styles.address}>
+            {pub.address
+              .split('\n')
+              .map(part => part.trim())
+              .filter(part => part.length > 0)
+              .join(', ')}
+          </Text>
         </View>
       )}
       
+      {/* Phone and Founded on same row - two columns */}
+      {(pub.phone || pub.founded) && (
+        <View style={styles.twoColumnRow}>
+          <View style={styles.columnLeft}>
       {pub.phone && (
-        <View style={styles.infoRow}>
+              <>
           <MaterialCommunityIcons name="phone" size={16} color={MEDIUM_GREY} />
           <Text style={styles.phone}>{pub.phone}</Text>
+              </>
+            )}
         </View>
-      )}
+          
+          <Text style={styles.columnSeparator}>|</Text>
       
+          <View style={styles.columnRight}>
       {pub.founded && (
-        <View style={styles.infoRow}>
+              <>
           <MaterialCommunityIcons name="calendar" size={16} color={MEDIUM_GREY} />
-          <Text style={styles.founded}>Founded: {pub.founded}</Text>
+                <Text style={styles.founded}>{pub.founded}</Text>
+              </>
+            )}
+          </View>
         </View>
       )}
       
       {pub.history && (
         <View style={styles.historyContainer}>
-          <MaterialCommunityIcons name="book-open-page-variant" size={16} color={MEDIUM_GREY} />
           <Text style={styles.history}>{pub.history}</Text>
         </View>
       )}
@@ -207,21 +233,33 @@ const styles = StyleSheet.create({
   },
   featuresContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 16,
+    paddingHorizontal: 4,
   },
-  featureItem: {
+  featureIconWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
+  },
+  featureIcon: {
+    // No additional styles needed - handled by color prop
+  },
+  featureIconInactive: {
+    opacity: 0.4,
+  },
+  achievementContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    width: '50%',
-    marginBottom: 8,
-    paddingRight: 8,
+    marginBottom: 12,
   },
-  featureText: {
+  achievementText: {
     fontSize: 14,
-    color: DARK_GREY,
-    marginLeft: 6,
-    flex: 1,
+    color: AMBER,
+    marginLeft: 8,
+    fontWeight: '600',
   },
   infoRow: {
     flexDirection: 'row',
@@ -244,18 +282,35 @@ const styles = StyleSheet.create({
     color: DARK_GREY,
     marginLeft: 8,
   },
-  historyContainer: {
+  twoColumnRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  columnLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  columnRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  columnSeparator: {
+    fontSize: 16,
+    color: MEDIUM_GREY,
+    marginHorizontal: 12,
+  },
+  historyContainer: {
     marginTop: 8,
     marginBottom: 16,
   },
   history: {
     fontSize: 14,
     color: DARK_GREY,
-    marginLeft: 8,
-    flex: 1,
     lineHeight: 20,
+    textAlign: 'justify',
   },
 });
 

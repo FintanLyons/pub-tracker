@@ -19,7 +19,8 @@
           "locationAlwaysAndWhenInUsePermission": "Allow Pub Tracker to access your location to show nearby pubs",
           "locationWhenInUsePermission": "Allow Pub Tracker to access your location to show nearby pubs"
         }
-      ]
+      ],
+      "expo-mail-composer"
     ],
     "ios": {
       "supportsTablet": true,
@@ -35,6 +36,10 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
+      "navigationBar": {
+        "backgroundColor": "#1C1C1C",
+        "barStyle": "light-content"
+      },
       "package": "com.yourcompany.pubtracker",
       "permissions": [
         "ACCESS_COARSE_LOCATION",

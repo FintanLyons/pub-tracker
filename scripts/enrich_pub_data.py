@@ -4,6 +4,8 @@ Pub Data Enrichment Script
 This script uses Google Gemini AI to enrich pub data from Supabase:
 - Finds founding date
 - Generates 100-200 word history/interesting features summary
+- Determines pub ownership
+- Detects pub features (garden, live music, food, dog friendly, pool/darts, parking, accommodation, real ale)
 - Updates Supabase with the enriched data
 
 Setup:
@@ -14,6 +16,11 @@ Setup:
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your_service_role_key (for writes)
    GOOGLE_API_KEY=your_google_api_key
+
+Usage:
+- python enrich_pub_data.py                  # Enrich pubs with missing data (default)
+- python enrich_pub_data.py --all            # Re-enrich all pubs
+- python enrich_pub_data.py --features-only  # Only detect and update features (all pubs)
 
 ⚠️  SECURITY: Never commit API keys to git! The .env file is in .gitignore.
 """
@@ -64,6 +71,101 @@ if missing_keys:
 # Initialize clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+def get_pub_features(pub_name: str, area: str, description: str = "", history: str = "") -> dict:
+    """
+    Use AI to detect which features a pub has based on its description.
+    Returns: dict with boolean values for each feature
+    """
+    context = f"Pub name: {pub_name}\nArea: {area}"
+    if description:
+        context += f"\nDescription: {description}"
+    if history:
+        context += f"\nHistory: {history}"
+    
+    prompt = f"""Analyze this London pub and determine which of these features it has. Only answer YES if you are confident based on the description. If unsure or no information, answer NO.
+
+Pub information:
+{context}
+
+For each feature below, answer ONLY with YES or NO:
+
+PUB_GARDEN: Does it have a pub garden, beer garden, outdoor seating area, or patio?
+LIVE_MUSIC: Does it have live music, bands, performances, or entertainment?
+FOOD_AVAILABLE: Does it serve food, meals, or have a restaurant/kitchen?
+DOG_FRIENDLY: Is it dog-friendly or allows dogs?
+POOL_DARTS: Does it have pool tables, darts, or pub games?
+PARKING: Does it mention parking availability?
+ACCOMMODATION: Does it offer rooms, hotel, or accommodation?
+CASK_REAL_ALE: Does it serve cask ale, real ale, or traditional hand-pulled beer?
+
+Format your response EXACTLY as:
+PUB_GARDEN: [YES/NO]
+LIVE_MUSIC: [YES/NO]
+FOOD_AVAILABLE: [YES/NO]
+DOG_FRIENDLY: [YES/NO]
+POOL_DARTS: [YES/NO]
+PARKING: [YES/NO]
+ACCOMMODATION: [YES/NO]
+CASK_REAL_ALE: [YES/NO]
+
+Remember: Only say YES if there is clear evidence. If uncertain, say NO."""
+
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        
+        content = response.text
+        
+        # Parse response
+        features = {
+            'has_pub_garden': False,
+            'has_live_music': False,
+            'has_food_available': False,
+            'has_dog_friendly': False,
+            'has_pool_darts': False,
+            'has_parking': False,
+            'has_accommodation': False,
+            'has_cask_real_ale': False,
+        }
+        
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if 'PUB_GARDEN:' in line:
+                features['has_pub_garden'] = 'YES' in line.upper()
+            elif 'LIVE_MUSIC:' in line:
+                features['has_live_music'] = 'YES' in line.upper()
+            elif 'FOOD_AVAILABLE:' in line:
+                features['has_food_available'] = 'YES' in line.upper()
+            elif 'DOG_FRIENDLY:' in line:
+                features['has_dog_friendly'] = 'YES' in line.upper()
+            elif 'POOL_DARTS:' in line or 'POOL/DARTS:' in line:
+                features['has_pool_darts'] = 'YES' in line.upper()
+            elif 'PARKING:' in line:
+                features['has_parking'] = 'YES' in line.upper()
+            elif 'ACCOMMODATION:' in line:
+                features['has_accommodation'] = 'YES' in line.upper()
+            elif 'CASK_REAL_ALE:' in line or 'REAL_ALE:' in line:
+                features['has_cask_real_ale'] = 'YES' in line.upper()
+        
+        return features
+        
+    except Exception as e:
+        print(f"   ❌ AI Error detecting features: {e}")
+        # Return all False on error
+        return {
+            'has_pub_garden': False,
+            'has_live_music': False,
+            'has_food_available': False,
+            'has_dog_friendly': False,
+            'has_pool_darts': False,
+            'has_parking': False,
+            'has_accommodation': False,
+            'has_cask_real_ale': False,
+        }
 
 def get_pub_enrichment(pub_name: str, area: str, address: str = "") -> tuple:
     """
@@ -156,9 +258,40 @@ Be accurate and factual. If you cannot find specific information, use reasonable
         print(f"   ❌ AI Error: {e}")
         return None, None, None
 
-def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "") -> bool:
+def enrich_pub_features_only(pub_id: str, pub_name: str, area: str, description: str = "", history: str = "") -> bool:
     """
-    Enrich a single pub with founding date, history, and ownership.
+    Enrich only the features for a pub (skip history/founded/ownership).
+    Returns True if successful.
+    """
+    print(f"🔍 Detecting features for: {pub_name} ({area})")
+    
+    features = get_pub_features(pub_name, area, description, history)
+    
+    # Show which features were detected
+    detected = [k.replace('has_', '').replace('_', ' ').title() for k, v in features.items() if v]
+    if detected:
+        print(f"   ✨ Features found: {', '.join(detected)}")
+    else:
+        print(f"   ℹ️  No features detected")
+    
+    # Update Supabase with just features
+    try:
+        response = supabase.table('pubs').update(features).eq('id', pub_id).execute()
+        
+        if response.data:
+            print(f"   ✅ Updated in Supabase")
+            return True
+        else:
+            print(f"   ❌ Update failed")
+            return False
+            
+    except Exception as e:
+        print(f"   ❌ Supabase Error: {e}")
+        return False
+
+def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", description: str = "", detect_features: bool = True) -> bool:
+    """
+    Enrich a single pub with founding date, history, ownership, and features.
     Returns True if successful.
     """
     print(f"🔍 Enriching: {pub_name} ({area})")
@@ -181,6 +314,21 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "") -> bool
         update_data['ownership'] = ownership
         print(f"   🏢 Ownership: {ownership}")
     
+    # Detect features using AI
+    if detect_features:
+        print(f"   🔍 Detecting features...")
+        features = get_pub_features(pub_name, area, description, history)
+        
+        # Add features to update data
+        update_data.update(features)
+        
+        # Show which features were detected
+        detected = [k.replace('has_', '').replace('_', ' ').title() for k, v in features.items() if v]
+        if detected:
+            print(f"   ✨ Features found: {', '.join(detected)}")
+        else:
+            print(f"   ℹ️  No features detected")
+    
     # Update Supabase
     try:
         response = supabase.table('pubs').update(update_data).eq('id', pub_id).execute()
@@ -201,7 +349,7 @@ def get_pubs_to_enrich(only_missing: bool = True):
     Get pubs from Supabase that need enrichment.
     If only_missing=True, only get pubs where founded, history, or ownership is NULL or empty.
     """
-    query = supabase.table('pubs').select('id,name,area,address,founded,history,ownership')
+    query = supabase.table('pubs').select('id,name,area,address,description,founded,history,ownership')
     
     if only_missing:
         # Get pubs where founded, history, OR ownership is NULL or empty
@@ -219,15 +367,20 @@ def get_pubs_to_enrich(only_missing: bool = True):
 def main():
     print("🍺 Pub Data Enrichment Script\n")
     
-    # Check if we should only enrich missing data
+    # Check command line arguments
     only_missing = '--all' not in sys.argv
+    features_only = '--features-only' in sys.argv
     
-    if only_missing:
+    if features_only:
+        print("📋 Fetching all pubs for feature detection...")
+        # Get all pubs for feature detection
+        pubs = supabase.table('pubs').select('id,name,area,address,description,history').execute().data
+    elif only_missing:
         print("📋 Fetching pubs with missing data (founded, history, or ownership)...")
+        pubs = get_pubs_to_enrich(only_missing=only_missing)
     else:
         print("📋 Fetching all pubs...")
-    
-    pubs = get_pubs_to_enrich(only_missing=only_missing)
+        pubs = get_pubs_to_enrich(only_missing=only_missing)
     
     if not pubs:
         print("✅ No pubs need enrichment!")
@@ -241,12 +394,25 @@ def main():
     for i, pub in enumerate(pubs, 1):
         print(f"\n[{i}/{len(pubs)}]")
         
-        success = enrich_pub(
-            pub['id'],
-            pub['name'],
-            pub.get('area', ''),
-            pub.get('address', '')
-        )
+        if features_only:
+            # Only detect and update features
+            success = enrich_pub_features_only(
+                pub['id'],
+                pub['name'],
+                pub.get('area', ''),
+                pub.get('description', ''),
+                pub.get('history', '')
+            )
+        else:
+            # Full enrichment (history, founded, ownership, and features)
+            success = enrich_pub(
+                pub['id'],
+                pub['name'],
+                pub.get('area', ''),
+                pub.get('address', ''),
+                pub.get('description', ''),
+                detect_features=True
+            )
         
         if success:
             enriched += 1
@@ -255,7 +421,7 @@ def main():
         
         # Rate limiting - wait between requests
         if i < len(pubs):
-            time.sleep(0.2)  # Wait 0.2 seconds between pubs
+            time.sleep(0.5)  # Wait 0.5 seconds between pubs (increased for feature detection)
     
     print(f"\n📊 Summary:")
     print(f"   ✅ Enriched: {enriched}")
