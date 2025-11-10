@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 
@@ -50,20 +51,29 @@ export default function TabNavigator() {
             }}
           />
           <Tab.Screen 
-            name="Achievements" 
-            component={AchievementsScreen}
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="trophy-outline" size={size} color={color} />
-              ),
-            }}
-          />
-          <Tab.Screen 
             name="Profile" 
             component={ProfileScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="account-outline" size={size} color={color} />
+              ),
+            }}
+          />
+          <Tab.Screen 
+            name="Leaderboard" 
+            component={LeaderboardScreen}
+            options={{
+              tabBarIcon: ({ color, size }) => (
+                <MaterialCommunityIcons name="podium" size={size} color={color} />
+              ),
+            }}
+          />
+          <Tab.Screen 
+            name="Achievements" 
+            component={AchievementsScreen}
+            options={{
+              tabBarIcon: ({ color, size }) => (
+                <MaterialCommunityIcons name="trophy-outline" size={size} color={color} />
               ),
             }}
           />

@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { fetchLondonPubs } from '../services/PubService';
+import { getCurrentUserSecure } from '../services/SecureAuthService';
+import { useAuth } from '../contexts/AuthContext';
 import PintGlassIcon from '../components/PintGlassIcon';
 
 const DARK_GREY = '#2C2C2C';
@@ -20,6 +22,7 @@ const SORT_MODES = {
 
 export default function ProfileScreen() {
   const navigation = useNavigation();
+  const { logout } = useAuth();
   const [pubs, setPubs] = useState([]);
   const [visitedCount, setVisitedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
@@ -27,6 +30,7 @@ export default function ProfileScreen() {
   const [currentLocation, setCurrentLocation] = useState(null);
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
@@ -71,6 +75,10 @@ export default function ProfileScreen() {
   }, []);
 
   const loadStats = useCallback(async () => {
+    // Load current user
+    const user = await getCurrentUserSecure();
+    setCurrentUser(user);
+
     const allPubs = await fetchLondonPubs();
     setPubs(allPubs);
     setTotalCount(allPubs.length);
@@ -218,13 +226,48 @@ export default function ProfileScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showFilterModal]);
 
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            // AuthContext will automatically update and show AuthScreen
+          },
+        },
+      ]
+    );
+  };
+
   const progressPercentage = totalCount > 0 ? Math.round((visitedCount / totalCount) * 100) : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <View style={styles.headerContainer}>
+        <View style={styles.spacer} />
       <View style={styles.header}>
         <PintGlassIcon size={48} color={DARK_GREY} />
         <Text style={styles.title}>Pub Tracker</Text>
+          {currentUser && (
+            <Text style={styles.username}>@{currentUser.username}</Text>
+          )}
+        </View>
+        {currentUser && (
+          <TouchableOpacity 
+            onPress={handleLogout}
+            style={styles.logoutButtonHeader}
+          >
+            <MaterialCommunityIcons name="logout" size={24} color="#F44336" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.statsCard}>
@@ -415,15 +458,35 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 40,
   },
-  header: {
-    alignItems: 'center',
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: 32,
+  },
+  spacer: {
+    width: 40,
+  },
+  header: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  logoutButtonHeader: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: LIGHT_GREY,
+    marginTop: 8,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     color: DARK_GREY,
     marginTop: 12,
+  },
+  username: {
+    fontSize: 16,
+    color: MEDIUM_GREY,
+    marginTop: 4,
   },
   statsCard: {
     backgroundColor: LIGHT_GREY,
