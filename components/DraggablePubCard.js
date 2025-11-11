@@ -1,10 +1,12 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { 
   View, 
+  Text,
   Dimensions, 
   Animated, 
   PanResponder,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Alert
 } from 'react-native';
@@ -30,16 +32,35 @@ export default function DraggablePubCard({
 }) {
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
+  
+  // Memoize snap positions to ensure they never change - prevents position variance
+  const snapPositions = useMemo(() => {
+    const cardHeight = screenHeight * 0.33;
+    return {
+      EXPANDED_Y: 0, // Full screen (top aligns with screen top, padding creates safe area)
+      COLLAPSED_Y: screenHeight - cardHeight, // Peek from bottom
+      HIDDEN_Y: screenHeight, // Completely hidden below screen
+    };
+  }, [screenHeight]);
+  
+  const { EXPANDED_Y, COLLAPSED_Y, HIDDEN_Y } = snapPositions;
   const cardHeight = screenHeight * 0.33;
   const fullHeight = screenHeight - insets.top;
   
-  // Snap positions - these define where the card can rest
-  const EXPANDED_Y = 0; // Full screen (top aligns with screen top, padding creates safe area)
-  const COLLAPSED_Y = screenHeight - cardHeight; // Peek from bottom
-  const HIDDEN_Y = screenHeight; // Completely hidden below screen
-  
   // Single source of truth for card position
   const translateY = useRef(new Animated.Value(HIDDEN_Y)).current;
+  
+  // Refs for PanResponder to always access current snap positions
+  const collapsedYRef = useRef(COLLAPSED_Y);
+  const expandedYRef = useRef(EXPANDED_Y);
+  const hiddenYRef = useRef(HIDDEN_Y);
+  
+  // Update refs when snap positions change
+  useEffect(() => {
+    collapsedYRef.current = COLLAPSED_Y;
+    expandedYRef.current = EXPANDED_Y;
+    hiddenYRef.current = HIDDEN_Y;
+  }, [COLLAPSED_Y, EXPANDED_Y, HIDDEN_Y]);
   
   // State management
   const [isExpanded, setIsExpanded] = useState(false);
@@ -50,6 +71,14 @@ export default function DraggablePubCard({
   const [scrollEnabled, setScrollEnabled] = useState(true); // Control ScrollView scrolling
   const scrollEnabledRef = useRef(true); // Ref for PanResponder to access current value
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
+  const buttonInteractionRef = useRef(false); // Track if button has been interacted with
+  
+  // Helper function to check if touch is in button area
+  const isTouchInButtonArea = (touchY) => {
+    const buttonTop = 103;
+    const buttonBottom = buttonTop + 48;
+    return touchY >= buttonTop && touchY <= buttonBottom;
+  };
   
   // Keep refs in sync with state
   useEffect(() => {
@@ -75,7 +104,11 @@ export default function DraggablePubCard({
   // Pan responder - handles all touch gestures
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponderCapture: () => false,
+      onStartShouldSetPanResponderCapture: (evt) => {
+        // Never capture touches - let buttons and other interactive elements handle them first
+        // This ensures buttons are immediately responsive
+        return false;
+      },
       
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
         // When expanded, at top, and dragging down - intercept before ScrollView claims it
@@ -89,11 +122,36 @@ export default function DraggablePubCard({
         );
       },
       
-      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponder: (evt) => {
+        // If button interaction is active, never start responder
+        if (buttonInteractionRef.current) {
+          return false;
+        }
+        
+        // Check if touch is in button area - if so, let button handle it
+        if (!isExpandedRef.current && isTouchInButtonArea(evt.nativeEvent.locationY)) {
+          buttonInteractionRef.current = true;
+          return false;
+        }
+        
+        // Never start responder on initial touch - let buttons handle it
+        return false;
+      },
       
-      onMoveShouldSetPanResponder: (_, gestureState) => {
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // If button interaction is active, never start responder
+        if (buttonInteractionRef.current) {
+          return false;
+        }
+        
+        // Check if touch is in button area - don't start dragging
+        if (!isExpandedRef.current && isTouchInButtonArea(evt.nativeEvent.locationY)) {
+          return false;
+        }
+        
         // Handle drags when collapsed
-        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
+        // Increased threshold to 10px to avoid interfering with button presses
+        const isDraggingVertically = Math.abs(gestureState.dy) > 10;
         const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
         return !isExpandedRef.current && isDraggingVertically && isMoreVerticalThanHorizontal;
       },
@@ -109,14 +167,16 @@ export default function DraggablePubCard({
         let newY = dragStartY.current + gestureState.dy;
         
         // Clamp to valid range with rubber-band effect at edges
-        if (newY < EXPANDED_Y) {
+        const currentExpandedY = expandedYRef.current;
+        const currentHiddenY = hiddenYRef.current;
+        if (newY < currentExpandedY) {
           // Rubber band at top
-          const overflow = EXPANDED_Y - newY;
-          newY = EXPANDED_Y - overflow * 0.3; // Resistance factor
-        } else if (newY > HIDDEN_Y) {
+          const overflow = currentExpandedY - newY;
+          newY = currentExpandedY - overflow * 0.3; // Resistance factor
+        } else if (newY > currentHiddenY) {
           // Rubber band at bottom
-          const overflow = newY - HIDDEN_Y;
-          newY = HIDDEN_Y + overflow * 0.3; // Resistance factor
+          const overflow = newY - currentHiddenY;
+          newY = currentHiddenY + overflow * 0.3; // Resistance factor
         }
         
         currentPosition.current = newY;
@@ -128,35 +188,40 @@ export default function DraggablePubCard({
         const dragDistance = gestureState.dy;
         const finalPosition = currentPosition.current;
         
-        let targetY = COLLAPSED_Y;
+        // Use refs to ensure we always have current snap positions
+        const currentCollapsedY = collapsedYRef.current;
+        const currentExpandedY = expandedYRef.current;
+        const currentHiddenY = hiddenYRef.current;
+        
+        let targetY = currentCollapsedY;
         let willBeExpanded = false;
         
         // High velocity swipe - use velocity to determine direction
         if (Math.abs(velocity) > 0.7) {
           if (velocity < 0) {
-            targetY = EXPANDED_Y;
+            targetY = currentExpandedY;
             willBeExpanded = true;
           } else {
-            if (dragStartY.current < COLLAPSED_Y * 0.5) {
-              targetY = COLLAPSED_Y;
+            if (dragStartY.current < currentCollapsedY * 0.5) {
+              targetY = currentCollapsedY;
             } else {
-              targetY = HIDDEN_Y;
+              targetY = currentHiddenY;
             }
           }
         } else {
           // Slow drag - snap to nearest position
-          const distToExpanded = Math.abs(finalPosition - EXPANDED_Y);
-          const distToCollapsed = Math.abs(finalPosition - COLLAPSED_Y);
-          const distToHidden = Math.abs(finalPosition - HIDDEN_Y);
+          const distToExpanded = Math.abs(finalPosition - currentExpandedY);
+          const distToCollapsed = Math.abs(finalPosition - currentCollapsedY);
+          const distToHidden = Math.abs(finalPosition - currentHiddenY);
           const minDist = Math.min(distToExpanded, distToCollapsed, distToHidden);
           
           if (minDist === distToHidden && dragDistance > cardHeight * 0.3) {
-            targetY = HIDDEN_Y;
+            targetY = currentHiddenY;
           } else if (minDist === distToExpanded) {
-            targetY = EXPANDED_Y;
+            targetY = currentExpandedY;
             willBeExpanded = true;
           } else {
-            targetY = COLLAPSED_Y;
+            targetY = currentCollapsedY;
           }
         }
         
@@ -170,15 +235,25 @@ export default function DraggablePubCard({
         }
         
         // Smoother, faster animation
+        // When snapping to COLLAPSED_Y, don't use velocity to ensure exact positioning
+        const useVelocity = targetY !== currentCollapsedY;
         Animated.spring(translateY, {
           toValue: targetY,
-          velocity: velocity,
+          velocity: useVelocity ? velocity : 0,
           tension: 85,
           friction: 10,
           useNativeDriver: true,
         }).start(({ finished }) => {
-          if (finished && targetY === HIDDEN_Y) {
+          if (finished) {
+            // Ensure exact position after animation completes
+            if (targetY === currentCollapsedY) {
+              translateY.setValue(currentCollapsedY);
+              dragStartY.current = currentCollapsedY;
+              currentPosition.current = currentCollapsedY;
+            }
+            if (targetY === currentHiddenY) {
             onClose();
+            }
           }
         });
       },
@@ -186,12 +261,22 @@ export default function DraggablePubCard({
       onPanResponderTerminationRequest: () => false,
       
       onPanResponderTerminate: () => {
+        const snapBackY = dragStartY.current;
+        const currentCollapsedY = collapsedYRef.current;
         Animated.spring(translateY, {
-          toValue: dragStartY.current,
+          toValue: snapBackY,
+          velocity: snapBackY === currentCollapsedY ? 0 : undefined, // No velocity for COLLAPSED_Y
           tension: 85,
           friction: 10,
           useNativeDriver: true,
-        }).start();
+        }).start(({ finished }) => {
+          if (finished && snapBackY === currentCollapsedY) {
+            // Ensure exact position after animation completes
+            translateY.setValue(currentCollapsedY);
+            dragStartY.current = currentCollapsedY;
+            currentPosition.current = currentCollapsedY;
+          }
+        });
       },
     })
   ).current;
@@ -205,13 +290,24 @@ export default function DraggablePubCard({
       scrollY.current = 0;
       setScrollEnabled(false);
       
+      // Reset button interaction flag when card opens to ensure first touch works
+      buttonInteractionRef.current = false;
       translateY.stopAnimation();
+      
       Animated.spring(translateY, {
         toValue: COLLAPSED_Y,
+        velocity: 0, // No velocity to ensure exact positioning
         tension: 120,
         friction: 10,
         useNativeDriver: true,
-      }).start();
+      }).start(({ finished }) => {
+        if (finished) {
+          // Ensure exact position after animation completes
+          translateY.setValue(COLLAPSED_Y);
+          dragStartY.current = COLLAPSED_Y;
+          currentPosition.current = COLLAPSED_Y;
+        }
+      });
     } else {
       Animated.spring(translateY, {
         toValue: HIDDEN_Y,
@@ -350,11 +446,71 @@ export default function DraggablePubCard({
       </View>
 
       {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
+      {/* Split into two parts to exclude the visited button area */}
       {!isExpanded && (
-        <View 
-          style={styles.draggableOverlay} 
-          pointerEvents="box-only" 
+        <>
+          <View 
+            style={styles.draggableOverlayTop} 
+            pointerEvents="box-only" 
+          />
+          <View 
+            style={styles.draggableOverlayBottom} 
+            pointerEvents="box-only" 
+          />
+        </>
+      )}
+
+      {/* Visited button overlay when collapsed - positioned to match the button in ScrollView */}
+      {!isExpanded && (
+        <View
+          style={styles.visitedButtonWrapper}
+          collapsable={false}
+          pointerEvents="box-none"
+          onStartShouldSetResponderCapture={(evt) => {
+            // Mark button interaction if touch is in button area - prevents PanResponder interference
+            if (isTouchInButtonArea(evt.nativeEvent.locationY)) {
+              buttonInteractionRef.current = true;
+            }
+            return false; // Let Pressable handle it
+          }}
+        >
+          <Pressable
+            style={({ pressed }) => [
+              styles.visitedButtonOverlay,
+              pub.isVisited && styles.visitedButtonOverlayActive,
+              pressed && { opacity: 0.7 }
+        ]}
+            onPress={() => {
+              // Immediate response - call handler directly
+              onToggleVisited(pub.id);
+              // Reset interaction flag after a short delay
+              setTimeout(() => {
+                buttonInteractionRef.current = false;
+              }, 200);
+            }}
+            onPressIn={() => {
+              // Mark interaction started IMMEDIATELY on press start - BEFORE PanResponder can interfere
+              buttonInteractionRef.current = true;
+            }}
+            delayPressIn={0}
+            delayPressOut={0}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            pointerEvents="box-only"
+      >
+        <MaterialCommunityIcons
+          name={pub.isVisited ? 'check-circle' : 'checkbox-blank-circle-outline'}
+          size={24}
+            color={pub.isVisited ? '#FFFFFF' : '#2C2C2C'}
         />
+        <Text style={[
+            styles.visitedButtonOverlayText,
+            pub.isVisited && styles.visitedButtonOverlayTextActive
+        ]}>
+          {pub.isVisited ? 'Visited' : 'Mark as Visited'}
+        </Text>
+          </Pressable>
+        </View>
       )}
 
       {/* Card content */}
@@ -471,13 +627,63 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  draggableOverlay: {
+  draggableOverlayTop: {
     position: 'absolute',
     top: 40, // Below handle
     left: 0,
     right: 0,
-    bottom: 50, // Above visited button area
+    height: 60, // Covers area above visited button (pub name + area row)
     zIndex: 5,
     backgroundColor: 'transparent',
+  },
+  draggableOverlayBottom: {
+    position: 'absolute',
+    // Button starts at 88px, has paddingVertical 12px top + ~24px content + 12px bottom = ~48px height
+    // Button ends at ~88 + 48 = 136px, so overlay starts just after
+    top: 151,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+    backgroundColor: 'transparent',
+  },
+  visitedButtonWrapper: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20, // Higher than everything to ensure button receives touches first
+  },
+  visitedButtonOverlay: {
+    position: 'absolute',
+    // Recalculation: paddingTop(12) + handleContainer(8+4+8+4=24) + pubName(actual ~30-32px with line height + 4px margin) + areaRow(12px)
+    // More accurate: 12 + 24 + 34 + 12 = 82px, but accounting for text baseline/rendering, using 88px
+    top: 103,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#2C2C2C',
+    zIndex: 15, // Higher than draggableOverlay to ensure it receives touches
+  },
+  visitedButtonOverlayActive: {
+    backgroundColor: '#2C2C2C',
+    borderColor: '#2C2C2C',
+  },
+  visitedButtonOverlayText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2C2C2C',
+    marginLeft: 8,
+  },
+  visitedButtonOverlayTextActive: {
+    color: '#FFFFFF',
   },
 });

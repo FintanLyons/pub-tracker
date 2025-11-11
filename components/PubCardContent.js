@@ -61,7 +61,16 @@ export default function PubCardContent({
           styles.visitedButton,
           pub.isVisited && styles.visitedButtonActive
         ]}
-        onPress={() => onToggleVisited(pub.id)}
+        onPress={() => {
+          // Immediate response - call handler directly
+          onToggleVisited(pub.id);
+        }}
+        delayPressIn={0}
+        delayPressOut={0}
+        delayLongPress={500}
+        activeOpacity={0.7}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
         pointerEvents="auto"
       >
         <MaterialCommunityIcons

@@ -26,11 +26,14 @@ Usage:
 """
 
 import os
+import re
 import sys
-from dotenv import load_dotenv
-from supabase import create_client, Client
-from google import genai
 import time
+from typing import Optional
+
+from dotenv import load_dotenv
+from google import genai
+from supabase import Client, create_client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,6 +50,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
 
 # Validate that all required environment variables are set
 missing_keys = []
@@ -71,6 +75,69 @@ if missing_keys:
 # Initialize clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+
+def extract_borough_from_text(text: Optional[str]) -> Optional[str]:
+    if not text:
+        return None
+
+    borough = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.upper().startswith('BOROUGH'):
+            _, _, value = line.partition(':')
+            borough = value.strip() or None
+            break
+    if borough is None:
+        match = re.search(r'BOROUGH\s*[:\-]\s*([A-Za-z\s\'&-]+)', text, re.IGNORECASE)
+        if match:
+            borough = match.group(1).strip()
+
+    if not borough:
+        return None
+
+    lower = borough.lower()
+    if lower in {'unknown', 'not known', 'n/a', 'none'}:
+        return None
+
+    # Normalise spacing/capitalisation (title case keeps internal apostrophes)
+    return ' '.join(word.capitalize() if word else '' for word in borough.split())
+
+
+def get_pub_borough(pub_name: str, area: Optional[str], address: Optional[str] = "") -> Optional[str]:
+    """
+    Ask Gemini to identify the London borough for a given pub/area.
+    Returns None when the borough cannot be determined confidently.
+    """
+    context = f"Pub name: {pub_name}"
+    if area:
+        context += f"\nNeighbourhood: {area}"
+    if address:
+        context += f"\nAddress: {address}"
+
+    prompt = f"""You are a London geography expert. Based on the information below,
+identify the official London borough (one of the 32 London boroughs or the City of London)
+that the pub belongs to. If the location is outside Greater London or cannot be determined,
+answer Unknown.
+
+Pub information:
+{context}
+
+Respond exactly in the format:
+BOROUGH: <borough name or Unknown>"""
+
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return extract_borough_from_text(response.text)
+    except Exception as exc:
+        print(f"   ❌ AI Error determining borough: {exc}")
+        return None
+
 
 def get_pub_features(pub_name: str, area: str, description: str = "", history: str = "") -> dict:
     """
@@ -180,7 +247,8 @@ def get_pub_enrichment(pub_name: str, area: str, address: str = "") -> tuple:
     prompt = f"""You are a pub historian filling out a database. Do not add any fluff, just the data. If you are unsure say Not Known. For the following pub in London, provide:
 1. The founding year (or approximate founding year if exact date unknown). Format as 4-digit year (e.g., "1860" or "circa 1820" if approximate).
 2. A 100 to 200 word summary of the pub's history, interesting features, architectural details, notable events, or local significance. As few words as possible.
-3. The ownership/operator of the pub. Be as accurate as possible. Common ownership chains include: Greene King, Stonegate, Wetherspoon, Mitchells & Butlers, Fuller's, Young's, Shepherd Neame, or smaller chains. If it's independently owned, say "Independent". If you cannot determine the ownership, say "Independent". Do not say Stonegate Company, for example (apply to all companies), just say Stonegate unless the company in question lists company explicitly in their name..
+3. The ownership/operator of the pub. Be as accurate as possible. Common ownership chains include: Greene King, Stonegate, Wetherspoon, Mitchells & Butlers, Fuller's, Young's, Shepherd Neame, or smaller chains. If it's independently owned, say "Independent". If you cannot determine the ownership, say "Independent". Do not say Stonegate Company, for example (apply to all companies), just say Stonegate unless the company in question lists company explicitly in their name.
+4. The official London borough (one of the 32 boroughs or the City of London) that contains the pub. If you cannot determine this, answer Unknown.
 
 Pub information:
 {context}
@@ -189,6 +257,7 @@ Please format your response as:
 FOUNDED: [year]
 HISTORY: [100-200 word summary]
 OWNERSHIP: [ownership name]
+BOROUGH: [borough name]
 
 Be accurate and factual. If you cannot find specific information, use reasonable estimates based on the area's history."""
 
@@ -208,6 +277,7 @@ Be accurate and factual. If you cannot find specific information, use reasonable
         founded = None
         history = None
         ownership = None
+        borough = None
         lines = content.split('\n')
         for line in lines:
             if line.startswith('FOUNDED:'):
@@ -221,6 +291,8 @@ Be accurate and factual. If you cannot find specific information, use reasonable
                 history = line.replace('HISTORY:', '').strip()
             elif line.startswith('OWNERSHIP:'):
                 ownership = line.replace('OWNERSHIP:', '').strip()
+            elif line.startswith('BOROUGH:'):
+                borough = line.replace('BOROUGH:', '').strip()
             elif history is None and ':' not in line and line.strip():
                 # If we haven't found history yet, this might be it
                 if not founded:
@@ -252,11 +324,13 @@ Be accurate and factual. If you cannot find specific information, use reasonable
         if not ownership or ownership.lower() in ['not known', 'unknown', 'n/a']:
             ownership = 'Independent'
         
-        return founded, history, ownership
+        borough = borough or extract_borough_from_text(content)
+
+        return founded, history, ownership, borough
         
     except Exception as e:
         print(f"   ❌ AI Error: {e}")
-        return None, None, None
+        return None, None, None, None
 
 def enrich_pub_features_only(pub_id: str, pub_name: str, area: str, description: str = "", history: str = "") -> bool:
     """
@@ -296,9 +370,9 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", descrip
     """
     print(f"🔍 Enriching: {pub_name} ({area})")
     
-    founded, history, ownership = get_pub_enrichment(pub_name, area, address)
+    founded, history, ownership, borough = get_pub_enrichment(pub_name, area, address)
     
-    if not founded and not history and not ownership:
+    if not founded and not history and not ownership and not borough:
         print(f"   ⚠️  Failed to get enrichment data")
         return False
     
@@ -328,6 +402,11 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", descrip
             print(f"   ✨ Features found: {', '.join(detected)}")
         else:
             print(f"   ℹ️  No features detected")
+    
+    # Add borough metadata (AI-derived)
+    if borough:
+        update_data['borough'] = borough
+        print(f"   🗺️ Borough: {borough}")
     
     # Update Supabase
     try:
@@ -368,10 +447,15 @@ def main():
     print("🍺 Pub Data Enrichment Script\n")
     
     # Check command line arguments
-    only_missing = '--all' not in sys.argv
-    features_only = '--features-only' in sys.argv
+    borough_only = '--borough-only' in sys.argv
+    features_only = '--features-only' in sys.argv and not borough_only
+    enrich_all = '--all' in sys.argv
+    only_missing = not borough_only and not enrich_all
     
-    if features_only:
+    if borough_only:
+        print("📋 Fetching pubs for borough updates...")
+        pubs = supabase.table('pubs').select('id,name,area,address,borough').execute().data
+    elif features_only:
         print("📋 Fetching all pubs for feature detection...")
         # Get all pubs for feature detection
         pubs = supabase.table('pubs').select('id,name,area,address,description,history').execute().data
@@ -394,7 +478,36 @@ def main():
     for i, pub in enumerate(pubs, 1):
         print(f"\n[{i}/{len(pubs)}]")
         
-        if features_only:
+        if borough_only:
+            borough = get_pub_borough(
+                pub.get('name', 'Unknown pub'),
+                pub.get('area'),
+                pub.get('address', ''),
+            )
+            if not borough:
+                print("   ⚠️  Could not determine borough")
+                success = False
+            elif borough == pub.get('borough'):
+                print("   ℹ️  Borough already up to date")
+                success = True
+            else:
+                try:
+                    response = (
+                        supabase.table('pubs')
+                        .update({'borough': borough})
+                        .eq('id', pub['id'])
+                        .execute()
+                    )
+                    if response.data:
+                        print(f"   ✅ Borough set to {borough}")
+                        success = True
+                    else:
+                        print("   ❌ Update failed")
+                        success = False
+                except Exception as exc:
+                    print(f"   ❌ Supabase Error: {exc}")
+                    success = False
+        elif features_only:
             # Only detect and update features
             success = enrich_pub_features_only(
                 pub['id'],
@@ -419,12 +532,13 @@ def main():
         else:
             failed += 1
         
-        # Rate limiting - wait between requests
-        if i < len(pubs):
+        # Rate limiting - wait between requests when using AI enrichment
+        if i < len(pubs) and not borough_only:
             time.sleep(0.5)  # Wait 0.5 seconds between pubs (increased for feature detection)
     
+    summary_label = "Updated" if borough_only else "Enriched"
     print(f"\n📊 Summary:")
-    print(f"   ✅ Enriched: {enriched}")
+    print(f"   ✅ {summary_label}: {enriched}")
     print(f"   ❌ Failed: {failed}")
     print(f"   📝 Total: {len(pubs)}")
 

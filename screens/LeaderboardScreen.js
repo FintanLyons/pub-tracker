@@ -4,9 +4,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCurrentUserSecure, syncUserStats } from '../services/SecureAuthService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
-import { getUserLeagues, getLeagueLeaderboard } from '../services/LeagueService';
+import { getUserLeagues, getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
 import AddFriendModal from '../components/AddFriendModal';
 import CreateLeagueModal from '../components/CreateLeagueModal';
+import JoinLeagueModal from '../components/JoinLeagueModal';
+import LeagueActionsModal from '../components/LeagueActionsModal';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -28,6 +30,9 @@ export default function LeaderboardScreen() {
   const [showLeagueSelector, setShowLeagueSelector] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [openAddFriendOnRequests, setOpenAddFriendOnRequests] = useState(false);
+  const [showLeagueActionsModal, setShowLeagueActionsModal] = useState(false);
+  const [showJoinLeagueModal, setShowJoinLeagueModal] = useState(false);
+  const [leavingLeague, setLeavingLeague] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -60,6 +65,9 @@ export default function LeaderboardScreen() {
         setSelectedLeague(firstLeague);
         const leagueBoard = await getLeagueLeaderboard(firstLeague.id);
         setLeagueLeaderboard(leagueBoard);
+      } else {
+        setSelectedLeague(null);
+        setLeagueLeaderboard([]);
       }
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
@@ -96,10 +104,49 @@ export default function LeaderboardScreen() {
     }
   };
 
+  const handleLeaveLeague = () => {
+    if (!selectedLeague || !currentUser || leavingLeague) {
+      return;
+    }
+
+    const leagueName = selectedLeague.name;
+
+    Alert.alert(
+      'Leave League',
+      `Are you sure you want to leave ${leagueName}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLeavingLeague(true);
+              setLoading(true);
+              await removeLeagueMember(selectedLeague.id, currentUser.id);
+              await loadData();
+              Alert.alert('League Left', `You have left ${leagueName}.`);
+            } catch (error) {
+              console.error('Error leaving league:', error);
+              Alert.alert(
+                'Error',
+                'Failed to leave league. Please try again.'
+              );
+            } finally {
+              setLeavingLeague(false);
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderCurrentUserCard = (user) => {
     if (!user) return null;
     
     const rankColor = user.rank === 1 ? '#FFD700' : user.rank === 2 ? '#C0C0C0' : user.rank === 3 ? '#CD7F32' : ACCENT_GREY;
+    const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
       <>
@@ -114,6 +161,9 @@ export default function LeaderboardScreen() {
             <View style={styles.userInfo}>
               <Text style={[styles.username, styles.currentUserText]}>
                 {user.username}
+                {showAdminLabel && (
+                  <Text style={styles.adminLabel}> - Admin</Text>
+                )}
               </Text>
               <View style={styles.statsRow}>
                 <Text style={styles.statText}>
@@ -140,6 +190,7 @@ export default function LeaderboardScreen() {
   const renderLeaderboardRow = (user, index) => {
     const isCurrentUser = user.id === currentUser?.id;
     const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : ACCENT_GREY;
+    const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
       <View
@@ -155,6 +206,9 @@ export default function LeaderboardScreen() {
           <Text style={[styles.username, isCurrentUser && styles.currentUserText]}>
             {user.username}
             {isCurrentUser && ' (You)'}
+            {showAdminLabel && (
+              <Text style={styles.adminLabel}> - Admin</Text>
+            )}
           </Text>
           <View style={styles.statsRow}>
             <Text style={styles.statText}>
@@ -282,9 +336,14 @@ export default function LeaderboardScreen() {
         <View style={styles.tabContent}>
           <View style={styles.sectionHeader}>
             <View style={styles.leagueTitleContainer}>
-              <Text style={styles.sectionTitle}>
-                {selectedLeague ? selectedLeague.name : 'No League Selected'}
-              </Text>
+              <View style={styles.leagueNameRow}>
+                <Text style={styles.sectionTitle}>
+                  {selectedLeague ? selectedLeague.name : 'No League Selected'}
+                </Text>
+                {selectedLeague?.code && (
+                  <Text style={styles.leagueCodeText}>{selectedLeague.code}</Text>
+                )}
+              </View>
               {leagues.length > 1 && (
                 <TouchableOpacity
                   style={styles.switchLeagueButton}
@@ -294,12 +353,26 @@ export default function LeaderboardScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => setShowCreateLeagueModal(true)}
-            >
-              <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
+            <View style={styles.leagueActions}>
+              {selectedLeague && (
+                <TouchableOpacity
+                  style={[
+                    styles.leaveLeagueButton,
+                    (leavingLeague || loading) && styles.leaveLeagueButtonDisabled,
+                  ]}
+                  onPress={handleLeaveLeague}
+                  disabled={leavingLeague || loading}
+                >
+                  <Text style={styles.leaveLeagueButtonText}>-</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => setShowLeagueActionsModal(true)}
+              >
+                <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* League Selector */}
@@ -314,14 +387,19 @@ export default function LeaderboardScreen() {
                   ]}
                   onPress={() => handleLeagueSelect(league)}
                 >
-                  <Text
-                    style={[
-                      styles.leagueOptionText,
-                      selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
-                    ]}
-                  >
-                    {league.name}
-                  </Text>
+                  <View style={styles.leagueOptionContent}>
+                    <Text
+                      style={[
+                        styles.leagueOptionText,
+                        selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
+                      ]}
+                    >
+                      {league.name}
+                    </Text>
+                    {league.code && (
+                      <Text style={styles.leagueOptionCode}>{league.code}</Text>
+                    )}
+                  </View>
                   {selectedLeague?.id === league.id && (
                     <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
                   )}
@@ -365,6 +443,24 @@ export default function LeaderboardScreen() {
         onClose={() => setShowCreateLeagueModal(false)}
         currentUserId={currentUser?.id}
         onLeagueCreated={loadData}
+      />
+      <JoinLeagueModal
+        visible={showJoinLeagueModal}
+        onClose={() => setShowJoinLeagueModal(false)}
+        currentUserId={currentUser?.id}
+        onJoined={loadData}
+      />
+      <LeagueActionsModal
+        visible={showLeagueActionsModal}
+        onClose={() => setShowLeagueActionsModal(false)}
+        onSelectCreate={() => {
+          setShowLeagueActionsModal(false);
+          setTimeout(() => setShowCreateLeagueModal(true), 150);
+        }}
+        onSelectJoin={() => {
+          setShowLeagueActionsModal(false);
+          setTimeout(() => setShowJoinLeagueModal(true), 150);
+        }}
       />
     </ScrollView>
   );
@@ -471,6 +567,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  leagueNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  leagueActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  leagueCodeText: {
+    fontSize: 16,
+    color: MEDIUM_GREY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  leaveLeagueButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: MEDIUM_GREY,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  leaveLeagueButtonText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#D32F2F',
+    lineHeight: 24,
+  },
+  leaveLeagueButtonDisabled: {
+    opacity: 0.6,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -499,6 +631,12 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 16,
   },
+  leagueOptionContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   leagueOption: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -513,6 +651,12 @@ const styles = StyleSheet.create({
   leagueOptionText: {
     fontSize: 16,
     color: DARK_GREY,
+  },
+  leagueOptionCode: {
+    fontSize: 14,
+    color: MEDIUM_GREY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   selectedLeagueOptionText: {
     fontWeight: '600',
@@ -581,6 +725,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: DARK_GREY,
     marginBottom: 4,
+  },
+  adminLabel: {
+    fontSize: 14,
+    color: MEDIUM_GREY,
+    letterSpacing: 0.5,
   },
   currentUserText: {
     color: AMBER,

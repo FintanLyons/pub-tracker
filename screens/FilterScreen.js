@@ -124,7 +124,7 @@ export default function FilterScreen({
             <View style={styles.quickFiltersGrid}>
               <TouchableOpacity
                 style={[
-                  styles.featureBox,
+                  styles.quickFilterBox,
                   localShowOnlyFavorites && styles.featureBoxSelected
                 ]}
                 onPress={() => setLocalShowOnlyFavorites(!localShowOnlyFavorites)}
@@ -133,13 +133,14 @@ export default function FilterScreen({
                   styles.featureBoxText,
                   localShowOnlyFavorites && styles.featureBoxTextSelected
                 ]}>
-                  Favourite
+                  Favourites
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
-                  styles.featureBox,
+                  styles.quickFilterBox,
+                  styles.quickFilterRightColumn,
                   localShowOnlyAchievements && styles.featureBoxSelected
                 ]}
                 onPress={() => setLocalShowOnlyAchievements(!localShowOnlyAchievements)}
@@ -155,14 +156,15 @@ export default function FilterScreen({
 
             <Text style={styles.sectionTitle}>Features</Text>
             <View style={styles.featuresGrid}>
-              {ALL_FEATURES_WITH_ICONS.map((feature) => {
+              {ALL_FEATURES_WITH_ICONS.map((feature, index) => {
                 const isSelected = localSelectedFeatures.has(feature.name);
                 return (
                   <TouchableOpacity
                     key={feature.name}
                     style={[
                       styles.featureBox,
-                      isSelected && styles.featureBoxSelected
+                      isSelected && styles.featureBoxSelected,
+                      index % 2 === 1 && styles.featureBoxRightColumn
                     ]}
                     onPress={() => toggleFeature(feature.name)}
                   >
@@ -208,7 +210,7 @@ export default function FilterScreen({
               </View>
             </ScrollView>
 
-            <Text style={styles.sectionTitle}>Founded Year</Text>
+            <Text style={[styles.sectionTitle, styles.sectionTitleTight]}>Founded Year</Text>
             <RangeSlider
               min={minYear || 1800}
               max={maxYear || 2025}
@@ -277,8 +279,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: 12,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     paddingTop: 16,
+  },
+  quickFilterBox: {
+    width: '48%',
+    backgroundColor: LIGHT_GREY,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginRight: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  quickFilterRightColumn: {
+    marginRight: 0,
   },
   sectionTitle: {
     fontSize: 18,
@@ -288,11 +306,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 12,
   },
+  sectionTitleTight: {
+    marginBottom: -8,
+  },
   featuresGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: 12,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   featureBox: {
     width: '48%',
@@ -303,15 +324,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    marginRight: 8,
     paddingVertical: 10,
     paddingHorizontal: 8,
+  },
+  featureBoxRightColumn: {
+    marginRight: 0,
   },
   featureBoxSelected: {
     backgroundColor: '#FFF8E7',
     borderColor: AMBER,
   },
   featureBoxText: {
-    fontSize: 11,
+    fontSize: 13,
     color: DARK_CHARCOAL,
     textAlign: 'center',
     fontWeight: '500',
@@ -330,7 +355,7 @@ const styles = StyleSheet.create({
   ownershipGrid: {
     flexDirection: 'column', // Column direction to stack vertically
     flexWrap: 'wrap', // Wrap to create multiple columns
-    height: 192, // 4 rows * ~48px per row (padding + text + border + margin)
+    height: 200, // Increased height to accommodate four rows with larger text
   },
   ownershipBox: {
     width: 165, // Same as features boxes for consistency
@@ -350,7 +375,7 @@ const styles = StyleSheet.create({
     borderColor: AMBER,
   },
   ownershipBoxText: {
-    fontSize: 11,
+    fontSize: 13,
     color: DARK_CHARCOAL,
     textAlign: 'center',
     fontWeight: '500',

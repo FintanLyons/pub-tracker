@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -7,6 +7,11 @@ import { fetchLondonPubs } from '../services/PubService';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import PintGlassIcon from '../components/PintGlassIcon';
+import {
+  cacheProfileStats,
+  getCachedProfileStats,
+  preloadProfileStats,
+} from '../services/ProfileStatsCache';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -20,24 +25,58 @@ const SORT_MODES = {
   PERCENTAGE: 'percentage',
 };
 
+const VIEW_MODES = {
+  AREA: 'area',
+  BOROUGH: 'borough',
+};
+
 export default function ProfileScreen() {
   const navigation = useNavigation();
   const { logout } = useAuth();
-  const [pubs, setPubs] = useState([]);
-  const [visitedCount, setVisitedCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const [areaStats, setAreaStats] = useState([]);
-  const [currentLocation, setCurrentLocation] = useState(null);
+  const initialCachedStats = getCachedProfileStats();
+  const [pubs, setPubs] = useState(initialCachedStats?.pubs || []);
+  const [visitedCount, setVisitedCount] = useState(
+    initialCachedStats?.visitedCount || 0
+  );
+  const [totalCount, setTotalCount] = useState(
+    initialCachedStats?.totalCount || 0
+  );
+  const [areaStatsRaw, setAreaStatsRaw] = useState(
+    initialCachedStats?.areaStats || []
+  );
+  const [boroughStatsRaw, setBoroughStatsRaw] = useState(
+    initialCachedStats?.boroughStats || []
+  );
+  const [currentLocation, setCurrentLocation] = useState(
+    initialCachedStats?.location || null
+  );
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
+  const [viewMode, setViewMode] = useState(VIEW_MODES.AREA);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
+  const distanceCacheRef = useRef({
+    areas: initialCachedStats?.areaDistanceMap
+      ? { ...initialCachedStats.areaDistanceMap }
+      : {},
+    boroughs: initialCachedStats?.boroughDistanceMap
+      ? { ...initialCachedStats.boroughDistanceMap }
+      : {},
+  });
+  const hasCalculatedDistances = useRef(!!initialCachedStats?.location);
 
-  const handleAreaPress = (areaName) => {
+  const handleAreaPress = useCallback((areaName) => {
     // Navigate to Map tab and pass the area name as a parameter
     navigation.navigate('Map', { areaToSearch: areaName });
-  };
+  }, [navigation]);
+
+  const handleBoroughPress = useCallback((boroughName) => {
+    if (!boroughName || boroughName === 'Unknown') {
+      return;
+    }
+    navigation.navigate('Map', { boroughToSearch: boroughName });
+  }, [navigation]);
 
   // Calculate distance between two coordinates using Haversine formula (in km)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -69,10 +108,41 @@ export default function ProfileScreen() {
         longitude: location.coords.longitude,
       };
     } catch (error) {
-      console.error('Error getting location:', error);
+      console.warn('Location unavailable, continuing without distance sorting:', error?.message || error);
       return null;
     }
   }, []);
+
+  const applyProfileStats = useCallback(
+    (stats) => {
+      if (!stats) {
+        return;
+      }
+
+      setPubs(stats.pubs || []);
+      setVisitedCount(stats.visitedCount || 0);
+      setTotalCount(stats.totalCount || 0);
+      setAreaStatsRaw(
+        Array.isArray(stats.areaStats) ? stats.areaStats : []
+      );
+      setBoroughStatsRaw(
+        Array.isArray(stats.boroughStats) ? stats.boroughStats : []
+      );
+
+      if (stats.location) {
+        setCurrentLocation(stats.location);
+        hasCalculatedDistances.current = true;
+      }
+
+      distanceCacheRef.current = {
+        areas: stats.areaDistanceMap ? { ...stats.areaDistanceMap } : {},
+        boroughs: stats.boroughDistanceMap
+          ? { ...stats.boroughDistanceMap }
+          : {},
+      };
+    },
+    [distanceCacheRef, hasCalculatedDistances]
+  );
 
   const loadStats = useCallback(async () => {
     // Load current user
@@ -85,10 +155,10 @@ export default function ProfileScreen() {
     const visited = allPubs.filter(p => p.isVisited);
     setVisitedCount(visited.length);
 
-    // Get current location if we don't have it and location sorting is needed
-    // Make sure location is fetched BEFORE calculating area breakdown when sorting by location
+    // Get current location once (on first load) for distance calculations
     let userLocation = currentLocation;
-    if (!userLocation && sortMode === SORT_MODES.LOCATION) {
+    const shouldCalculateDistances = !hasCalculatedDistances.current;
+    if (shouldCalculateDistances && !userLocation) {
       userLocation = await getCurrentLocation();
       if (userLocation) {
         setCurrentLocation(userLocation);
@@ -97,107 +167,294 @@ export default function ProfileScreen() {
 
     // Calculate area breakdown
     const areaMap = {};
-    const areaRepresentativePub = {}; // Store one pub per area for distance calculation
+    const boroughMap = {};
     
     allPubs.forEach(pub => {
-      const area = pub.area || 'Unknown';
-      if (!areaMap[area]) {
-        areaMap[area] = { total: 0, visited: 0 };
-        // Store the first pub with valid coordinates as representative for this area
-        if (pub.lat && pub.lon) {
-          areaRepresentativePub[area] = {
-            lat: parseFloat(pub.lat),
-            lon: parseFloat(pub.lon),
-          };
-        }
-      }
-      areaMap[area].total++;
-      if (pub.isVisited) {
-        areaMap[area].visited++;
-      }
-      // If we don't have a representative pub yet for this area, use this one if it has coordinates
-      if (!areaRepresentativePub[area] && pub.lat && pub.lon) {
-        areaRepresentativePub[area] = {
-          lat: parseFloat(pub.lat),
-          lon: parseFloat(pub.lon),
+      const areaName =
+        typeof pub.area === 'string' && pub.area.trim().length > 0
+          ? pub.area.trim()
+          : 'Unknown';
+      const boroughName =
+        typeof pub.borough === 'string' && pub.borough.trim().length > 0
+          ? pub.borough.trim()
+          : 'Unknown';
+
+      if (!areaMap[areaName]) {
+        areaMap[areaName] = {
+          total: 0,
+          visited: 0,
+          borough: boroughName !== 'Unknown' ? boroughName : null,
+          sumLat: 0,
+          sumLon: 0,
+          coordCount: 0,
         };
+      }
+
+      areaMap[areaName].total++;
+      if (pub.isVisited) {
+        areaMap[areaName].visited++;
+      }
+      if (!areaMap[areaName].borough && boroughName !== 'Unknown') {
+        areaMap[areaName].borough = boroughName;
+      }
+
+      const lat = Number.parseFloat(pub.lat);
+      const lon = Number.parseFloat(pub.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        areaMap[areaName].sumLat += lat;
+        areaMap[areaName].sumLon += lon;
+        areaMap[areaName].coordCount += 1;
+      }
+
+      if (!boroughMap[boroughName]) {
+        boroughMap[boroughName] = {
+          total: 0,
+          visited: 0,
+          sumLat: 0,
+          sumLon: 0,
+          coordCount: 0,
+          areas: new Set(),
+        };
+      }
+
+      boroughMap[boroughName].total += 1;
+      if (pub.isVisited) {
+        boroughMap[boroughName].visited += 1;
+      }
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        boroughMap[boroughName].sumLat += lat;
+        boroughMap[boroughName].sumLon += lon;
+        boroughMap[boroughName].coordCount += 1;
+      }
+      if (areaName !== 'Unknown') {
+        boroughMap[boroughName].areas.add(areaName);
       }
     });
 
+    // Ensure distance caches exist
+    if (!distanceCacheRef.current.areas) {
+      distanceCacheRef.current.areas = {};
+    }
+    if (!distanceCacheRef.current.boroughs) {
+      distanceCacheRef.current.boroughs = {};
+    }
+
     // Create stats with distance if location is available
-    let stats = Object.entries(areaMap)
+    const areaDistanceCache = distanceCacheRef.current.areas;
+    const stats = Object.entries(areaMap)
       .map(([area, counts]) => {
-        const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
+        const { total, visited, borough, sumLat, sumLon, coordCount } = counts;
+        const percentage = total > 0 ? Math.round((visited / total) * 100) : 0;
         let distance = null;
-        
-        // Only calculate distance if we have both userLocation and a representative pub for this area
-        if (userLocation && areaRepresentativePub[area]) {
+
+        if (Object.prototype.hasOwnProperty.call(areaDistanceCache, area)) {
+          distance = areaDistanceCache[area];
+        } else if (userLocation && coordCount > 0) {
           try {
+            const centerLat = sumLat / coordCount;
+            const centerLon = sumLon / coordCount;
             distance = calculateDistance(
               userLocation.latitude,
               userLocation.longitude,
-              areaRepresentativePub[area].lat,
-              areaRepresentativePub[area].lon
+              centerLat,
+              centerLon
             );
           } catch (error) {
-            console.error(`Error calculating distance for area ${area}:`, error);
+            console.warn(`Error calculating distance for area ${area}:`, error?.message || error);
             distance = null;
           }
+          areaDistanceCache[area] = distance;
         }
 
         return {
           area,
-          ...counts,
+          total,
+          visited,
+          borough: borough || null,
           percentage,
           distance,
         };
       });
 
-    // Sort based on sort mode
-    switch (sortMode) {
-      case SORT_MODES.LOCATION:
-        stats = stats.sort((a, b) => {
-          // If both have distances, sort by distance
-          if (a.distance !== null && b.distance !== null) {
-            return a.distance - b.distance;
+    const areaStatsByName = stats.reduce((acc, stat) => {
+      acc[stat.area] = stat;
+      return acc;
+    }, {});
+
+    const boroughDistanceCache = distanceCacheRef.current.boroughs;
+    const boroughStats = Object.entries(boroughMap).map(
+      ([boroughName, boroughCounts]) => {
+        const percentage =
+          boroughCounts.total > 0
+            ? Math.round((boroughCounts.visited / boroughCounts.total) * 100)
+            : 0;
+
+        let distance = null;
+        if (Object.prototype.hasOwnProperty.call(boroughDistanceCache, boroughName)) {
+          distance = boroughDistanceCache[boroughName];
+        } else if (userLocation && boroughCounts.coordCount > 0) {
+          try {
+            const centerLat = boroughCounts.sumLat / boroughCounts.coordCount;
+            const centerLon = boroughCounts.sumLon / boroughCounts.coordCount;
+            distance = calculateDistance(
+              userLocation.latitude,
+              userLocation.longitude,
+              centerLat,
+              centerLon
+            );
+          } catch (error) {
+            console.warn(
+              `Error calculating distance for borough ${boroughName}:`,
+              error?.message || error
+            );
+            distance = null;
           }
-          // If only one has distance, prioritize it
-          if (a.distance !== null && b.distance === null) return -1;
-          if (a.distance === null && b.distance !== null) return 1;
-          // If neither has distance, sort alphabetically
-          return a.area.localeCompare(b.area);
-        });
-        break;
-      case SORT_MODES.ALPHABETICAL:
-        stats = stats.sort((a, b) => a.area.localeCompare(b.area));
-        break;
-      case SORT_MODES.MOST_VISITED:
-        stats = stats.sort((a, b) => b.visited - a.visited || b.total - a.total);
-        break;
-      case SORT_MODES.PERCENTAGE:
-        stats = stats.sort((a, b) => b.percentage - a.percentage || b.visited - a.visited);
-        break;
-      default:
-        break;
+          boroughDistanceCache[boroughName] = distance;
+        }
+
+        const areaNames = Array.from(boroughCounts.areas);
+        const totalAreas = areaNames.length;
+        const completedAreas = areaNames.filter((areaName) => {
+          const areaStat = areaStatsByName[areaName];
+          if (!areaStat) {
+            return false;
+          }
+          return areaStat.visited >= areaStat.total && areaStat.total > 0;
+        }).length;
+
+        return {
+          borough: boroughName,
+          total: boroughCounts.total,
+          visited: boroughCounts.visited,
+          percentage,
+          distance,
+          totalAreas,
+          completedAreas,
+        };
+      }
+    );
+
+    if (shouldCalculateDistances && userLocation) {
+      hasCalculatedDistances.current = true;
     }
 
-    setAreaStats(stats);
-  }, [currentLocation, sortMode, getCurrentLocation]);
+    setAreaStatsRaw(stats);
+    setBoroughStatsRaw(boroughStats);
+    cacheProfileStats({
+      pubs: allPubs,
+      totalCount: allPubs.length,
+      visitedCount: visited.length,
+      areaStats: stats,
+      boroughStats,
+      areaDistanceMap: { ...distanceCacheRef.current.areas },
+      boroughDistanceMap: { ...distanceCacheRef.current.boroughs },
+      location: userLocation || null,
+    });
+  }, [cacheProfileStats, currentLocation, distanceCacheRef, getCurrentLocation, hasCalculatedDistances]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    preloadProfileStats()
+      .then((stats) => {
+        if (isActive && stats) {
+          applyProfileStats(stats);
+        }
+      })
+      .catch((error) => {
+        console.warn(
+          'Unable to preload profile stats:',
+          error?.message || error
+        );
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [applyProfileStats]);
 
   useFocusEffect(
     useCallback(() => {
-      loadStats();
-    }, [loadStats])
+      const cached = getCachedProfileStats();
+      if (cached) {
+        applyProfileStats(cached);
+      }
+
+      loadStats().catch((error) => {
+        console.error('Error loading profile stats:', error);
+      });
+    }, [applyProfileStats, loadStats])
   );
 
-  // Reload stats when sort mode changes (but not on initial mount)
-  useEffect(() => {
-    // Skip initial mount - useFocusEffect handles that
-    if (totalCount > 0) {
-      loadStats();
+  const sortStats = useCallback(
+    (stats, type) => {
+      const sorted = [...stats];
+      switch (sortMode) {
+        case SORT_MODES.LOCATION:
+          sorted.sort((a, b) => {
+            const aHasDistance = a.distance !== null && a.distance !== undefined;
+            const bHasDistance = b.distance !== null && b.distance !== undefined;
+            if (aHasDistance && bHasDistance) {
+              return a.distance - b.distance;
+            }
+            if (aHasDistance && !bHasDistance) return -1;
+            if (!aHasDistance && bHasDistance) return 1;
+            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
+            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            return aName.localeCompare(bName);
+          });
+          break;
+        case SORT_MODES.ALPHABETICAL:
+          sorted.sort((a, b) => {
+            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
+            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            return aName.localeCompare(bName);
+          });
+          break;
+        case SORT_MODES.MOST_VISITED:
+          sorted.sort(
+            (a, b) =>
+              b.visited - a.visited ||
+              (b.total || 0) - (a.total || 0)
+          );
+          break;
+        case SORT_MODES.PERCENTAGE:
+          sorted.sort(
+            (a, b) =>
+              b.percentage - a.percentage ||
+              (b.visited || 0) - (a.visited || 0)
+          );
+          break;
+        default:
+          break;
+      }
+      return sorted;
+    },
+    [sortMode]
+  );
+
+  const areaStats = useMemo(() => {
+    return sortStats(areaStatsRaw, VIEW_MODES.AREA);
+  }, [areaStatsRaw, sortStats]);
+
+  const boroughStats = useMemo(() => {
+    return sortStats(boroughStatsRaw, VIEW_MODES.BOROUGH);
+  }, [boroughStatsRaw, sortStats]);
+
+  const hasPrevView = viewMode !== VIEW_MODES.AREA;
+  const hasNextView = viewMode !== VIEW_MODES.BOROUGH;
+
+  const handlePrevView = useCallback(() => {
+    if (viewMode === VIEW_MODES.BOROUGH) {
+      setViewMode(VIEW_MODES.AREA);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortMode]);
+  }, [viewMode]);
+
+  const handleNextView = useCallback(() => {
+    if (viewMode === VIEW_MODES.AREA) {
+      setViewMode(VIEW_MODES.BOROUGH);
+    }
+  }, [viewMode]);
 
   // Animate modal content slide
   useEffect(() => {
@@ -289,43 +546,134 @@ export default function ProfileScreen() {
 
       <View style={styles.section}>
         <View style={styles.sectionTitleContainer}>
-          <Text style={styles.sectionTitle}>Breakdown by Area</Text>
-          <TouchableOpacity 
-            onPress={() => setShowFilterModal(true)}
-            style={styles.filterButton}
+          <TouchableOpacity
+            onPress={handlePrevView}
+            disabled={!hasPrevView}
+            style={[
+              styles.switchButton,
+              styles.switchButtonLeft,
+              !hasPrevView && styles.switchButtonDisabled,
+            ]}
+            activeOpacity={0.7}
           >
-            <MaterialCommunityIcons name="filter-variant" size={20} color={DARK_GREY} />
+            <MaterialCommunityIcons
+              name="chevron-left"
+              size={24}
+              color={hasPrevView ? DARK_GREY : '#D9D9D9'}
+            />
           </TouchableOpacity>
-        </View>
-        {areaStats.length === 0 ? (
-          <Text style={styles.emptyText}>No areas found</Text>
-        ) : (
-          areaStats.map((stat, index) => (
+          <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
+            {viewMode === VIEW_MODES.AREA ? 'Sort by Area' : 'Sort by Borough'}
+          </Text>
+          <View style={styles.sectionRightControls}>
             <TouchableOpacity 
-              key={index} 
-              style={styles.areaCard}
-              onPress={() => handleAreaPress(stat.area)}
+              onPress={() => setShowFilterModal(true)}
+              style={styles.filterButton}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="filter-variant" size={20} color={DARK_GREY} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleNextView}
+              disabled={!hasNextView}
+              style={[
+                styles.switchButton,
+                styles.switchButtonRight,
+                !hasNextView && styles.switchButtonDisabled,
+              ]}
               activeOpacity={0.7}
             >
-              <View style={styles.areaHeader}>
-                <Text style={styles.areaName}>{stat.area}</Text>
-                <Text style={styles.areaCount}>
-                  {stat.visited} / {stat.total}
-                </Text>
-              </View>
-              <View style={styles.areaProgressBarContainer}>
-                <View style={styles.areaProgressBarBackground}>
-                  <View 
-                    style={[
-                      styles.areaProgressBarFill, 
-                      { width: `${stat.percentage}%` }
-                    ]} 
-                  />
-                </View>
-                <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
-              </View>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={24}
+                color={hasNextView ? DARK_GREY : '#D9D9D9'}
+              />
             </TouchableOpacity>
-          ))
+          </View>
+        </View>
+        {viewMode === VIEW_MODES.AREA ? (
+          areaStats.length === 0 ? (
+            <Text style={styles.emptyText}>No areas found</Text>
+          ) : (
+            areaStats.map((stat, index) => (
+              <TouchableOpacity 
+                key={`area-${index}`} 
+                style={styles.areaCard}
+                onPress={() => handleAreaPress(stat.area)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.areaHeader}>
+                  <View style={styles.areaTitleRow}>
+                    <Text style={styles.areaName} numberOfLines={1} ellipsizeMode="tail">
+                      {stat.area}
+                    </Text>
+                    {stat.borough && (
+                      <Text
+                        style={styles.areaBoroughInline}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {stat.borough}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.areaCount}>
+                    {stat.visited} / {stat.total}
+                  </Text>
+                </View>
+                <View style={styles.areaProgressBarContainer}>
+                  <View style={styles.areaProgressBarBackground}>
+                    <View 
+                      style={[
+                        styles.areaProgressBarFill, 
+                        { width: `${stat.percentage}%` }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )
+        ) : boroughStats.length === 0 ? (
+          <Text style={styles.emptyText}>No boroughs found</Text>
+        ) : (
+          boroughStats.map((stat, index) => {
+            const isInteractive = stat.borough && stat.borough !== 'Unknown';
+            return (
+              <TouchableOpacity 
+                key={`borough-${index}`} 
+                style={styles.areaCard}
+                onPress={() => handleBoroughPress(stat.borough)}
+                activeOpacity={isInteractive ? 0.7 : 1}
+                disabled={!isInteractive}
+              >
+                <View style={styles.areaHeader}>
+                  <Text style={styles.areaName}>{stat.borough}</Text>
+                  <Text style={styles.areaCount}>
+                    {stat.visited} / {stat.total}
+                  </Text>
+                </View>
+                <View style={styles.areaProgressBarContainer}>
+                  <View style={styles.areaProgressBarBackground}>
+                    <View 
+                      style={[
+                        styles.areaProgressBarFill, 
+                        { width: `${stat.percentage}%` }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
+                </View>
+                <View style={styles.boroughAreaSummary}>
+                  <MaterialCommunityIcons name="map-marker-radius" size={16} color={DARK_GREY} />
+                  <Text style={styles.boroughAreaSummaryText}>
+                    Areas complete: {stat.completedAreas} / {stat.totalAreas}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
         )}
       </View>
 
@@ -562,11 +910,41 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: DARK_GREY,
     flex: 1,
+    textAlign: 'center',
+  },
+  sectionTitleLeft: {
+    textAlign: 'left',
+  },
+  sectionRightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  switchButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  switchButtonLeft: {
+    marginRight: 12,
+  },
+  switchButtonRight: {
+    marginLeft: 12,
+  },
+  switchButtonDisabled: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#F5F5F5',
   },
   filterButton: {
     padding: 8,
     borderRadius: 8,
     backgroundColor: LIGHT_GREY,
+    marginRight: 12,
   },
   emptyText: {
     fontSize: 14,
@@ -591,11 +969,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  areaTitleRow: {
+    flex: 1,
+    paddingRight: 12,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
   areaName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: DARK_GREY,
-    flex: 1,
+    flexShrink: 1,
+  },
+  areaBoroughInline: {
+    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: ACCENT_GREY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   areaCount: {
     fontSize: 16,
@@ -625,6 +1017,16 @@ const styles = StyleSheet.create({
     color: MEDIUM_GREY,
     minWidth: 45,
     textAlign: 'right',
+  },
+  boroughAreaSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  boroughAreaSummaryText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: DARK_GREY,
   },
   modalOverlay: {
     flex: 1,

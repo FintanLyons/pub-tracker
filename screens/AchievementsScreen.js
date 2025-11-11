@@ -11,6 +11,8 @@ const LIGHT_GREY = '#F5F5F5';
 const MEDIUM_GREY = '#757575';
 const ACCENT_GREY = '#424242';
 const AMBER = '#D4A017';
+const BURGUNDY = '#A1183C';
+const SAPPHIRE = '#2F4AA1';
 
 export default function AchievementsScreen() {
   const [pubs, setPubs] = useState([]);
@@ -25,8 +27,9 @@ export default function AchievementsScreen() {
     const visitedPubs = allPubs.filter(p => p.isVisited);
     const pointsFromPubs = visitedPubs.reduce((sum, pub) => sum + (pub.points || 0), 0);
 
-    // Calculate area completion bonuses
+    // Calculate area & borough completion bonuses
     const areaMap = {};
+    const boroughMap = {};
     allPubs.forEach(pub => {
       const area = pub.area || 'Unknown';
       if (!areaMap[area]) {
@@ -36,17 +39,40 @@ export default function AchievementsScreen() {
       if (pub.isVisited) {
         areaMap[area].visited++;
       }
+
+      const borough =
+        typeof pub.borough === 'string' && pub.borough.trim().length > 0
+          ? pub.borough.trim()
+          : 'Unknown';
+      if (!boroughMap[borough]) {
+        boroughMap[borough] = {
+          total: 0,
+          visited: 0,
+          areas: new Set(),
+        };
+      }
+      boroughMap[borough].total++;
+      if (pub.isVisited) {
+        boroughMap[borough].visited++;
+      }
+      if (area && area !== 'Unknown') {
+        boroughMap[borough].areas.add(area);
+      }
     });
 
     // Count completed areas (100% completion)
     const completedAreas = Object.entries(areaMap)
       .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0)
       .map(([area, _]) => area);
-    
+    const completedAreasSet = new Set(completedAreas);
     const areaBonusPoints = completedAreas.length * 50;
 
+    const completedBoroughs = Object.entries(boroughMap)
+      .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0);
+    const boroughBonusPoints = completedBoroughs.length * 200;
+
     // Current score = visited pub points + area bonuses
-    const currentTotalScore = pointsFromPubs + areaBonusPoints;
+    const currentTotalScore = pointsFromPubs + areaBonusPoints + boroughBonusPoints;
 
     setCurrentScore(currentTotalScore);
 
@@ -57,7 +83,7 @@ export default function AchievementsScreen() {
     Object.entries(areaMap).forEach(([area, counts]) => {
       const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
       const isCompleted = counts.visited === counts.total && counts.total > 0;
-      
+
       trophyList.push({
         id: `area-${area}`,
         type: 'area',
@@ -65,6 +91,25 @@ export default function AchievementsScreen() {
         description: `${percentage}%`,
         isAchieved: isCompleted,
         area: area,
+      });
+    });
+
+    // Add borough trophies
+    Object.entries(boroughMap).forEach(([borough, counts]) => {
+      if (borough === 'Unknown') {
+        return;
+      }
+      const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
+      const isCompleted = counts.visited === counts.total && counts.total > 0;
+
+      trophyList.push({
+        id: `borough-${borough}`,
+        type: 'borough',
+        title: `${borough} Champion`,
+        description: `${percentage}%`,
+        isAchieved: isCompleted,
+        borough,
+        completionPercentage: percentage,
       });
     });
 
@@ -134,6 +179,33 @@ export default function AchievementsScreen() {
     trophyRows.push(trophies.slice(i, i + 3));
   }
 
+  const getTrophyIcon = (trophy) => {
+    switch (trophy.type) {
+      case 'borough':
+        return trophy.isAchieved ? 'crown' : 'crown-outline';
+      case 'achievement':
+        return trophy.isAchieved ? 'medal' : 'medal-outline';
+      case 'area':
+      default:
+        return trophy.isAchieved ? 'trophy' : 'trophy-outline';
+    }
+  };
+
+  const getTrophyColor = (trophy) => {
+    if (!trophy.isAchieved) {
+      return MEDIUM_GREY;
+    }
+    switch (trophy.type) {
+      case 'borough':
+        return BURGUNDY;
+      case 'achievement':
+        return SAPPHIRE;
+      case 'area':
+      default:
+        return AMBER;
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
@@ -169,9 +241,9 @@ export default function AchievementsScreen() {
                     !trophy.isAchieved && styles.trophyIconContainerLocked
                   ]}>
                     <MaterialCommunityIcons
-                      name={trophy.isAchieved ? "trophy" : "trophy-outline"}
+                      name={getTrophyIcon(trophy)}
                       size={48}
-                      color={trophy.isAchieved ? AMBER : MEDIUM_GREY}
+                      color={getTrophyColor(trophy)}
                     />
                   </View>
                   <Text 

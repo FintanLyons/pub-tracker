@@ -8,7 +8,7 @@ const DARK_CHARCOAL = '#1C1C1C';
 const MEDIUM_GREY = '#757575';
 const WHITE = '#FFFFFF';
 
-export default function SearchSuggestions({ 
+function SearchSuggestions({ 
   visible, 
   searchQuery, 
   areaSuggestions, 
@@ -136,4 +136,6 @@ const styles = StyleSheet.create({
     color: MEDIUM_GREY,
   },
 });
+
+export default React.memo(SearchSuggestions);
 

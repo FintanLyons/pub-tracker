@@ -11,6 +11,44 @@ const getAuthHeaders = async () => {
   return getSupabaseHeaders(accessToken);
 };
 
+const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LEAGUE_CODE_LENGTH = 6;
+const MAX_CODE_GENERATION_ATTEMPTS = 10;
+
+const generateLeagueCode = () => {
+  let code = '';
+  for (let i = 0; i < LEAGUE_CODE_LENGTH; i += 1) {
+    const randomIndex = Math.floor(Math.random() * LEAGUE_CODE_ALPHABET.length);
+    code += LEAGUE_CODE_ALPHABET[randomIndex];
+  }
+  return code;
+};
+
+const validateUniqueLeagueCode = async (supabaseUrl, headers, code) => {
+  const response = await fetch(`${supabaseUrl}/leagues?code=eq.${code}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to validate league code uniqueness');
+  }
+
+  const leagues = await response.json();
+  return leagues.length === 0;
+};
+
+const generateUniqueLeagueCode = async (supabaseUrl, headers) => {
+  for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt += 1) {
+    const code = generateLeagueCode();
+    const isUnique = await validateUniqueLeagueCode(supabaseUrl, headers, code);
+    if (isUnique) {
+      return code;
+    }
+  }
+  throw new Error('Unable to generate unique league code');
+};
+
 /**
  * Create a new league
  */
@@ -23,11 +61,14 @@ export const createLeague = async (userId, leagueName) => {
       throw new Error('Supabase not configured');
     }
 
+    const code = await generateUniqueLeagueCode(supabaseUrl, headers);
+
     // Create league
     const leagueData = {
       name: leagueName,
       created_by: userId,
       created_at: new Date().toISOString(),
+      code,
     };
 
     const response = await fetch(`${supabaseUrl}/leagues`, {
@@ -42,12 +83,13 @@ export const createLeague = async (userId, leagueName) => {
     }
 
     const league = await response.json();
-    const leagueId = Array.isArray(league) ? league[0].id : league.id;
+    const leagueRecord = Array.isArray(league) ? league[0] : league;
+    const leagueId = leagueRecord.id;
 
     // Add creator as first member
     await addLeagueMember(leagueId, userId);
 
-    return Array.isArray(league) ? league[0] : league;
+    return leagueRecord;
   } catch (error) {
     console.error('Error creating league:', error);
     throw error;
@@ -102,6 +144,61 @@ export const addLeagueMember = async (leagueId, userId) => {
     return await response.json();
   } catch (error) {
     console.error('Error adding league member:', error);
+    throw error;
+  }
+};
+
+/**
+ * Join a league using its code
+ */
+export const joinLeagueByCode = async (userId, code) => {
+  try {
+    const supabaseUrl = getSupabaseUrl();
+    const headers = await getAuthHeaders();
+
+    if (!supabaseUrl || !headers) {
+      throw new Error('Supabase not configured');
+    }
+
+    const normalizedCode = code.trim().toUpperCase();
+    if (!normalizedCode) {
+      throw new Error('League code is required');
+    }
+
+    const leagueResponse = await fetch(
+      `${supabaseUrl}/leagues?code=eq.${normalizedCode}`,
+      { headers }
+    );
+
+    if (!leagueResponse.ok) {
+      const errorText = await leagueResponse.text();
+      throw new Error(`Failed to look up league: ${errorText}`);
+    }
+
+    const leagues = await leagueResponse.json();
+    if (leagues.length === 0) {
+      throw new Error('League not found');
+    }
+
+    const league = leagues[0];
+
+    try {
+      await addLeagueMember(league.id, userId);
+      return {
+        league,
+        alreadyMember: false,
+      };
+    } catch (error) {
+      if (error.message.includes('already a member')) {
+        return {
+          league,
+          alreadyMember: true,
+        };
+      }
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error joining league by code:', error);
     throw error;
   }
 };

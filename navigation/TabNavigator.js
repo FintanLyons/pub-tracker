@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,6 +8,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
+import { preloadProfileStats } from '../services/ProfileStatsCache';
 
 const Tab = createBottomTabNavigator();
 
@@ -17,6 +18,12 @@ const DARK_CHARCOAL = '#1C1C1C';
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
+  
+  useEffect(() => {
+    preloadProfileStats().catch((error) => {
+      console.warn('Unable to preload profile stats:', error?.message || error);
+    });
+  }, []);
   
   return (
     <LoadingContext.Provider value={{ isLocationLoaded, setIsLocationLoaded }}>

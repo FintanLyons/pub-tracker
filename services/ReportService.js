@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSupabaseUrl, getSupabaseHeaders } from '../config/supabase';
 
 /**
@@ -8,7 +9,11 @@ export const submitReport = async (pubId, pubName, pubArea, reportText) => {
   
   try {
     const supabaseUrl = getSupabaseUrl();
-    const headers = getSupabaseHeaders();
+
+    const sessionJson = await AsyncStorage.getItem('supabase_session');
+    const session = sessionJson ? JSON.parse(sessionJson) : null;
+    const accessToken = session?.access_token;
+    const headers = getSupabaseHeaders(accessToken);
 
     console.log('🔗 Supabase URL:', supabaseUrl);
 

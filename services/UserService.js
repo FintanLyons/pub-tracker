@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSupabaseUrl, getSupabaseHeaders } from '../config/supabase';
 import { fetchLondonPubs } from './PubService';
 import { getLevelProgress } from '../utils/levelSystem';
+import { refreshSession } from './SecureAuthService';
 
 /**
  * Helper to get authenticated headers
@@ -11,6 +12,60 @@ const getAuthHeaders = async () => {
   const session = sessionJson ? JSON.parse(sessionJson) : null;
   const accessToken = session?.access_token;
   return getSupabaseHeaders(accessToken);
+};
+
+/**
+ * Helper to make authenticated API calls with automatic token refresh
+ * Retries once if token is expired
+ */
+const makeAuthenticatedRequest = async (url, options = {}) => {
+  const headers = await getAuthHeaders();
+  if (!headers) {
+    throw new Error('Supabase not configured');
+  }
+
+  let response = await fetch(url, {
+    ...options,
+    headers: {
+      ...headers,
+      ...options.headers,
+    },
+  });
+
+  // If we get a 401 (JWT expired), try refreshing the token and retry once
+  if (response.status === 401) {
+    console.log('Token expired, attempting to refresh...');
+    try {
+      await refreshSession();
+      // Get fresh headers with new token
+      const newHeaders = await getAuthHeaders();
+      if (newHeaders) {
+        // Retry the request with the new token
+        response = await fetch(url, {
+          ...options,
+          headers: {
+            ...newHeaders,
+            ...options.headers,
+          },
+        });
+        // If retry also fails with 401, the refresh token is likely expired
+        if (response.status === 401) {
+          throw new Error('Session expired. Please log in again.');
+        }
+      } else {
+        throw new Error('Failed to get authentication headers after refresh');
+      }
+    } catch (refreshError) {
+      console.error('Failed to refresh token:', refreshError);
+      // If it's already our custom error, re-throw it
+      if (refreshError.message && refreshError.message.includes('Session expired')) {
+        throw refreshError;
+      }
+      throw new Error('Session expired. Please log in again.');
+    }
+  }
+
+  return response;
 };
 
 /**
@@ -163,8 +218,9 @@ const calculateUserStats = async () => {
   const visitedPubs = allPubs.filter(p => p.isVisited);
   const pointsFromPubs = visitedPubs.reduce((sum, pub) => sum + (pub.points || 0), 0);
 
-  // Calculate area completion bonuses
+  // Calculate area & borough completion bonuses
   const areaMap = {};
+  const boroughMap = {};
   allPubs.forEach(pub => {
     const area = pub.area || 'Unknown';
     if (!areaMap[area]) {
@@ -174,13 +230,38 @@ const calculateUserStats = async () => {
     if (pub.isVisited) {
       areaMap[area].visited++;
     }
+
+    const borough =
+      typeof pub.borough === 'string' && pub.borough.trim().length > 0
+        ? pub.borough.trim()
+        : 'Unknown';
+    if (!boroughMap[borough]) {
+      boroughMap[borough] = {
+        total: 0,
+        visited: 0,
+        areas: new Set(),
+      };
+    }
+    boroughMap[borough].total++;
+    if (pub.isVisited) {
+      boroughMap[borough].visited++;
+    }
+    if (area && area !== 'Unknown') {
+      boroughMap[borough].areas.add(area);
+    }
   });
 
-  const completedAreas = Object.entries(areaMap)
+  const completedAreaEntries = Object.entries(areaMap)
     .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0);
+  const completedAreas = completedAreaEntries.map(([area]) => area);
   
   const areaBonusPoints = completedAreas.length * 50;
-  const totalScore = pointsFromPubs + areaBonusPoints;
+
+  const completedBoroughs = Object.entries(boroughMap)
+    .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0);
+  const boroughBonusPoints = completedBoroughs.length * 200;
+
+  const totalScore = pointsFromPubs + areaBonusPoints + boroughBonusPoints;
   const levelProgress = getLevelProgress(totalScore);
 
   return {
@@ -203,17 +284,8 @@ export const syncUserStats = async (userId) => {
     console.log('User ID:', userId);
 
     const supabaseUrl = getSupabaseUrl();
-    
-    // Get user's access token for authenticated requests
-    const sessionJson = await AsyncStorage.getItem('supabase_session');
-    const session = sessionJson ? JSON.parse(sessionJson) : null;
-    const accessToken = session?.access_token;
-    
-    console.log('Has access token:', !!accessToken);
-    
-    const headers = getSupabaseHeaders(accessToken);
 
-    if (!supabaseUrl || !headers) {
+    if (!supabaseUrl) {
       throw new Error('Supabase not configured');
     }
 
@@ -221,11 +293,10 @@ export const syncUserStats = async (userId) => {
     const stats = await calculateUserStats();
     console.log('Stats calculated:', stats);
 
-    // Check if stats exist
+    // Check if stats exist (with automatic token refresh)
     console.log('Checking if stats exist for user:', userId);
-    const checkResponse = await fetch(
-      `${supabaseUrl}/user_stats?user_id=eq.${userId}`,
-      { headers }
+    const checkResponse = await makeAuthenticatedRequest(
+      `${supabaseUrl}/user_stats?user_id=eq.${userId}`
     );
 
     console.log('Check response status:', checkResponse.status);
@@ -247,24 +318,25 @@ export const syncUserStats = async (userId) => {
 
     let response;
     if (existingStats.length > 0) {
-      // Update existing stats
+      // Update existing stats (with automatic token refresh)
       console.log('Updating existing stats...');
-      response = await fetch(
+      response = await makeAuthenticatedRequest(
         `${supabaseUrl}/user_stats?user_id=eq.${userId}`,
         {
           method: 'PATCH',
-          headers,
           body: JSON.stringify(statsData),
         }
       );
     } else {
-      // Create new stats
+      // Create new stats (with automatic token refresh)
       console.log('Creating new stats...');
-      response = await fetch(`${supabaseUrl}/user_stats`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(statsData),
-      });
+      response = await makeAuthenticatedRequest(
+        `${supabaseUrl}/user_stats`,
+        {
+          method: 'POST',
+          body: JSON.stringify(statsData),
+        }
+      );
     }
 
     console.log('Sync response status:', response.status);
@@ -290,15 +362,13 @@ export const syncUserStats = async (userId) => {
 export const getUserStats = async (userId) => {
   try {
     const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
 
-    if (!supabaseUrl || !headers) {
+    if (!supabaseUrl) {
       throw new Error('Supabase not configured');
     }
 
-    const response = await fetch(
-      `${supabaseUrl}/user_stats?user_id=eq.${userId}`,
-      { headers }
+    const response = await makeAuthenticatedRequest(
+      `${supabaseUrl}/user_stats?user_id=eq.${userId}`
     );
 
     if (!response.ok) {
@@ -319,16 +389,14 @@ export const getUserStats = async (userId) => {
 export const searchUsers = async (query) => {
   try {
     const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
 
-    if (!supabaseUrl || !headers) {
+    if (!supabaseUrl) {
       throw new Error('Supabase not configured');
     }
 
     // Search for users whose username contains the query (case-insensitive)
-    const response = await fetch(
-      `${supabaseUrl}/users?username=ilike.*${query}*&select=id,username,created_at`,
-      { headers }
+    const response = await makeAuthenticatedRequest(
+      `${supabaseUrl}/users?username=ilike.*${query}*&select=id,username,created_at`
     );
 
     if (!response.ok) {
@@ -348,15 +416,13 @@ export const searchUsers = async (query) => {
 export const getUserById = async (userId) => {
   try {
     const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
 
-    if (!supabaseUrl || !headers) {
+    if (!supabaseUrl) {
       throw new Error('Supabase not configured');
     }
 
-    const response = await fetch(
-      `${supabaseUrl}/users?id=eq.${userId}`,
-      { headers }
+    const response = await makeAuthenticatedRequest(
+      `${supabaseUrl}/users?id=eq.${userId}`
     );
 
     if (!response.ok) {
