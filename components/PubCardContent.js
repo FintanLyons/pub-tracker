@@ -32,7 +32,8 @@ export default function PubCardContent({
   getImageSource,
   pointerEvents,
   onScroll,
-  scrollEnabled
+  scrollEnabled,
+  scrollRef
 }) {
   return (
     <ScrollView
@@ -44,6 +45,7 @@ export default function PubCardContent({
       scrollEventThrottle={16}
       bounces={false}
       directionalLockEnabled={true}
+      ref={scrollRef}
     >
       <Text style={styles.pubName}>{pub.name}</Text>
       

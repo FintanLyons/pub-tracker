@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { 
   View, 
   Text,
@@ -18,6 +18,8 @@ import { submitReport } from '../services/ReportService';
 
 const MEDIUM_GREY = '#757575';
 const AMBER = '#D4A017';
+const TOP_THRESHOLD = 2;
+const POSITION_EPSILON = 0.5;
 
 /**
  * DraggablePubCard - A bottom sheet card with three states: hidden, collapsed, expanded
@@ -68,8 +70,9 @@ export default function DraggablePubCard({
   const dragStartY = useRef(HIDDEN_Y); // Track where drag started
   const currentPosition = useRef(HIDDEN_Y); // Track current position
   const scrollY = useRef(0); // Track scroll position
-  const [scrollEnabled, setScrollEnabled] = useState(true); // Control ScrollView scrolling
-  const scrollEnabledRef = useRef(true); // Ref for PanResponder to access current value
+  const [scrollEnabled, setScrollEnabled] = useState(false); // Control ScrollView scrolling
+  const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
+  const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
   const buttonInteractionRef = useRef(false); // Track if button has been interacted with
   
@@ -80,26 +83,46 @@ export default function DraggablePubCard({
     return touchY >= buttonTop && touchY <= buttonBottom;
   };
   
-  // Keep refs in sync with state
+  const updateIsExpanded = useCallback((value) => {
+    if (isExpandedRef.current !== value) {
+      isExpandedRef.current = value;
+      setIsExpanded(value);
+    }
+  }, [setIsExpanded]);
+
+  const updateScrollEnabled = useCallback((value) => {
+    if (scrollEnabledRef.current !== value) {
+      if (scrollViewRef.current) {
+        scrollViewRef.current.setNativeProps({ scrollEnabled: value });
+      }
+      scrollEnabledRef.current = value;
+      setScrollEnabled(value);
+    }
+  }, [setScrollEnabled]);
+
+  // Keep refs in sync with state changes that bypass the helpers (safety net)
   useEffect(() => {
     isExpandedRef.current = isExpanded;
+  }, [isExpanded]);
+
+  useEffect(() => {
     scrollEnabledRef.current = scrollEnabled;
-  }, [isExpanded, scrollEnabled]);
+  }, [scrollEnabled]);
   
   // Handle scroll events - dynamically manage scroll enable/disable
-  const handleScroll = (event) => {
+  const handleScroll = useCallback((event) => {
     const newScrollY = event.nativeEvent.contentOffset.y;
     scrollY.current = newScrollY;
     
     // When at top, disable scrolling so parent can intercept downward drags
     if (isExpandedRef.current) {
-      if (newScrollY <= 0 && scrollEnabled) {
-        setScrollEnabled(false);
-      } else if (newScrollY > 0 && !scrollEnabled) {
-        setScrollEnabled(true);
+      if (newScrollY <= TOP_THRESHOLD) {
+        updateScrollEnabled(false);
+      } else {
+        updateScrollEnabled(true);
       }
     }
-  };
+  }, [updateScrollEnabled]);
 
   // Pan responder - handles all touch gestures
   const panResponder = useRef(
@@ -114,9 +137,22 @@ export default function DraggablePubCard({
         // When expanded, at top, and dragging down - intercept before ScrollView claims it
         const isDraggingVertically = Math.abs(gestureState.dy) > 5;
         const isDraggingDown = gestureState.dy > 5;
-        return (
+        const isDraggingUp = gestureState.dy < -5;
+        const isAtTop = scrollY.current <= TOP_THRESHOLD;
+
+        if (
           isExpandedRef.current &&
           !scrollEnabledRef.current &&
+          isDraggingUp &&
+          isDraggingVertically
+        ) {
+          updateScrollEnabled(true);
+          return false;
+        }
+
+        return (
+          isExpandedRef.current &&
+          (isAtTop || !scrollEnabledRef.current) &&
           isDraggingDown &&
           isDraggingVertically
         );
@@ -149,11 +185,25 @@ export default function DraggablePubCard({
           return false;
         }
         
-        // Handle drags when collapsed
-        // Increased threshold to 10px to avoid interfering with button presses
         const isDraggingVertically = Math.abs(gestureState.dy) > 10;
+        if (isExpandedRef.current) {
+          const isAtTop = scrollY.current <= TOP_THRESHOLD;
+          const isDraggingDown = gestureState.dy > 10;
+          if (isDraggingVertically && isDraggingDown && isAtTop) {
+            updateScrollEnabled(false);
+            return true;
+          }
+
+          const isDraggingUp = gestureState.dy < -6;
+          if (isDraggingVertically && isDraggingUp && !scrollEnabledRef.current) {
+            updateScrollEnabled(true);
+          }
+          return false;
+        }
+
+        // Handle drags when collapsed
         const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
-        return !isExpandedRef.current && isDraggingVertically && isMoreVerticalThanHorizontal;
+        return isDraggingVertically && isMoreVerticalThanHorizontal;
       },
       
       onPanResponderGrant: () => {
@@ -177,6 +227,10 @@ export default function DraggablePubCard({
           // Rubber band at bottom
           const overflow = newY - currentHiddenY;
           newY = currentHiddenY + overflow * 0.3; // Resistance factor
+        }
+
+        if (Math.abs(newY - currentPosition.current) < POSITION_EPSILON) {
+          return;
         }
         
         currentPosition.current = newY;
@@ -225,13 +279,16 @@ export default function DraggablePubCard({
           }
         }
         
-        setIsExpanded(willBeExpanded);
+        updateIsExpanded(willBeExpanded);
         dragStartY.current = targetY;
         currentPosition.current = targetY;
         
         // Enable scrolling when expanding (auto-disabled when reaching top)
         if (willBeExpanded) {
-          setScrollEnabled(true);
+          updateScrollEnabled(scrollY.current > 0);
+        } else {
+          updateScrollEnabled(false);
+          scrollY.current = 0;
         }
         
         // Smoother, faster animation
@@ -284,11 +341,11 @@ export default function DraggablePubCard({
   // Show/hide card when pub changes
   useEffect(() => {
     if (pub) {
-      setIsExpanded(false);
+      updateIsExpanded(false);
       dragStartY.current = COLLAPSED_Y;
       currentPosition.current = COLLAPSED_Y;
       scrollY.current = 0;
-      setScrollEnabled(false);
+      updateScrollEnabled(false);
       
       // Reset button interaction flag when card opens to ensure first touch works
       buttonInteractionRef.current = false;
@@ -323,7 +380,7 @@ export default function DraggablePubCard({
   }, [pub?.id]);
   
   const handleClose = () => {
-    setIsExpanded(false);
+    updateIsExpanded(false);
     translateY.stopAnimation();
     
     Animated.spring(translateY, {
@@ -334,6 +391,8 @@ export default function DraggablePubCard({
     }).start(() => {
       dragStartY.current = HIDDEN_Y;
       currentPosition.current = HIDDEN_Y;
+      scrollY.current = 0;
+      updateScrollEnabled(false);
       onClose();
     });
   };
@@ -522,6 +581,7 @@ export default function DraggablePubCard({
         pointerEvents={!isExpanded ? 'none' : 'auto'}
         onScroll={handleScroll}
         scrollEnabled={scrollEnabled}
+        scrollRef={scrollViewRef}
       />
 
       {/* Report Modal */}

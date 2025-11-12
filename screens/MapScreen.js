@@ -19,6 +19,7 @@ import {
   togglePubVisited,
   togglePubFavorite,
 } from '../services/PubService';
+import { submitMissingPubReport } from '../services/ReportService';
 import {
   primeProfileStatsFromPubs,
   updateCachedProfileLocation,
@@ -29,6 +30,7 @@ import boroughIcon from '../assets/borough.png';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
+import ReportMissingPubModal from '../components/ReportMissingPubModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import {
@@ -243,6 +245,10 @@ export default function MapScreen() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTop, setKeyboardTop] = useState(0);
+  const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
+  const [isSubmittingMissingPub, setIsSubmittingMissingPub] = useState(false);
+  const [missingPubError, setMissingPubError] = useState(null);
+  const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
   const clearedAreaRef = useRef(null); // Track which area was explicitly cleared (to prevent re-applying)
   const clearedBoroughRef = useRef(null);
   const mapRef = useRef(null);
@@ -259,6 +265,10 @@ export default function MapScreen() {
   const [shouldTrackBoroughViews, setShouldTrackBoroughViews] = useState(true);
   const screenHeight = Dimensions.get('window').height;
   const cardHeight = screenHeight * 0.33;
+  const floatingButtonBottom = useMemo(
+    () => insets.bottom - 24 + (selectedPub ? cardHeight - 24 : 0),
+    [insets.bottom, selectedPub, cardHeight]
+  );
   const { areaStatsMap, allAreas, calculateAreaStats } = useAreaStats(allPubs);
   const allBoroughNames = useMemo(() => {
     const boroughSet = new Set();
@@ -1730,6 +1740,39 @@ export default function MapScreen() {
     }
   }, [currentLocation, commitMapRegion]);
 
+  const openMissingPubModal = useCallback(() => {
+    setMissingPubError(null);
+    setIsMissingPubModalVisible(true);
+  }, []);
+
+  const closeMissingPubModal = useCallback(() => {
+    if (isSubmittingMissingPub) {
+      return;
+    }
+    setIsMissingPubModalVisible(false);
+    setMissingPubError(null);
+  }, [isSubmittingMissingPub]);
+
+  const handleSubmitMissingPub = useCallback(
+    async ({ pubName, pubLocation }) => {
+      setIsSubmittingMissingPub(true);
+      setMissingPubError(null);
+      try {
+        await submitMissingPubReport(pubName, pubLocation);
+        setIsMissingPubModalVisible(false);
+        setIsMissingPubSuccessVisible(true);
+      } catch (error) {
+        const message =
+          error?.message ||
+          'Unable to submit report right now. Please try again in a moment.';
+        setMissingPubError(message);
+      } finally {
+        setIsSubmittingMissingPub(false);
+      }
+    },
+    []
+  );
+
   return (
     <View style={styles.container}>
       <SearchBar 
@@ -1835,8 +1878,20 @@ export default function MapScreen() {
       </MapView>
 
       <TouchableOpacity 
+        style={[
+          styles.missingPubButton,
+          {
+            bottom: floatingButtonBottom,
+          },
+        ]}
+        onPress={openMissingPubModal}
+      >
+        <MaterialCommunityIcons name="flag-plus-outline" size={24} color={AMBER} />
+      </TouchableOpacity>
+
+      <TouchableOpacity 
         style={[styles.locationButton, { 
-          bottom: insets.bottom - 24 + (selectedPub ? cardHeight - 24: 0)
+          bottom: floatingButtonBottom,
         }]}
         onPress={handleCurrentLocation}
       >
@@ -1850,6 +1905,33 @@ export default function MapScreen() {
         onToggleFavorite={handleToggleFavorite}
         getImageSource={getImageSource}
       />
+      <ReportMissingPubModal
+        visible={isMissingPubModalVisible}
+        onClose={closeMissingPubModal}
+        onSubmit={handleSubmitMissingPub}
+        isSubmitting={isSubmittingMissingPub}
+        errorMessage={missingPubError}
+      />
+      {isMissingPubSuccessVisible && (
+        <View
+          style={[
+            styles.feedbackToast,
+            {
+              bottom: floatingButtonBottom + 68,
+            },
+          ]}
+        >
+          <MaterialCommunityIcons name="check-circle" size={20} color={AMBER} />
+          <Text style={styles.feedbackToastText}>Missing pub successfully reported</Text>
+          <TouchableOpacity
+            onPress={() => setIsMissingPubSuccessVisible(false)}
+            style={styles.feedbackToastCloseButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MaterialCommunityIcons name="close" size={20} color={DARK_CHARCOAL} />
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -1873,6 +1955,51 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+  },
+  missingPubButton: {
+    position: 'absolute',
+    left: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: DARK_CHARCOAL,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  feedbackToast: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  feedbackToastText: {
+    color: DARK_CHARCOAL,
+    fontWeight: '600',
+    fontSize: 15,
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 12,
+  },
+  feedbackToastCloseButton: {
+    padding: 4,
   },
   boroughCallout: {
     backgroundColor: 'rgba(28, 28, 28, 0.9)',
