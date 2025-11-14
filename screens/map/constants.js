@@ -11,13 +11,13 @@ export const MARKER_MODES = {
   PUBS: 'pubs',
 };
 
-export const BOROUGH_ENTER_DELTA = 0.12;
-export const BOROUGH_EXIT_DELTA = 0.1;
-export const AREA_ENTER_DELTA = 0.055;
-export const AREA_EXIT_DELTA = 0.035;
+export const BOROUGH_ENTER_DELTA = 0.14;
+export const BOROUGH_EXIT_DELTA = 0.12;
+export const AREA_ENTER_DELTA = 0.075;
+export const AREA_EXIT_DELTA = 0.055;
 
-export const NEIGHBOURHOOD_LIMIT = 3;
-export const BOROUGH_LIMIT = 3;
+export const NEIGHBOURHOOD_LIMIT = 5;
+export const BOROUGH_LIMIT = 5;
 
 export const REGION_LATITUDE_EPSILON = 0.00035;
 export const REGION_LONGITUDE_EPSILON = 0.00035;

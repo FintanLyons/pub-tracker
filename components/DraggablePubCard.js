@@ -74,14 +74,6 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  const buttonInteractionRef = useRef(false); // Track if button has been interacted with
-  
-  // Helper function to check if touch is in button area
-  const isTouchInButtonArea = (touchY) => {
-    const buttonTop = 103;
-    const buttonBottom = buttonTop + 48;
-    return touchY >= buttonTop && touchY <= buttonBottom;
-  };
   
   const updateIsExpanded = useCallback((value) => {
     if (isExpandedRef.current !== value) {
@@ -159,32 +151,11 @@ export default function DraggablePubCard({
       },
       
       onStartShouldSetPanResponder: (evt) => {
-        // If button interaction is active, never start responder
-        if (buttonInteractionRef.current) {
-          return false;
-        }
-        
-        // Check if touch is in button area - if so, let button handle it
-        if (!isExpandedRef.current && isTouchInButtonArea(evt.nativeEvent.locationY)) {
-          buttonInteractionRef.current = true;
-          return false;
-        }
-        
         // Never start responder on initial touch - let buttons handle it
         return false;
       },
       
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // If button interaction is active, never start responder
-        if (buttonInteractionRef.current) {
-          return false;
-        }
-        
-        // Check if touch is in button area - don't start dragging
-        if (!isExpandedRef.current && isTouchInButtonArea(evt.nativeEvent.locationY)) {
-          return false;
-        }
-        
         const isDraggingVertically = Math.abs(gestureState.dy) > 10;
         if (isExpandedRef.current) {
           const isAtTop = scrollY.current <= TOP_THRESHOLD;
@@ -347,8 +318,6 @@ export default function DraggablePubCard({
       scrollY.current = 0;
       updateScrollEnabled(false);
       
-      // Reset button interaction flag when card opens to ensure first touch works
-      buttonInteractionRef.current = false;
       translateY.stopAnimation();
       
       Animated.spring(translateY, {
@@ -432,9 +401,25 @@ export default function DraggablePubCard({
       ]}
       {...panResponder.panHandlers}
     >
-      {/* Report, Favorite and Close buttons - positioned differently based on state */}
+      {/* Report, Favorite, Visited and Close buttons - positioned differently based on state */}
       {isExpanded ? (
         <>
+          <TouchableOpacity
+            style={[
+              styles.visitedButtonTop,
+              { top: insets.top + 8 },
+              pub.isVisited && styles.visitedButtonTopActive
+            ]}
+            onPress={() => onToggleVisited(pub.id)}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.visitedButtonTopText,
+              pub.isVisited && styles.visitedButtonTopTextActive
+            ]}>
+              {pub.isVisited ? 'Visited' : 'Not Visited'}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.reportButtonTop, { top: insets.top + 8 }]}
             onPress={() => setReportModalVisible(true)}
@@ -468,6 +453,21 @@ export default function DraggablePubCard({
       ) : (
         <>
           <TouchableOpacity
+            style={[
+              styles.visitedButton,
+              pub.isVisited && styles.visitedButtonActive
+            ]}
+            onPress={() => onToggleVisited(pub.id)}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.visitedButtonText,
+              pub.isVisited && styles.visitedButtonTextActive
+            ]}>
+              {pub.isVisited ? 'Visited' : 'Not Visited'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={styles.reportButton}
             onPress={() => setReportModalVisible(true)}
             activeOpacity={0.7}
@@ -499,84 +499,26 @@ export default function DraggablePubCard({
         </>
       )}
       
-      {/* Drag handle indicator */}
-      <View style={styles.cardHandleContainer}>
+      {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
+      {!isExpanded && (
+        <View 
+          style={styles.draggableOverlay} 
+          pointerEvents="box-only" 
+        />
+      )}
+
+      {/* Drag handle indicator - positioned between buttons and title */}
+      <View style={[
+        styles.cardHandleContainer,
+        isExpanded && { top: insets.top + 61 } // Keep same visual position as collapsed (12 + 53 = 65, so insets.top + 8 + 53 = insets.top + 61)
+      ]}>
         <View style={styles.cardHandle} />
       </View>
-
-      {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
-      {/* Split into two parts to exclude the visited button area */}
-      {!isExpanded && (
-        <>
-          <View 
-            style={styles.draggableOverlayTop} 
-            pointerEvents="box-only" 
-          />
-          <View 
-            style={styles.draggableOverlayBottom} 
-            pointerEvents="box-only" 
-          />
-        </>
-      )}
-
-      {/* Visited button overlay when collapsed - positioned to match the button in ScrollView */}
-      {!isExpanded && (
-        <View
-          style={styles.visitedButtonWrapper}
-          collapsable={false}
-          pointerEvents="box-none"
-          onStartShouldSetResponderCapture={(evt) => {
-            // Mark button interaction if touch is in button area - prevents PanResponder interference
-            if (isTouchInButtonArea(evt.nativeEvent.locationY)) {
-              buttonInteractionRef.current = true;
-            }
-            return false; // Let Pressable handle it
-          }}
-        >
-          <Pressable
-            style={({ pressed }) => [
-              styles.visitedButtonOverlay,
-              pub.isVisited && styles.visitedButtonOverlayActive,
-              pressed && { opacity: 0.7 }
-        ]}
-            onPress={() => {
-              // Immediate response - call handler directly
-              onToggleVisited(pub.id);
-              // Reset interaction flag after a short delay
-              setTimeout(() => {
-                buttonInteractionRef.current = false;
-              }, 200);
-            }}
-            onPressIn={() => {
-              // Mark interaction started IMMEDIATELY on press start - BEFORE PanResponder can interfere
-              buttonInteractionRef.current = true;
-            }}
-            delayPressIn={0}
-            delayPressOut={0}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            pointerEvents="box-only"
-      >
-        <MaterialCommunityIcons
-          name={pub.isVisited ? 'check-circle' : 'checkbox-blank-circle-outline'}
-          size={24}
-            color={pub.isVisited ? '#FFFFFF' : '#2C2C2C'}
-        />
-        <Text style={[
-            styles.visitedButtonOverlayText,
-            pub.isVisited && styles.visitedButtonOverlayTextActive
-        ]}>
-          {pub.isVisited ? 'Visited' : 'Mark as Visited'}
-        </Text>
-          </Pressable>
-        </View>
-      )}
 
       {/* Card content */}
       <PubCardContent
         pub={pub}
         isExpanded={isExpanded}
-        onToggleVisited={onToggleVisited}
         getImageSource={getImageSource}
         pointerEvents={!isExpanded ? 'none' : 'auto'}
         onScroll={handleScroll}
@@ -616,9 +558,12 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   cardHandleContainer: {
+    position: 'absolute',
+    top: 65, // Moved higher up now that buttons have moved up (buttons at top ~12, height ~40)
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    paddingVertical: 8,
-    marginBottom: 4,
+    zIndex: 8,
   },
   cardHandle: {
     width: 40,
@@ -629,10 +574,17 @@ const styles = StyleSheet.create({
   },
   reportButton: {
     position: 'absolute',
-    top: 12,
-    right: 92,
+    top: 12, // Moved closer to top
+    right: 112, // Match expanded position
     zIndex: 10,
-    padding: 4,
+    padding: 8, // Match expanded padding
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Match expanded styling
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   reportButtonTop: {
     position: 'absolute',
@@ -649,10 +601,17 @@ const styles = StyleSheet.create({
   },
   favoriteButton: {
     position: 'absolute',
-    top: 12,
-    right: 54,
+    top: 12, // Moved closer to top
+    right: 64, // Match expanded position
     zIndex: 10,
-    padding: 4,
+    padding: 8, // Match expanded padding
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Match expanded styling
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   favoriteButtonTop: {
     position: 'absolute',
@@ -669,10 +628,17 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     position: 'absolute',
-    top: 12,
+    top: 12, // Moved closer to top
     right: 16,
     zIndex: 10,
-    padding: 4,
+    padding: 8, // Match expanded padding
+    backgroundColor: 'rgba(255, 255, 255, 0.9)', // Match expanded styling
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   closeButtonTop: {
     position: 'absolute',
@@ -687,63 +653,75 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  draggableOverlayTop: {
+  draggableOverlay: {
     position: 'absolute',
-    top: 40, // Below handle
-    left: 0,
-    right: 0,
-    height: 60, // Covers area above visited button (pub name + area row)
-    zIndex: 5,
-    backgroundColor: 'transparent',
-  },
-  draggableOverlayBottom: {
-    position: 'absolute',
-    // Button starts at 88px, has paddingVertical 12px top + ~24px content + 12px bottom = ~48px height
-    // Button ends at ~88 + 48 = 136px, so overlay starts just after
-    top: 151,
+    top: 80, // Below handle and buttons (increased to accommodate larger button area)
     left: 0,
     right: 0,
     bottom: 0,
     zIndex: 5,
     backgroundColor: 'transparent',
   },
-  visitedButtonWrapper: {
+  visitedButton: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 20, // Higher than everything to ensure button receives touches first
-  },
-  visitedButtonOverlay: {
-    position: 'absolute',
-    // Recalculation: paddingTop(12) + handleContainer(8+4+8+4=24) + pubName(actual ~30-32px with line height + 4px margin) + areaRow(12px)
-    // More accurate: 12 + 24 + 34 + 12 = 82px, but accounting for text baseline/rendering, using 88px
-    top: 103,
-    left: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5F5F5',
-    paddingVertical: 12,
+    top: 12, // Moved closer to top
+    left: 16, // Start from left margin
+    right: 160, // End with 48px gap from report button (112 + 48 = 160)
+    zIndex: 10,
+    paddingVertical: 10, // Increased from 6
     paddingHorizontal: 16,
-    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 18,
     borderWidth: 2,
     borderColor: '#2C2C2C',
-    zIndex: 15, // Higher than draggableOverlay to ensure it receives touches
+    minHeight: 40, // Ensure minimum height
+    justifyContent: 'center', // Center content vertically
+    alignItems: 'center', // Center content horizontally
   },
-  visitedButtonOverlayActive: {
+  visitedButtonActive: {
     backgroundColor: '#2C2C2C',
     borderColor: '#2C2C2C',
   },
-  visitedButtonOverlayText: {
-    fontSize: 16,
+  visitedButtonText: {
+    fontSize: 16, // Increased from 14
     fontWeight: '600',
     color: '#2C2C2C',
-    marginLeft: 8,
+    textAlign: 'center', // Center text horizontally
   },
-  visitedButtonOverlayTextActive: {
+  visitedButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  visitedButtonTop: {
+    position: 'absolute',
+    left: 16, // Start from left margin
+    right: 160, // End with 48px gap from report button (112 + 48 = 160)
+    zIndex: 10,
+    paddingVertical: 10, // Increased from 6
+    paddingHorizontal: 16,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#2C2C2C',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    minHeight: 40, // Ensure minimum height
+    justifyContent: 'center', // Center content vertically
+    alignItems: 'center', // Center content horizontally
+  },
+  visitedButtonTopActive: {
+    backgroundColor: '#2C2C2C',
+    borderColor: '#2C2C2C',
+  },
+  visitedButtonTopText: {
+    fontSize: 16, // Increased from 14
+    fontWeight: '600',
+    color: '#2C2C2C',
+    textAlign: 'center', // Center text horizontally
+  },
+  visitedButtonTopTextActive: {
     color: '#FFFFFF',
   },
 });

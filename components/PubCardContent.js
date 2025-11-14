@@ -28,7 +28,6 @@ const hasFeature = (pubFeatures, featureName) => {
 export default function PubCardContent({
   pub,
   isExpanded,
-  onToggleVisited,
   getImageSource,
   pointerEvents,
   onScroll,
@@ -38,6 +37,7 @@ export default function PubCardContent({
   return (
     <ScrollView
       style={styles.cardContent}
+      contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator={false}
       scrollEnabled={scrollEnabled !== undefined ? scrollEnabled : isExpanded}
       pointerEvents={pointerEvents}
@@ -57,36 +57,6 @@ export default function PubCardContent({
           <Text style={styles.ownershipInline}>{pub.ownership}</Text>
         )}
       </View>
-      
-      <TouchableOpacity
-        style={[
-          styles.visitedButton,
-          pub.isVisited && styles.visitedButtonActive
-        ]}
-        onPress={() => {
-          // Immediate response - call handler directly
-          onToggleVisited(pub.id);
-        }}
-        delayPressIn={0}
-        delayPressOut={0}
-        delayLongPress={500}
-        activeOpacity={0.7}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-        pointerEvents="auto"
-      >
-        <MaterialCommunityIcons
-          name={pub.isVisited ? 'check-circle' : 'checkbox-blank-circle-outline'}
-          size={24}
-          color={pub.isVisited ? '#FFFFFF' : DARK_GREY}
-        />
-        <Text style={[
-          styles.visitedButtonText,
-          pub.isVisited && styles.visitedButtonTextActive
-        ]}>
-          {pub.isVisited ? 'Visited' : 'Mark as Visited'}
-        </Text>
-      </TouchableOpacity>
       
       {pub.photoUrl && (
         <View style={styles.photoContainer}>
@@ -180,12 +150,16 @@ const styles = StyleSheet.create({
   cardContent: {
     flex: 1,
   },
+  contentContainer: {
+    paddingTop: 55, // Moved higher up now that buttons and handle have moved up
+  },
   pubName: {
     fontSize: 24,
     fontWeight: 'bold',
     color: DARK_GREY,
     marginBottom: 4,
     paddingRight: 40,
+    paddingLeft: 0, // Remove left padding to align title to the left
   },
   areaRow: {
     flexDirection: 'row',
@@ -204,31 +178,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: MEDIUM_GREY,
     fontWeight: '500',
-  },
-  visitedButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: LIGHT_GREY,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: DARK_GREY,
-  },
-  visitedButtonActive: {
-    backgroundColor: DARK_GREY,
-    borderColor: DARK_GREY,
-  },
-  visitedButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: DARK_GREY,
-    marginLeft: 8,
-  },
-  visitedButtonTextActive: {
-    color: '#FFFFFF',
   },
   photoContainer: {
     width: '100%',

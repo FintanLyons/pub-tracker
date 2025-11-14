@@ -9,13 +9,16 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:android": "eas build --platform android --profile preview",
-    "build:android:production": "eas build --platform android --profile production"
+    "build:android:production": "eas build --platform android --profile production",
+    "build:ios": "eas build --platform ios --profile preview",
+    "build:ios:simulator": "eas build --platform ios --profile preview"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.7.2",
     "@react-navigation/native": "^7.1.19",
     "expo": "54.0.22",
+    "expo-image": "^3.0.10",
     "expo-location": "~19.0.7",
     "expo-mail-composer": "~15.0.7",
     "expo-navigation-bar": "~5.0.9",

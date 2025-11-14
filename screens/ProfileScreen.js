@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert, InteractionManager } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { fetchLondonPubs } from '../services/PubService';
+import { fetchLondonPubs, fetchBoroughSummaries } from '../services/PubService';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import PintGlassIcon from '../components/PintGlassIcon';
@@ -38,9 +38,9 @@ export default function ProfileScreen() {
   const [visitedCount, setVisitedCount] = useState(
     initialCachedStats?.visitedCount || 0
   );
-  const [totalCount, setTotalCount] = useState(
-    initialCachedStats?.totalCount || 0
-  );
+  
+  // Use totalCount from cached stats (set by primeProfileStatsFromPubs when all pubs loaded)
+  const [totalCount, setTotalCount] = useState(initialCachedStats?.totalCount || 0);
   const [areaStatsRaw, setAreaStatsRaw] = useState(
     initialCachedStats?.areaStats || []
   );
@@ -65,6 +65,7 @@ export default function ProfileScreen() {
       : {},
   });
   const hasCalculatedDistances = useRef(!!initialCachedStats?.location);
+  const boroughSummariesCacheRef = useRef(null); // Cache borough summaries to avoid repeated fetches
 
   const handleAreaPress = useCallback((areaName) => {
     // Navigate to Map tab and pass the area name as a parameter
@@ -121,13 +122,14 @@ export default function ProfileScreen() {
 
       setPubs(stats.pubs || []);
       setVisitedCount(stats.visitedCount || 0);
+      
+      // Use totalCount from cached stats (accurate total from all pubs)
       setTotalCount(stats.totalCount || 0);
+      
       setAreaStatsRaw(
         Array.isArray(stats.areaStats) ? stats.areaStats : []
       );
-      setBoroughStatsRaw(
-        Array.isArray(stats.boroughStats) ? stats.boroughStats : []
-      );
+      setBoroughStatsRaw(boroughStats);
 
       if (stats.location) {
         setCurrentLocation(stats.location);
@@ -144,14 +146,51 @@ export default function ProfileScreen() {
     [distanceCacheRef, hasCalculatedDistances]
   );
 
+  // Calculate total pub count from borough summaries (non-intensive)
+  // Handles both boroughSummaries (with totalPubs) and boroughStats (with total)
+  const calculateTotalCountFromBoroughs = useCallback((boroughData) => {
+    if (!Array.isArray(boroughData) || boroughData.length === 0) {
+      return 0;
+    }
+    // Sum up total pubs from all boroughs
+    // Handle both structures: boroughSummaries use 'totalPubs', boroughStats use 'total'
+    return boroughData.reduce((sum, borough) => {
+      return sum + (borough.totalPubs || borough.total || 0);
+    }, 0);
+  }, []);
+
   const loadStats = useCallback(async () => {
     // Load current user
     const user = await getCurrentUserSecure();
     setCurrentUser(user);
 
-    const allPubs = await fetchLondonPubs();
+    // Get cached stats for totalCount (total count doesn't change when visiting pubs)
+    const cachedStats = getCachedProfileStats();
+
+    // Always fetch fresh pubs to get latest visited status from AsyncStorage
+    // This ensures that visiting a pub is immediately reflected when switching to ProfileScreen
+    let allPubs = [];
+    try {
+      allPubs = await fetchLondonPubs();
+    } catch (error) {
+      console.error('Error fetching pubs in ProfileScreen:', error);
+      // Fallback to cached data if fetch fails
+      allPubs = cachedStats?.pubs || [];
+    }
+    
     setPubs(allPubs);
-    setTotalCount(allPubs.length);
+    
+    // Use totalCount from cached stats (set by primeProfileStatsFromPubs when all pubs loaded)
+    // This is the accurate total from all pubs in the database
+    // Note: totalCount doesn't change when visiting pubs, so using cached value is safe
+    const cachedTotalCount = cachedStats?.totalCount;
+    if (typeof cachedTotalCount === 'number' && cachedTotalCount > 0) {
+      setTotalCount(cachedTotalCount);
+    } else {
+      // Fallback: use allPubs length if cache doesn't have totalCount yet
+      setTotalCount(allPubs.length);
+    }
+    
     const visited = allPubs.filter(p => p.isVisited);
     setVisitedCount(visited.length);
 
@@ -340,9 +379,13 @@ export default function ProfileScreen() {
 
     setAreaStatsRaw(stats);
     setBoroughStatsRaw(boroughStats);
+    
+    // Calculate accurate total count from borough stats (not just loaded pubs)
+    const accurateTotalCount = calculateTotalCountFromBoroughs(boroughStats);
+    
     cacheProfileStats({
       pubs: allPubs,
-      totalCount: allPubs.length,
+      totalCount: accurateTotalCount, // Use accurate total from borough stats
       visitedCount: visited.length,
       areaStats: stats,
       boroughStats,
@@ -350,7 +393,15 @@ export default function ProfileScreen() {
       boroughDistanceMap: { ...distanceCacheRef.current.boroughs },
       location: userLocation || null,
     });
-  }, [cacheProfileStats, currentLocation, distanceCacheRef, getCurrentLocation, hasCalculatedDistances]);
+  }, [cacheProfileStats, currentLocation, distanceCacheRef, getCurrentLocation, hasCalculatedDistances, calculateTotalCountFromBoroughs]);
+
+  // Update total count when cached stats update (from background pub loading)
+  useEffect(() => {
+    const cachedStats = getCachedProfileStats();
+    if (cachedStats?.totalCount && cachedStats.totalCount !== totalCount) {
+      setTotalCount(cachedStats.totalCount);
+    }
+  }, [totalCount]);
 
   useEffect(() => {
     let isActive = true;
@@ -375,13 +426,18 @@ export default function ProfileScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // Show cached data immediately for instant display
       const cached = getCachedProfileStats();
       if (cached) {
         applyProfileStats(cached);
       }
 
-      loadStats().catch((error) => {
-        console.error('Error loading profile stats:', error);
+      // Refresh in background (non-blocking)
+      // Use InteractionManager to defer heavy computation
+      InteractionManager.runAfterInteractions(() => {
+        loadStats().catch((error) => {
+          console.error('Error loading profile stats:', error);
+        });
       });
     }, [applyProfileStats, loadStats])
   );

@@ -625,6 +625,6 @@ export const refreshSession = async () => {
   }
 };
 
-// Re-export stats functions from original UserService
-export { syncUserStats, getUserStats, searchUsers, getUserById } from './UserService';
+// Note: Stats functions are in UserService but not re-exported here to avoid circular dependency
+// Import them directly from UserService where needed: import { syncUserStats } from './UserService'
 

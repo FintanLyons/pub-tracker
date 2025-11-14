@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Keyboard,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoute, useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -24,9 +25,13 @@ import {
   primeProfileStatsFromPubs,
   updateCachedProfileLocation,
 } from '../services/ProfileStatsCache';
+import { getCurrentUserSecure } from '../services/SecureAuthService';
+import { syncUserStats } from '../services/UserService';
+import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
+import { getUserLeagues, getLeagueLeaderboard } from '../services/LeagueService';
+import { cacheLeaderboardData } from '../services/LeaderboardCache';
 import PintGlassIcon from '../components/PintGlassIcon';
 import AreaIcon from '../components/AreaIcon';
-import boroughIcon from '../assets/borough.png';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
@@ -58,6 +63,7 @@ import {
 } from './map/utils';
 import { useAreaStats } from './map/hooks/useAreaStats';
 import { useNearestAreaKeys } from './map/hooks/useNearestAreas';
+import { useViewportPubs } from './map/hooks/useViewportPubs';
 
 const AMBER = COLORS.amber;
 const MEDIUM_GREY = COLORS.grey;
@@ -203,9 +209,6 @@ const BoroughMarker = React.memo(
         tracksViewChanges={tracksViewChanges}
         onPress={handlePress}
       >
-        <View pointerEvents="none" style={styles.boroughMarkerIconWrapper}>
-          <Image source={boroughIcon} style={styles.boroughMarkerIcon} />
-        </View>
         <Callout tooltip>
           <View style={styles.boroughCallout}>
             <Text style={styles.boroughCalloutText}>{summary.borough}</Text>
@@ -222,16 +225,55 @@ const BoroughMarker = React.memo(
     prev.completion === next.completion
 );
 
+const PubMarker = React.memo(
+  ({ pub, onPress }) => {
+    if (!pub || typeof pub.lat !== 'number' || typeof pub.lon !== 'number') {
+      return null;
+    }
+
+    const handlePress = () => {
+      onPress(pub);
+    };
+
+    return (
+      <Marker
+        coordinate={{ latitude: pub.lat, longitude: pub.lon }}
+        onPress={handlePress}
+      >
+        <View style={styles.markerContainer}>
+          <PintGlassIcon
+            size={28}
+            color={pub.isVisited ? AMBER : MEDIUM_GREY}
+          />
+        </View>
+      </Marker>
+    );
+  },
+  (prev, next) => {
+    // Only re-render if pub id, coordinates, or visited status changes
+    return (
+      prev.pub?.id === next.pub?.id &&
+      prev.pub?.lat === next.pub?.lat &&
+      prev.pub?.lon === next.pub?.lon &&
+      prev.pub?.isVisited === next.pub?.isVisited &&
+      prev.onPress === next.onPress
+    );
+  }
+);
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute();
-  const { isLocationLoaded, setIsLocationLoaded } = useContext(LoadingContext);
+  const { isLocationLoaded, setIsLocationLoaded, setIsInitialPubsLoaded } = useContext(LoadingContext);
   const [allPubs, setAllPubs] = useState([]); // Store unfiltered pubs
   const [selectedPub, setSelectedPub] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [mapRegion, setMapRegion] = useState(LONDON_REGION);
+  // Start with null region - will be set to user location once available
+  // This prevents loading pubs for the entire London region initially
+  const [mapRegion, setMapRegion] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
+  const [hasSetInitialRegion, setHasSetInitialRegion] = useState(false);
   const [markerMode, setMarkerMode] = useState(MARKER_MODES.BOROUGHS);
   const [heading, setHeading] = useState(0);
   const [showFilterScreen, setShowFilterScreen] = useState(false);
@@ -256,7 +298,8 @@ export default function MapScreen() {
   const isNavigatingRef = useRef(false); // Track when doing programmatic navigation
   const lastLocationUpdateRef = useRef(0); // Track last location update time for throttling
   const regionChangeTimeoutRef = useRef(null); // Track region change throttling timeout
-  const lastCommittedRegionRef = useRef(LONDON_REGION);
+  // Start with null - will be set when user location is available
+  const lastCommittedRegionRef = useRef(null);
   const lastLocationRef = useRef(null);
   const lastHeadingRef = useRef(null);
   const [boroughSummaries, setBoroughSummaries] = useState([]);
@@ -290,6 +333,44 @@ export default function MapScreen() {
     return Array.from(boroughSet).sort((a, b) => a.localeCompare(b));
   }, [boroughSummaries, allPubs]);
 
+  // Track if initial pubs have been loaded
+  const initialPubsLoadedRef = useRef(false);
+
+  // Callback for when viewport pubs are loaded
+  const handleViewportPubsLoaded = useCallback((pubs) => {
+    if (Array.isArray(pubs) && pubs.length > 0) {
+      mergePubs(pubs);
+      
+      // Mark initial pubs as loaded (only once)
+      if (!initialPubsLoadedRef.current && setIsInitialPubsLoaded) {
+        initialPubsLoadedRef.current = true;
+        setIsInitialPubsLoaded(true);
+      }
+    }
+  }, [mergePubs, setIsInitialPubsLoaded]);
+
+  // Use viewport-based loading instead of loading all pubs
+  // Only start loading once we have a region (user location or fallback)
+  const { loadPubsForRegion: loadPubsForViewportRegion, isLoading: isLoadingViewportPubs } = useViewportPubs(
+    mapRegion || lastCommittedRegionRef.current || null,
+    handleViewportPubsLoaded
+  );
+  
+  // If viewport loading completes with no pubs (error case), still mark as loaded
+  useEffect(() => {
+    if (!isLoadingViewportPubs && !initialPubsLoadedRef.current && setIsInitialPubsLoaded) {
+      // Give it a moment in case pubs are still loading
+      const timer = setTimeout(() => {
+        if (!initialPubsLoadedRef.current) {
+          initialPubsLoadedRef.current = true;
+          setIsInitialPubsLoaded(true);
+        }
+      }, 2000); // Wait 2 seconds max for initial load
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isLoadingViewportPubs, setIsInitialPubsLoaded]);
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -320,20 +401,83 @@ export default function MapScreen() {
       }
     };
 
-    const loadAllPubs = async () => {
+    // Load all pubs in background for accurate total counts
+    // Store in ProfileStatsCache (not React state) to avoid performance issues
+    // Only viewport pubs are kept in allPubs state for fast UI
+    const loadAllPubsInBackground = async () => {
       try {
-        const pubs = await fetchLondonPubs();
-        if (!isCancelled && Array.isArray(pubs)) {
-          mergePubs(pubs);
-          primeProfileStatsFromPubs(pubs);
-        }
+        // Use InteractionManager to defer this until after initial render
+        InteractionManager.runAfterInteractions(async () => {
+          if (isCancelled) return;
+          
+          // Fetch all pubs without bounds to get complete dataset
+          const allPubsData = await fetchLondonPubs();
+          if (!isCancelled && Array.isArray(allPubsData) && allPubsData.length > 0) {
+            // Store all pubs in ProfileStatsCache for accurate counts
+            // Do NOT merge into allPubs state - that would cause performance issues
+            // Only viewport pubs should be in React state (handled by viewport loading)
+            primeProfileStatsFromPubs(allPubsData);
+          }
+        });
       } catch (error) {
-        console.error('Error preloading all pubs:', error);
+        console.error('Error loading all pubs in background:', error);
+      }
+    };
+
+    // Preload leaderboard data in background for fast LeaderboardScreen loading
+    const preloadLeaderboardData = async () => {
+      try {
+        // Use InteractionManager to defer this until after initial render
+        InteractionManager.runAfterInteractions(async () => {
+          if (isCancelled) return;
+          
+          try {
+            const user = await getCurrentUserSecure();
+            if (!user || !user.id) {
+              return; // Not logged in, skip leaderboard preload
+            }
+
+            // Sync user stats first
+            await syncUserStats(user.id);
+
+            // Load all leaderboard data
+            const [friends, pendingRequests, leagues] = await Promise.all([
+              getFriendsLeaderboard(user.id),
+              getPendingFriendRequests(user.id),
+              getUserLeagues(user.id),
+            ]);
+
+            // Load first league's leaderboard if available
+            let leagueLeaderboard = [];
+            if (leagues && leagues.length > 0) {
+              try {
+                leagueLeaderboard = await getLeagueLeaderboard(leagues[0].id);
+              } catch (error) {
+                console.warn('Error loading first league leaderboard:', error);
+              }
+            }
+
+            // Cache the leaderboard data
+            cacheLeaderboardData({
+              friendsLeaderboard: friends || [],
+              pendingRequestsCount: pendingRequests?.length || 0,
+              leagues: leagues || [],
+              leagueLeaderboard: leagueLeaderboard || [],
+              selectedLeagueId: leagues && leagues.length > 0 ? leagues[0].id : null,
+            });
+          } catch (error) {
+            console.warn('Error preloading leaderboard data:', error);
+            // Don't throw - this is background preloading, failures are acceptable
+          }
+        });
+      } catch (error) {
+        console.warn('Error setting up leaderboard preload:', error);
       }
     };
 
     loadBoroughSummaries();
-    loadAllPubs();
+    loadAllPubsInBackground();
+    preloadLeaderboardData();
 
     return () => {
       isCancelled = true;
@@ -420,13 +564,17 @@ export default function MapScreen() {
             setHeading(initialHeading);
           }
           
-          // Set initial map region to user's location
+          // Set initial map region to user's location with smaller zoom (fewer pubs to load)
           const initialRegion = {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
+            latitudeDelta: 0.02, // Much smaller - shows ~2km area instead of ~10km
+            longitudeDelta: 0.02,
           };
+          
+          // Set region state first (this will trigger viewport loading)
+          setMapRegion(initialRegion);
+          setHasSetInitialRegion(true);
           commitMapRegion(initialRegion);
           
           // Mark as navigating to prevent onRegionChangeComplete from overriding
@@ -486,13 +634,43 @@ export default function MapScreen() {
             }
           );
         } else {
-          // Permission denied, use London as fallback
+          // Permission denied, use smaller region around central London as fallback
           setIsLocationLoaded(true);
+          if (!hasSetInitialRegion) {
+            const fallbackRegion = {
+              latitude: 51.5074,
+              longitude: -0.1278,
+              latitudeDelta: 0.02, // Small region around central London
+              longitudeDelta: 0.02,
+            };
+            setMapRegion(fallbackRegion);
+            setHasSetInitialRegion(true);
+            commitMapRegion(fallbackRegion);
+            
+            if (mapRef.current) {
+              mapRef.current.animateToRegion(fallbackRegion, 0);
+            }
+          }
         }
       } catch (error) {
         console.error('Location setup error:', error);
-        // On error, use London as fallback
+        // On error, use smaller region around central London as fallback
         setIsLocationLoaded(true);
+        if (!hasSetInitialRegion) {
+          const fallbackRegion = {
+            latitude: 51.5074,
+            longitude: -0.1278,
+            latitudeDelta: 0.02, // Small region around central London
+            longitudeDelta: 0.02,
+          };
+          setMapRegion(fallbackRegion);
+          setHasSetInitialRegion(true);
+          commitMapRegion(fallbackRegion);
+          
+          if (mapRef.current) {
+            mapRef.current.animateToRegion(fallbackRegion, 0);
+          }
+        }
       }
     };
     
@@ -884,11 +1062,11 @@ export default function MapScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    if (Array.isArray(allPubs) && allPubs.length > 0) {
-      primeProfileStatsFromPubs(allPubs);
-    }
-  }, [allPubs]);
+  // NOTE: We no longer update profile stats from allPubs state because:
+  // 1. allPubs only contains viewport pubs (for performance reasons)
+  // 2. The correct total count comes from loadAllPubsInBackground which fetches ALL pubs
+  // 3. Calling primeProfileStatsFromPubs with viewport pubs would overwrite the correct total
+  // Profile stats are updated by loadAllPubsInBackground which runs on mount and fetches all pubs
 
   // Interpolate color from grey to amber based on completion percentage (0-100)
   const boroughMarkerCacheRef = useRef({ key: null, elements: [] });
@@ -967,26 +1145,15 @@ export default function MapScreen() {
   }, [markerMode, areaStatsMap, handleAreaMarkerPress, activeBoroughs, focusedBorough, interpolateColor]);
 
   const pubMarkerElements = useMemo(() => {
-    return filteredPubs.map((p) => {
-      if (typeof p.lat !== 'number' || typeof p.lon !== 'number') {
-        return null;
-      }
-
-      return (
-        <Marker
+    return filteredPubs
+      .filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number')
+      .map((p) => (
+        <PubMarker
           key={p.id}
-          coordinate={{ latitude: p.lat, longitude: p.lon }}
-          onPress={() => handlePubPress(p)}
-        >
-          <View style={styles.markerContainer}>
-            <PintGlassIcon
-              size={28}
-              color={p.isVisited ? AMBER : MEDIUM_GREY}
-            />
-          </View>
-        </Marker>
-      );
-    }).filter(Boolean);
+          pub={p}
+          onPress={handlePubPress}
+        />
+      ));
   }, [filteredPubs, handlePubPress]);
 
   const updateMarkerMode = useCallback((region) => {
@@ -1052,11 +1219,19 @@ export default function MapScreen() {
       mapRef.current.animateToRegion(newRegion, 1000);
       setTimeout(() => {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }, 1050);
     } else {
       isNavigatingRef.current = false;
+      // Load pubs for the new region
+      if (loadPubsForViewportRegion) {
+        loadPubsForViewportRegion(newRegion);
+      }
     }
-  }, [commitMapRegion]);
+  }, [commitMapRegion, loadPubsForViewportRegion]);
 
   const boroughMarkerElements = useMemo(() => {
     if (!Array.isArray(boroughSummaries) || boroughSummaries.length === 0) {
@@ -1100,15 +1275,8 @@ export default function MapScreen() {
       return boroughMarkerCacheRef.current.elements;
     }
 
-    const newElements = entries.map(({ summary, completion }) => (
-      <BoroughMarker
-        key={`borough-${summary.borough}`}
-        summary={summary}
-        completion={Number.isFinite(completion) ? Number(completion.toFixed(4)) : 0}
-        onPress={handleBoroughMarkerPress}
-        tracksViewChanges={shouldTrackBoroughViews}
-      />
-    ));
+    // Logic retained but markers not rendered - return empty array
+    const newElements = [];
 
     boroughMarkerCacheRef.current = { key: cacheKey, elements: newElements };
     return newElements;
@@ -1148,14 +1316,22 @@ export default function MapScreen() {
       
       setTimeout(() => {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }, 1050);
     } else {
       isNavigatingRef.current = false;
+      // Load pubs for the new region
+      if (loadPubsForViewportRegion) {
+        loadPubsForViewportRegion(newRegion);
+      }
     }
     
     // Don't set selectedPub - just zoom in
     setSelectedPub(null);
-  }, [filteredPubs, commitMapRegion]);
+  }, [filteredPubs, commitMapRegion, loadPubsForViewportRegion]);
 
   // Pre-sort pubs alphabetically once when allPubs changes - memoized for performance
   const sortedPubs = useMemo(() => {
@@ -1318,13 +1494,21 @@ export default function MapScreen() {
       mapRef.current.animateToRegion(newRegion, 1000);
       setTimeout(() => {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }, 1050);
     } else {
       isNavigatingRef.current = false;
+      // Load pubs for the new region
+      if (loadPubsForViewportRegion) {
+        loadPubsForViewportRegion(newRegion);
+      }
     }
 
     return true;
-  }, [boroughSummaries, allPubs, commitMapRegion]);
+  }, [boroughSummaries, allPubs, commitMapRegion, loadPubsForViewportRegion]);
 
   // Shared function to search for an area using pub coordinates
   // If applyAreaFilter is true, also filter pubs to only show pubs in that area
@@ -1375,9 +1559,17 @@ export default function MapScreen() {
           // Reset navigation flag after animation completes
           setTimeout(() => {
             isNavigatingRef.current = false;
+            // Load pubs for the new region
+            if (loadPubsForViewportRegion) {
+              loadPubsForViewportRegion(newRegion);
+            }
           }, 1050);
         } else {
           isNavigatingRef.current = false;
+          // Load pubs for the new region
+          if (loadPubsForViewportRegion) {
+            loadPubsForViewportRegion(newRegion);
+          }
         }
         
         // Explicitly don't set selectedPub - no pub card should appear
@@ -1424,9 +1616,17 @@ export default function MapScreen() {
           
           setTimeout(() => {
             isNavigatingRef.current = false;
+            // Load pubs for the new region
+            if (loadPubsForViewportRegion) {
+              loadPubsForViewportRegion(newRegion);
+            }
           }, 1050);
         } else {
           isNavigatingRef.current = false;
+          // Load pubs for the new region
+          if (loadPubsForViewportRegion) {
+            loadPubsForViewportRegion(newRegion);
+          }
         }
         
         // Explicitly don't set selectedPub - no pub card should appear
@@ -1439,7 +1639,7 @@ export default function MapScreen() {
     }
     
     return false; // Failed
-  }, [allPubs, commitMapRegion]);
+  }, [allPubs, commitMapRegion, loadPubsForViewportRegion]);
 
   // Shared function to search for a pub
   const searchPub = useCallback((pub) => {
@@ -1465,9 +1665,17 @@ export default function MapScreen() {
         // Reset navigation flag after animation completes
         setTimeout(() => {
           isNavigatingRef.current = false;
+          // Load pubs for the new region
+          if (loadPubsForViewportRegion) {
+            loadPubsForViewportRegion(newRegion);
+          }
         }, 1050);
       } else {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }
       
       // Set the selected pub
@@ -1478,7 +1686,7 @@ export default function MapScreen() {
       isNavigatingRef.current = false;
       return false; // Failed
     }
-  }, [commitMapRegion]);
+  }, [commitMapRegion, loadPubsForViewportRegion]);
 
   const handleSearch = useCallback(async (queryOverride = null) => {
     const queryToUse = queryOverride !== null ? queryOverride : searchQuery;
@@ -1551,11 +1759,17 @@ export default function MapScreen() {
         mapRef.current?.animateToRegion(newRegion, 1000);
         // Don't set selectedPub for general searches - no pub card
         setSelectedPub(null);
+        // Load pubs for the new region
+        setTimeout(() => {
+          if (loadPubsForViewportRegion) {
+            loadPubsForViewportRegion(newRegion);
+          }
+        }, 1100);
       }
     } catch (error) {
       console.error('Search error:', error);
     }
-  }, [searchQuery, allAreas, allPubs, allBoroughNames, searchArea, searchPub, searchBorough]);
+  }, [searchQuery, allAreas, allPubs, allBoroughNames, searchArea, searchPub, searchBorough, loadPubsForViewportRegion]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
@@ -1681,6 +1895,10 @@ export default function MapScreen() {
       // Clear navigation flag after animation completes
       setTimeout(() => {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }, 1050);
       return;
     }
@@ -1733,12 +1951,16 @@ export default function MapScreen() {
       // Clear navigation flag after animation completes
       setTimeout(() => {
         isNavigatingRef.current = false;
+        // Load pubs for the new region
+        if (loadPubsForViewportRegion) {
+          loadPubsForViewportRegion(newRegion);
+        }
       }, 1050);
     } catch (error) {
       console.error('Error getting location:', error);
       isNavigatingRef.current = false;
     }
-  }, [currentLocation, commitMapRegion]);
+  }, [currentLocation, commitMapRegion, loadPubsForViewportRegion]);
 
   const openMissingPubModal = useCallback(() => {
     setMissingPubError(null);
@@ -1813,7 +2035,7 @@ export default function MapScreen() {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={LONDON_REGION}
+        initialRegion={mapRegion || LONDON_REGION}
         onRegionChangeComplete={(region) => {
           // Ignore region changes during programmatic navigation
           if (isNavigatingRef.current) {
@@ -2013,17 +2235,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  boroughMarkerIconWrapper: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  boroughMarkerIcon: {
-    width: 32,
-    height: 32,
-    resizeMode: 'contain',
   },
   markerContainer: {
     backgroundColor: 'transparent',

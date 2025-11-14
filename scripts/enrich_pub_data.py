@@ -1,7 +1,7 @@
 """
 Pub Data Enrichment Script
 
-This script uses Google Gemini AI to enrich pub data from Supabase:
+This script uses OpenAI GPT models to enrich pub data from Supabase:
 - Finds founding date
 - Generates 100-200 word history/interesting features summary
 - Determines pub ownership
@@ -9,13 +9,11 @@ This script uses Google Gemini AI to enrich pub data from Supabase:
 - Updates Supabase with the enriched data
 
 Setup:
-1. Install dependencies: pip install supabase google-generativeai python-dotenv
-2. Get Google API key: https://aistudio.google.com/app/apikey (FREE!)
-   (Same key works for both Gemini AI and Custom Search)
-3. Create .env file in scripts/ directory or project root with:
+1. Install dependencies: pip install supabase openai python-dotenv
+2. Create .env file in scripts/ directory or project root with:
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your_service_role_key (for writes)
-   GOOGLE_API_KEY=your_google_api_key
+   OPENAI_API_KEY=your_openai_api_key
 
 Usage:
 - python enrich_pub_data.py                  # Enrich pubs with missing data (default)
@@ -25,14 +23,16 @@ Usage:
 ⚠️  SECURITY: Never commit API keys to git! The .env file is in .gitignore.
 """
 
+import argparse
+import json
 import os
 import re
 import sys
 import time
-from typing import Optional
+from typing import Optional, Sequence
 
 from dotenv import load_dotenv
-from google import genai
+from openai import OpenAI
 from supabase import Client, create_client
 
 # Load environment variables from .env file
@@ -45,12 +45,11 @@ load_dotenv()
 #     Create a .env file in the scripts/ directory or project root with:
 #     SUPABASE_URL=https://your-project.supabase.co
 #     SUPABASE_KEY=your_service_role_key
-#     GOOGLE_API_KEY=your_google_api_key (same key used for Gemini AI and Custom Search)
+#     OPENAI_API_KEY=your_openai_api_key
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Validate that all required environment variables are set
 missing_keys = []
@@ -58,8 +57,8 @@ if not SUPABASE_URL:
     missing_keys.append('SUPABASE_URL')
 if not SUPABASE_KEY:
     missing_keys.append('SUPABASE_KEY')
-if not GOOGLE_API_KEY:
-    missing_keys.append('GOOGLE_API_KEY')
+if not OPENAI_API_KEY:
+    missing_keys.append('OPENAI_API_KEY')
 
 if missing_keys:
     print("❌ Error: Missing required environment variables!")
@@ -67,270 +66,187 @@ if missing_keys:
     print("\n   Please create a .env file in the scripts/ directory or project root with:")
     print("   SUPABASE_URL=https://your-project.supabase.co")
     print("   SUPABASE_KEY=your_service_role_key")
-    print("   GOOGLE_API_KEY=your_google_api_key")
-    print("   Get Google API key: https://aistudio.google.com/app/apikey")
+    print("   OPENAI_API_KEY=your_openai_api_key")
     print("\n   Note: The .env file is already in .gitignore and will not be committed.")
     sys.exit(1)
 
 # Initialize clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 
-def extract_borough_from_text(text: Optional[str]) -> Optional[str]:
+def extract_message_text(message) -> str:
+    """Return the textual content from a chat completion message."""
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        pieces = []
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if text:
+                    pieces.append(str(text))
+            elif isinstance(part, str):
+                pieces.append(part)
+        return "\n".join(pieces).strip()
+    if content is None:
+        return ""
+    return str(content).strip()
+
+
+def extract_year_from_text(text: str) -> Optional[str]:
     if not text:
         return None
-
-    borough = None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.upper().startswith('BOROUGH'):
-            _, _, value = line.partition(':')
-            borough = value.strip() or None
-            break
-    if borough is None:
-        match = re.search(r'BOROUGH\s*[:\-]\s*([A-Za-z\s\'&-]+)', text, re.IGNORECASE)
-        if match:
-            borough = match.group(1).strip()
-
-    if not borough:
-        return None
-
-    lower = borough.lower()
-    if lower in {'unknown', 'not known', 'n/a', 'none'}:
-        return None
-
-    # Normalise spacing/capitalisation (title case keeps internal apostrophes)
-    return ' '.join(word.capitalize() if word else '' for word in borough.split())
+    current_year = time.localtime().tm_year
+    for match in re.finditer(r"(1[6-9]\d{2}|20\d{2})", text):
+        year = int(match.group(0))
+        if 1500 <= year <= current_year:
+            return str(year)
+    return None
 
 
-def get_pub_borough(pub_name: str, area: Optional[str], address: Optional[str] = "") -> Optional[str]:
-    """
-    Ask Gemini to identify the London borough for a given pub/area.
-    Returns None when the borough cannot be determined confidently.
-    """
-    context = f"Pub name: {pub_name}"
-    if area:
-        context += f"\nNeighbourhood: {area}"
-    if address:
-        context += f"\nAddress: {address}"
-
-    prompt = f"""You are a London geography expert. Based on the information below,
-identify the official London borough (one of the 32 London boroughs or the City of London)
-that the pub belongs to. If the location is outside Greater London or cannot be determined,
-answer Unknown.
-
-Pub information:
-{context}
-
-Respond exactly in the format:
-BOROUGH: <borough name or Unknown>"""
-
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        return extract_borough_from_text(response.text)
-    except Exception as exc:
-        print(f"   ❌ AI Error determining borough: {exc}")
-        return None
+def parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Enrich pub data and update Supabase records.")
+    parser.add_argument('--features-only', action='store_true', help='Only detect and update feature flags.')
+    parser.add_argument('--all', action='store_true', help='Re-enrich all pubs regardless of existing data.')
+    parser.add_argument('--delay', type=float, default=0.2, help='Delay (in seconds) between AI requests when enriching.')
+    parser.add_argument('--limit', type=int, default=None, help='Optional maximum number of pubs to process.')
+    return parser.parse_args(argv)
 
 
 def get_pub_features(pub_name: str, area: str, description: str = "", history: str = "") -> dict:
     """
-    Use AI to detect which features a pub has based on its description.
-    Returns: dict with boolean values for each feature
+    Use GPT to detect which features a pub has.
+    The model must respond strictly in JSON.
     """
-    context = f"Pub name: {pub_name}\nArea: {area}"
-    if description:
-        context += f"\nDescription: {description}"
-    if history:
-        context += f"\nHistory: {history}"
-    
-    prompt = f"""Analyze this London pub and determine which of these features it has. Only answer YES if you are confident based on the description. If unsure or no information, answer NO.
+    context = f"Pub name: {pub_name}\nArea: {area}\nDescription: {description}\nHistory: {history}"
+    prompt = f"""
+You are a factual data extractor for a pub database. Use the text below only.
+If a feature is not clearly mentioned, mark it as false. Never infer or guess.
 
-Pub information:
+Return valid JSON with keys:
+{{
+  "PUB_GARDEN": true/false,
+  "LIVE_MUSIC": true/false,
+  "FOOD_AVAILABLE": true/false,
+  "DOG_FRIENDLY": true/false,
+  "POOL_DARTS": true/false,
+  "PARKING": true/false,
+  "ACCOMMODATION": true/false,
+  "CASK_REAL_ALE": true/false
+}}
+
+Text:
 {context}
-
-For each feature below, answer ONLY with YES or NO:
-
-PUB_GARDEN: Does it have a pub garden, beer garden, outdoor seating area, or patio?
-LIVE_MUSIC: Does it have live music, bands, performances, or entertainment?
-FOOD_AVAILABLE: Does it serve food, meals, or have a restaurant/kitchen?
-DOG_FRIENDLY: Is it dog-friendly or allows dogs?
-POOL_DARTS: Does it have pool tables, darts, or pub games?
-PARKING: Does it mention parking availability?
-ACCOMMODATION: Does it offer rooms, hotel, or accommodation?
-CASK_REAL_ALE: Does it serve cask ale, real ale, or traditional hand-pulled beer?
-
-Format your response EXACTLY as:
-PUB_GARDEN: [YES/NO]
-LIVE_MUSIC: [YES/NO]
-FOOD_AVAILABLE: [YES/NO]
-DOG_FRIENDLY: [YES/NO]
-POOL_DARTS: [YES/NO]
-PARKING: [YES/NO]
-ACCOMMODATION: [YES/NO]
-CASK_REAL_ALE: [YES/NO]
-
-Remember: Only say YES if there is clear evidence. If uncertain, say NO."""
+"""
 
     try:
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
+        response = openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=1,
         )
-        
-        content = response.text
-        
-        # Parse response
-        features = {
-            'has_pub_garden': False,
-            'has_live_music': False,
-            'has_food_available': False,
-            'has_dog_friendly': False,
-            'has_pool_darts': False,
-            'has_parking': False,
-            'has_accommodation': False,
-            'has_cask_real_ale': False,
-        }
-        
-        lines = content.split('\n')
-        for line in lines:
-            line = line.strip()
-            if 'PUB_GARDEN:' in line:
-                features['has_pub_garden'] = 'YES' in line.upper()
-            elif 'LIVE_MUSIC:' in line:
-                features['has_live_music'] = 'YES' in line.upper()
-            elif 'FOOD_AVAILABLE:' in line:
-                features['has_food_available'] = 'YES' in line.upper()
-            elif 'DOG_FRIENDLY:' in line:
-                features['has_dog_friendly'] = 'YES' in line.upper()
-            elif 'POOL_DARTS:' in line or 'POOL/DARTS:' in line:
-                features['has_pool_darts'] = 'YES' in line.upper()
-            elif 'PARKING:' in line:
-                features['has_parking'] = 'YES' in line.upper()
-            elif 'ACCOMMODATION:' in line:
-                features['has_accommodation'] = 'YES' in line.upper()
-            elif 'CASK_REAL_ALE:' in line or 'REAL_ALE:' in line:
-                features['has_cask_real_ale'] = 'YES' in line.upper()
-        
-        return features
-        
-    except Exception as e:
-        print(f"   ❌ AI Error detecting features: {e}")
-        # Return all False on error
+        raw_text = extract_message_text(response.choices[0].message)
+        try:
+            result = json.loads(raw_text)
+        except json.JSONDecodeError as decode_error:
+            print(f"❌ AI JSON parse error detecting features: {decode_error}")
+            result = {}
         return {
-            'has_pub_garden': False,
-            'has_live_music': False,
-            'has_food_available': False,
-            'has_dog_friendly': False,
-            'has_pool_darts': False,
-            'has_parking': False,
-            'has_accommodation': False,
-            'has_cask_real_ale': False,
+            'has_pub_garden': result.get("PUB_GARDEN", False),
+            'has_live_music': result.get("LIVE_MUSIC", False),
+            'has_food_available': result.get("FOOD_AVAILABLE", False),
+            'has_dog_friendly': result.get("DOG_FRIENDLY", False),
+            'has_pool_darts': result.get("POOL_DARTS", False),
+            'has_parking': result.get("PARKING", False),
+            'has_accommodation': result.get("ACCOMMODATION", False),
+            'has_cask_real_ale': result.get("CASK_REAL_ALE", False),
         }
+    except Exception as e:
+        print(f"❌ AI Error detecting features: {e}")
+        return {k: False for k in [
+            'has_pub_garden','has_live_music','has_food_available','has_dog_friendly',
+            'has_pool_darts','has_parking','has_accommodation','has_cask_real_ale'
+        ]}
 
-def get_pub_enrichment(pub_name: str, area: str, address: str = "") -> tuple:
+def get_pub_enrichment(pub_name: str, area: str, address: str = "", description: str = "") -> tuple:
     """
-    Use AI to find founding date, generate history, and determine ownership.
-    Returns: (founded_year, history_text, ownership)
+    Get factual enrichment (founded year, narrative history, ownership, sources).
+    The model must return strict JSON and never invent data.
     """
-    # Build context for the AI
-    context = f"Pub name: {pub_name}\nArea: {area}"
-    if address:
-        context += f"\nAddress: {address}"
-    
-    prompt = f"""You are a pub historian filling out a database. Do not add any fluff, just the data. If you are unsure say Not Known. For the following pub in London, provide:
-1. The founding year (or approximate founding year if exact date unknown). Format as 4-digit year (e.g., "1860" or "circa 1820" if approximate).
-2. A 100 to 200 word summary of the pub's history, interesting features, architectural details, notable events, or local significance. As few words as possible.
-3. The ownership/operator of the pub. Be as accurate as possible. Common ownership chains include: Greene King, Stonegate, Wetherspoon, Mitchells & Butlers, Fuller's, Young's, Shepherd Neame, or smaller chains. If it's independently owned, say "Independent". If you cannot determine the ownership, say "Independent". Do not say Stonegate Company, for example (apply to all companies), just say Stonegate unless the company in question lists company explicitly in their name.
-4. The official London borough (one of the 32 boroughs or the City of London) that contains the pub. If you cannot determine this, answer Unknown.
+    context_parts = [
+        f"Pub name: {pub_name}",
+        f"Area: {area}",
+        f"Address: {address}",
+    ]
+    if description:
+        context_parts.append(f"Existing description: {description}")
+    context = "\n".join(part for part in context_parts if part.strip())
+    prompt = f"""
+You are a fact verifier. Use only publicly verifiable information.
+If data cannot be confirmed, set the value to "Unknown".
 
-Pub information:
+Return valid JSON:
+{{
+  "FOUNDED": "year or 'Unknown'",
+  "HISTORY": "120-200 word factual narrative weaving verifiable history, notable features, atmosphere, and accurate details from any provided existing description. Do not mention street addresses, directions, or other location details. Use 'Unknown' only when nothing reliable is available.",
+  "OWNERSHIP": "Company name or 'Independent' if unknown.",
+  "SOURCES": ["Short evidence snippets or URLs supporting the data. Use titles only (no addresses or directions) and keep each entry under 80 characters."]
+}}
+
+Use authoritative UK pub resources whenever possible, especially CAMRA (https://camra.org.uk). If no reliable information is found, return 'Unknown'.
+Never mention that you used the supplied description or context while writing the history.
+
+Text:
 {context}
-
-Please format your response as:
-FOUNDED: [year]
-HISTORY: [100-200 word summary]
-OWNERSHIP: [ownership name]
-BOROUGH: [borough name]
-
-Be accurate and factual. If you cannot find specific information, use reasonable estimates based on the area's history."""
+"""
 
     try:
-        # Use Google Gemini API (free tier available) - simple format like example
-        full_prompt = f"You are a helpful pub historian specializing in London pubs.\n\n{prompt}"
-        
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=full_prompt,
+        response = openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=1,
         )
-        
-        # Get text directly (as shown in example)
-        content = response.text
-        
-        # Parse response
-        founded = None
-        history = None
-        ownership = None
-        borough = None
-        lines = content.split('\n')
-        for line in lines:
-            if line.startswith('FOUNDED:'):
-                founded = line.replace('FOUNDED:', '').strip()
-                # Extract just the year if there's extra text
-                import re
-                year_match = re.search(r'\d{4}', founded)
-                if year_match:
-                    founded = year_match.group(0)
-            elif line.startswith('HISTORY:'):
-                history = line.replace('HISTORY:', '').strip()
-            elif line.startswith('OWNERSHIP:'):
-                ownership = line.replace('OWNERSHIP:', '').strip()
-            elif line.startswith('BOROUGH:'):
-                borough = line.replace('BOROUGH:', '').strip()
-            elif history is None and ':' not in line and line.strip():
-                # If we haven't found history yet, this might be it
-                if not founded:
-                    history = line.strip()
-        
-        # If history wasn't found separately, try to extract from content
-        if not history:
-            # Look for text after "HISTORY:" or after the founded line
-            history_start = content.find('HISTORY:')
-            if history_start != -1:
-                history = content[history_start + 8:].strip()
-                # Remove ownership if it appears after history
-                ownership_start = history.find('OWNERSHIP:')
-                if ownership_start != -1:
-                    history = history[:ownership_start].strip()
-            else:
-                # Fallback: take everything after the first line
-                history = '\n'.join(lines[1:]).strip()
-        
-        # If ownership wasn't found, try to extract from content
-        if not ownership:
-            ownership_start = content.find('OWNERSHIP:')
-            if ownership_start != -1:
-                ownership = content[ownership_start + 10:].strip()
-                # Take only the first line (in case there's more text)
-                ownership = ownership.split('\n')[0].strip()
-        
-        # Default to "Independent" if ownership is not found or is "Not Known"
-        if not ownership or ownership.lower() in ['not known', 'unknown', 'n/a']:
-            ownership = 'Independent'
-        
-        borough = borough or extract_borough_from_text(content)
+        raw_text = extract_message_text(response.choices[0].message)
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as decode_error:
+            print(f"❌ AI JSON parse error during enrichment: {decode_error}")
+            data = {}
 
-        return founded, history, ownership, borough
-        
+        founded = data.get("FOUNDED")
+        if founded and re.match(r"^\d{4}$", founded):
+            year = int(founded)
+            if year < 500 or year > 2025:
+                founded = "Unknown"
+        else:
+            founded = "Unknown" if not founded else founded
+
+        history = data.get("HISTORY", "").strip()
+        if len(history) > 800:
+            history = history[:800].rsplit('.', 1)[0] + "."
+
+        if (not founded or founded.lower() == "unknown") and history:
+            inferred_year = extract_year_from_text(history)
+            if inferred_year:
+                founded = inferred_year
+
+        ownership = data.get("OWNERSHIP") or "Independent"
+        if ownership.strip().lower() in {"unknown", "not known", "n/a", "none", ""}:
+            ownership = "Independent"
+        raw_sources = data.get("SOURCES", [])
+        sources = []
+        if isinstance(raw_sources, list):
+            sources = [str(item).strip() for item in raw_sources if str(item).strip()]
+
+        return founded, history, ownership, sources
+
     except Exception as e:
-        print(f"   ❌ AI Error: {e}")
-        return None, None, None, None
+        print(f"❌ AI Error: {e}")
+        return None, None, "Independent", []
 
 def enrich_pub_features_only(pub_id: str, pub_name: str, area: str, description: str = "", history: str = "") -> bool:
     """
@@ -370,9 +286,9 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", descrip
     """
     print(f"🔍 Enriching: {pub_name} ({area})")
     
-    founded, history, ownership, borough = get_pub_enrichment(pub_name, area, address)
+    founded, history, ownership, sources = get_pub_enrichment(pub_name, area, address, description)
     
-    if not founded and not history and not ownership and not borough:
+    if not founded and not history and not ownership:
         print(f"   ⚠️  Failed to get enrichment data")
         return False
     
@@ -387,6 +303,9 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", descrip
     if ownership:
         update_data['ownership'] = ownership
         print(f"   🏢 Ownership: {ownership}")
+
+    if sources:
+        print(f"   📚 Evidence: {', '.join(sources[:3])}{'…' if len(sources) > 3 else ''}")
     
     # Detect features using AI
     if detect_features:
@@ -402,11 +321,6 @@ def enrich_pub(pub_id: str, pub_name: str, area: str, address: str = "", descrip
             print(f"   ✨ Features found: {', '.join(detected)}")
         else:
             print(f"   ℹ️  No features detected")
-    
-    # Add borough metadata (AI-derived)
-    if borough:
-        update_data['borough'] = borough
-        print(f"   🗺️ Borough: {borough}")
     
     # Update Supabase
     try:
@@ -445,19 +359,15 @@ def get_pubs_to_enrich(only_missing: bool = True):
 
 def main():
     print("🍺 Pub Data Enrichment Script\n")
-    
-    # Check command line arguments
-    borough_only = '--borough-only' in sys.argv
-    features_only = '--features-only' in sys.argv and not borough_only
-    enrich_all = '--all' in sys.argv
-    only_missing = not borough_only and not enrich_all
-    
-    if borough_only:
-        print("📋 Fetching pubs for borough updates...")
-        pubs = supabase.table('pubs').select('id,name,area,address,borough').execute().data
-    elif features_only:
+    args = parse_arguments(sys.argv[1:])
+
+    features_only = args.features_only
+    enrich_all = args.all
+    only_missing = not features_only and not enrich_all
+    delay_between_requests = max(0.0, args.delay)
+
+    if features_only:
         print("📋 Fetching all pubs for feature detection...")
-        # Get all pubs for feature detection
         pubs = supabase.table('pubs').select('id,name,area,address,description,history').execute().data
     elif only_missing:
         print("📋 Fetching pubs with missing data (founded, history, or ownership)...")
@@ -465,50 +375,24 @@ def main():
     else:
         print("📋 Fetching all pubs...")
         pubs = get_pubs_to_enrich(only_missing=only_missing)
-    
+
     if not pubs:
         print("✅ No pubs need enrichment!")
         return
-    
-    print(f"✅ Found {len(pubs)} pubs to enrich\n")
-    
+
+    if args.limit is not None:
+        pubs = pubs[:args.limit]
+
+    total = len(pubs)
+    print(f"✅ Found {total} pubs to enrich\n")
+
     enriched = 0
     failed = 0
-    
+
     for i, pub in enumerate(pubs, 1):
-        print(f"\n[{i}/{len(pubs)}]")
-        
-        if borough_only:
-            borough = get_pub_borough(
-                pub.get('name', 'Unknown pub'),
-                pub.get('area'),
-                pub.get('address', ''),
-            )
-            if not borough:
-                print("   ⚠️  Could not determine borough")
-                success = False
-            elif borough == pub.get('borough'):
-                print("   ℹ️  Borough already up to date")
-                success = True
-            else:
-                try:
-                    response = (
-                        supabase.table('pubs')
-                        .update({'borough': borough})
-                        .eq('id', pub['id'])
-                        .execute()
-                    )
-                    if response.data:
-                        print(f"   ✅ Borough set to {borough}")
-                        success = True
-                    else:
-                        print("   ❌ Update failed")
-                        success = False
-                except Exception as exc:
-                    print(f"   ❌ Supabase Error: {exc}")
-                    success = False
-        elif features_only:
-            # Only detect and update features
+        print(f"\n[{i}/{total}]")
+
+        if features_only:
             success = enrich_pub_features_only(
                 pub['id'],
                 pub['name'],
@@ -517,7 +401,6 @@ def main():
                 pub.get('history', '')
             )
         else:
-            # Full enrichment (history, founded, ownership, and features)
             success = enrich_pub(
                 pub['id'],
                 pub['name'],
@@ -526,21 +409,20 @@ def main():
                 pub.get('description', ''),
                 detect_features=True
             )
-        
+
         if success:
             enriched += 1
         else:
             failed += 1
-        
-        # Rate limiting - wait between requests when using AI enrichment
-        if i < len(pubs) and not borough_only:
-            time.sleep(0.5)  # Wait 0.5 seconds between pubs (increased for feature detection)
-    
-    summary_label = "Updated" if borough_only else "Enriched"
+
+        if i < total and delay_between_requests > 0:
+            time.sleep(delay_between_requests)
+
+    summary_label = "Features updated" if features_only else "Enriched"
     print(f"\n📊 Summary:")
     print(f"   ✅ {summary_label}: {enriched}")
     print(f"   ❌ Failed: {failed}")
-    print(f"   📝 Total: {len(pubs)}")
+    print(f"   📝 Total: {total}")
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,7 @@ const DARK_CHARCOAL = '#1C1C1C';
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
+  const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   
   useEffect(() => {
     preloadProfileStats().catch((error) => {
@@ -25,8 +26,16 @@ export default function TabNavigator() {
     });
   }, []);
   
+  // Show loading screen until both location and initial pubs are loaded
+  const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
+  
   return (
-    <LoadingContext.Provider value={{ isLocationLoaded, setIsLocationLoaded }}>
+    <LoadingContext.Provider value={{ 
+      isLocationLoaded, 
+      setIsLocationLoaded,
+      isInitialPubsLoaded,
+      setIsInitialPubsLoaded,
+    }}>
       <View style={styles.container}>
         <Tab.Navigator
           screenOptions={{
@@ -85,7 +94,7 @@ export default function TabNavigator() {
             }}
           />
         </Tab.Navigator>
-        {!isLocationLoaded && (
+        {!isFullyLoaded && (
           <View style={styles.loadingContainer}>
             <Image 
               source={require('../assets/pub_icon.png')} 

@@ -2,9 +2,11 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getCurrentUserSecure, syncUserStats } from '../services/SecureAuthService';
+import { getCurrentUserSecure } from '../services/SecureAuthService';
+import { syncUserStats } from '../services/UserService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
 import { getUserLeagues, getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
+import { getCachedLeaderboardData } from '../services/LeaderboardCache';
 import AddFriendModal from '../components/AddFriendModal';
 import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
@@ -44,30 +46,62 @@ export default function LeaderboardScreen() {
 
       setCurrentUser(user);
 
-      // Sync current user stats
-      await syncUserStats(user.id);
+      // Try to use cached leaderboard data first (loaded at app startup)
+      const cachedData = getCachedLeaderboardData();
+      if (cachedData) {
+        // Use cached data for instant display
+        setFriendsLeaderboard(cachedData.friendsLeaderboard || []);
+        setPendingRequestsCount(cachedData.pendingRequestsCount || 0);
+        setLeagues(cachedData.leagues || []);
+        
+        if (cachedData.selectedLeagueId && cachedData.leagues) {
+          const cachedLeague = cachedData.leagues.find(l => l.id === cachedData.selectedLeagueId);
+          if (cachedLeague) {
+            setSelectedLeague(cachedLeague);
+            setLeagueLeaderboard(cachedData.leagueLeaderboard || []);
+          }
+        } else {
+          setSelectedLeague(null);
+          setLeagueLeaderboard([]);
+        }
+        
+        setLoading(false);
+        setRefreshing(false);
+      }
 
-      // Load friends leaderboard
-      const friends = await getFriendsLeaderboard(user.id);
-      setFriendsLeaderboard(friends);
+      // Refresh data in background (non-blocking)
+      try {
+        // Sync current user stats
+        await syncUserStats(user.id);
 
-      // Load pending friend requests count
-      const pendingRequests = await getPendingFriendRequests(user.id);
-      setPendingRequestsCount(pendingRequests.length);
+        // Load fresh data
+        const [friends, pendingRequests, userLeagues] = await Promise.all([
+          getFriendsLeaderboard(user.id),
+          getPendingFriendRequests(user.id),
+          getUserLeagues(user.id),
+        ]);
 
-      // Load user leagues
-      const userLeagues = await getUserLeagues(user.id);
-      setLeagues(userLeagues);
+        setFriendsLeaderboard(friends);
+        setPendingRequestsCount(pendingRequests.length);
+        setLeagues(userLeagues);
 
-      // Load first league's leaderboard if available
-      if (userLeagues.length > 0) {
-        const firstLeague = userLeagues[0];
-        setSelectedLeague(firstLeague);
-        const leagueBoard = await getLeagueLeaderboard(firstLeague.id);
-        setLeagueLeaderboard(leagueBoard);
-      } else {
-        setSelectedLeague(null);
-        setLeagueLeaderboard([]);
+        // Load first league's leaderboard if available
+        if (userLeagues.length > 0) {
+          const firstLeague = userLeagues[0];
+          setSelectedLeague(firstLeague);
+          const leagueBoard = await getLeagueLeaderboard(firstLeague.id);
+          setLeagueLeaderboard(leagueBoard);
+        } else {
+          setSelectedLeague(null);
+          setLeagueLeaderboard([]);
+        }
+      } catch (refreshError) {
+        console.error('Error refreshing leaderboard data:', refreshError);
+        // Don't show alert if we have cached data - just log the error
+        const hasCachedData = !!getCachedLeaderboardData();
+        if (!hasCachedData) {
+          Alert.alert('Error', 'Failed to load leaderboard data');
+        }
       }
     } catch (error) {
       console.error('Error loading leaderboard data:', error);

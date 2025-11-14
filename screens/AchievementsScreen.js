@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchLondonPubs } from '../services/PubService';
+import { getCachedProfileStats } from '../services/ProfileStatsCache';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
 
@@ -15,13 +16,21 @@ const BURGUNDY = '#A1183C';
 const SAPPHIRE = '#2F4AA1';
 
 export default function AchievementsScreen() {
-  const [pubs, setPubs] = useState([]);
+  // Initialize with cached data for instant display
+  const initialCachedStats = getCachedProfileStats();
+  const initialPubs = initialCachedStats?.pubs || [];
+  
+  const [pubs, setPubs] = useState(initialPubs);
   const [currentScore, setCurrentScore] = useState(0);
   const [trophies, setTrophies] = useState([]);
-
-  const loadAchievements = useCallback(async () => {
-    const allPubs = await fetchLondonPubs();
-    setPubs(allPubs);
+  
+  // Calculate score and trophies from pubs data
+  const calculateScoreAndTrophies = useCallback((allPubs) => {
+    if (!Array.isArray(allPubs) || allPubs.length === 0) {
+      setCurrentScore(0);
+      setTrophies([]);
+      return;
+    }
 
     // Calculate points from visited pubs
     const visitedPubs = allPubs.filter(p => p.isVisited);
@@ -64,7 +73,6 @@ export default function AchievementsScreen() {
     const completedAreas = Object.entries(areaMap)
       .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0)
       .map(([area, _]) => area);
-    const completedAreasSet = new Set(completedAreas);
     const areaBonusPoints = completedAreas.length * 50;
 
     const completedBoroughs = Object.entries(boroughMap)
@@ -164,10 +172,43 @@ export default function AchievementsScreen() {
     setTrophies(trophyList);
   }, []);
 
+  const loadAchievements = useCallback(async () => {
+    // Always fetch fresh pubs to get latest visited status from AsyncStorage
+    // This ensures that visiting a pub is immediately reflected when switching to AchievementsScreen
+    let allPubs = [];
+    try {
+      allPubs = await fetchLondonPubs();
+    } catch (error) {
+      console.error('Error fetching pubs in AchievementsScreen:', error);
+      // Fallback to cached data if fetch fails
+      const cachedStats = getCachedProfileStats();
+      allPubs = cachedStats?.pubs || [];
+    }
+    
+    setPubs(allPubs);
+    calculateScoreAndTrophies(allPubs);
+  }, [calculateScoreAndTrophies]);
+
+  // Calculate initial data from cached pubs on mount
+  useEffect(() => {
+    if (initialPubs.length > 0) {
+      calculateScoreAndTrophies(initialPubs);
+    }
+  }, []); // Only run on mount
+
   useFocusEffect(
     useCallback(() => {
-      loadAchievements();
-    }, [loadAchievements])
+      // Show cached data immediately for instant display
+      const cached = getCachedProfileStats();
+      if (cached?.pubs && Array.isArray(cached.pubs) && cached.pubs.length > 0) {
+        calculateScoreAndTrophies(cached.pubs);
+      }
+
+      // Refresh in background (non-blocking)
+      InteractionManager.runAfterInteractions(() => {
+        loadAchievements();
+      });
+    }, [loadAchievements, calculateScoreAndTrophies])
   );
 
   // Calculate level progress

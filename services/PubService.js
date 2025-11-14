@@ -109,17 +109,77 @@ export const fetchLondonPubs = async (options = {}) => {
 					}
 				}
 
-				const queryString = supabaseQueryParams.join('&');
+				const baseQueryString = supabaseQueryParams.join('&');
 
-				const pubsResponse = await fetch(`${supabaseUrl}/pubs?${queryString}`, {
-					headers
-				});
-				
-				if (!pubsResponse.ok) {
-					throw new Error(`Supabase error: ${pubsResponse.status}`);
+				// Fetch all pubs using pagination
+				// Use smaller limit on mobile to avoid OOM errors
+				const limit = 500; // Reduced from 1000 to avoid memory issues on Android
+				let allPubs = [];
+				let offset = 0;
+				let hasMore = true;
+
+				while (hasMore) {
+					const queryString = `${baseQueryString}&limit=${limit}&offset=${offset}`;
+					
+					try {
+						const pubsResponse = await fetch(`${supabaseUrl}/pubs_all?${queryString}`, {
+							headers
+						});
+						
+						if (!pubsResponse.ok) {
+							throw new Error(`Supabase error: ${pubsResponse.status}`);
+						}
+						
+						// Parse response with error handling for large responses
+						const responseText = await pubsResponse.text();
+						if (!responseText || responseText.length === 0) {
+							hasMore = false;
+							break;
+						}
+						
+						let batch;
+						try {
+							batch = JSON.parse(responseText);
+						} catch (parseError) {
+							console.error('Failed to parse response:', parseError);
+							console.log('Response length:', responseText.length);
+							throw new Error('Failed to parse Supabase response - response too large');
+						}
+						
+						if (Array.isArray(batch) && batch.length > 0) {
+							allPubs = allPubs.concat(batch);
+							offset += batch.length;
+							hasMore = batch.length === limit;
+							
+							// Limit total pubs to prevent OOM (safety check)
+							if (allPubs.length > 5000) {
+								console.warn('Reached safety limit of 5000 pubs, stopping pagination');
+								hasMore = false;
+							}
+						} else {
+							hasMore = false;
+						}
+					} catch (fetchError) {
+						// Handle OOM or other memory errors
+						if (fetchError.message && (
+							fetchError.message.includes('allocation') ||
+							fetchError.message.includes('OOM') ||
+							fetchError.message.includes('memory') ||
+							fetchError.message.includes('too large')
+						)) {
+							console.error('Memory error fetching pubs:', fetchError.message);
+							// Return what we have so far instead of failing completely
+							if (allPubs.length > 0) {
+								console.warn(`Returning ${allPubs.length} pubs before memory error`);
+								break;
+							}
+							throw new Error('Response too large - try filtering by bounds or borough');
+						}
+						throw fetchError;
+					}
 				}
 				
-				const pubs = await pubsResponse.json();
+				const pubs = allPubs;
 				
 				// Convert boolean feature columns to features array
 				const convertFeaturesToArray = (pub) => {
@@ -240,17 +300,76 @@ export const fetchBoroughSummaries = async () => {
 
 		if (supabaseUrl && headers) {
 			try {
-				const queryParts = ['select=id,borough,lat,lon', 'borough=not.is.null'];
+				const baseQueryParts = ['select=id,borough,lat,lon', 'borough=not.is.null'];
+				const baseQueryString = baseQueryParts.join('&');
 
-				const response = await fetch(`${supabaseUrl}/pubs?${queryParts.join('&')}`, {
-					headers,
-				});
+				// Fetch all pubs using pagination with smaller limit to avoid OOM
+				let allRows = [];
+				let offset = 0;
+				const limit = 500; // Reduced from 1000 to avoid memory issues
+				let hasMore = true;
 
-				if (!response.ok) {
-					throw new Error(`Supabase borough summary error: ${response.status}`);
+				while (hasMore) {
+					const queryString = `${baseQueryString}&limit=${limit}&offset=${offset}`;
+					
+					try {
+						const response = await fetch(`${supabaseUrl}/pubs_all?${queryString}`, {
+							headers,
+						});
+
+						if (!response.ok) {
+							throw new Error(`Supabase borough summary error: ${response.status}`);
+						}
+
+						// Parse response with error handling for large responses
+						const responseText = await response.text();
+						if (!responseText || responseText.length === 0) {
+							hasMore = false;
+							break;
+						}
+						
+						let batch;
+						try {
+							batch = JSON.parse(responseText);
+						} catch (parseError) {
+							console.error('Failed to parse borough summary response:', parseError);
+							throw new Error('Failed to parse Supabase response - response too large');
+						}
+						
+						if (Array.isArray(batch) && batch.length > 0) {
+							allRows = allRows.concat(batch);
+							offset += batch.length;
+							hasMore = batch.length === limit;
+							
+							// Safety limit
+							if (allRows.length > 5000) {
+								console.warn('Reached safety limit for borough summaries');
+								hasMore = false;
+							}
+						} else {
+							hasMore = false;
+						}
+					} catch (fetchError) {
+						// Handle OOM or other memory errors
+						if (fetchError.message && (
+							fetchError.message.includes('allocation') ||
+							fetchError.message.includes('OOM') ||
+							fetchError.message.includes('memory') ||
+							fetchError.message.includes('too large')
+						)) {
+							console.error('Memory error fetching borough summaries:', fetchError.message);
+							// Return what we have so far
+							if (allRows.length > 0) {
+								console.warn(`Returning ${allRows.length} rows before memory error`);
+								break;
+							}
+							throw fetchError;
+						}
+						throw fetchError;
+					}
 				}
 
-				const rows = await response.json();
+				const rows = allRows;
 				const aggregated = new Map();
 
 				(Array.isArray(rows) ? rows : []).forEach((row) => {

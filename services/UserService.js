@@ -2,7 +2,65 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSupabaseUrl, getSupabaseHeaders } from '../config/supabase';
 import { fetchLondonPubs } from './PubService';
 import { getLevelProgress } from '../utils/levelSystem';
-import { refreshSession } from './SecureAuthService';
+
+/**
+ * Helper to refresh session - breaks circular dependency with SecureAuthService
+ * This is a lightweight version that only does what UserService needs
+ */
+const refreshSession = async () => {
+  try {
+    const sessionJson = await AsyncStorage.getItem('supabase_session');
+    if (!sessionJson) {
+      throw new Error('No session');
+    }
+    const session = JSON.parse(sessionJson);
+    
+    if (!session?.refresh_token) {
+      throw new Error('No refresh token');
+    }
+
+    const { SUPABASE_CONFIG } = require('../config/supabase');
+    const SUPABASE_URL = SUPABASE_CONFIG.url;
+    const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey;
+
+    const response = await fetch(
+      `${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          refresh_token: session.refresh_token,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to refresh session');
+    }
+
+    const newSession = await response.json();
+    
+    // Get user
+    const userJson = await AsyncStorage.getItem('currentUser');
+    const user = userJson ? JSON.parse(userJson) : null;
+    
+    // Save new session
+    await AsyncStorage.setItem('supabase_session', JSON.stringify(newSession));
+    if (user) {
+      await AsyncStorage.setItem('currentUser', JSON.stringify(user));
+    }
+
+    return newSession;
+  } catch (error) {
+    console.error('Refresh session error:', error);
+    // If refresh fails, clear session
+    await AsyncStorage.multiRemove(['supabase_session', 'currentUser']);
+    throw error;
+  }
+};
 
 /**
  * Helper to get authenticated headers

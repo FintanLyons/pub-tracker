@@ -2,6 +2,8 @@ import React, { createContext } from 'react';
 
 export const LoadingContext = createContext({ 
   isLocationLoaded: false, 
-  setIsLocationLoaded: () => {} 
+  setIsLocationLoaded: () => {},
+  isInitialPubsLoaded: false,
+  setIsInitialPubsLoaded: () => {},
 });
 
