@@ -3,18 +3,9 @@ import { clearVisitedFavoriteCache } from './PubService';
 
 export const registerUserSecure = async (email, username, password) => {
   try {
-    // Check if username is already taken
-    const { data: existing } = await supabase
-      .from('users')
-      .select('username')
-      .eq('username', username)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      throw new Error('Username already taken');
-    }
-
-    // Register with Supabase Auth
+    // Sign up first to get an authenticated session -- the users table
+    // SELECT policy requires authentication, so we can't check username
+    // availability before signing up.
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -46,7 +37,20 @@ export const registerUserSecure = async (email, username, password) => {
     };
 
     if (hasSession) {
-      const { data: profile } = await supabase
+      // Now authenticated -- check username availability before creating profile
+      const { data: existing } = await supabase
+        .from('users')
+        .select('username')
+        .eq('username', username)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        // Clean up the auth user we just created
+        await supabase.auth.signOut();
+        throw new Error('Username already taken');
+      }
+
+      const { data: profile, error: profileError } = await supabase
         .from('users')
         .upsert({
           id: userData.id,
@@ -57,6 +61,15 @@ export const registerUserSecure = async (email, username, password) => {
         }, { onConflict: 'id' })
         .select()
         .single();
+
+      if (profileError) {
+        // Unique constraint violation on username = username taken (race condition)
+        if (profileError.code === '23505' && profileError.message?.includes('username')) {
+          await supabase.auth.signOut();
+          throw new Error('Username already taken');
+        }
+        throw profileError;
+      }
 
       if (profile) user = profile;
 
@@ -87,24 +100,27 @@ export const registerUserSecure = async (email, username, password) => {
   }
 };
 
-const findEmailByUsername = async (usernameOrEmail) => {
-  if (usernameOrEmail.includes('@')) return usernameOrEmail;
-
-  const { data: users, error } = await supabase
-    .from('users')
-    .select('email')
-    .eq('username', usernameOrEmail)
-    .limit(1);
-
-  if (error || !users || users.length === 0) {
-    throw new Error('User not found');
-  }
-  return users[0].email;
-};
-
 export const loginUserSecure = async (usernameOrEmail, password) => {
   try {
-    const email = await findEmailByUsername(usernameOrEmail);
+    let email = usernameOrEmail;
+
+    if (!usernameOrEmail.includes('@')) {
+      // Username login: look up email via an RPC or try signing in directly.
+      // Since users SELECT requires auth, we use the Supabase Auth admin-safe
+      // approach: store the username, attempt sign-in with a helper query.
+      // We use a lightweight RPC if available, otherwise fall back to a
+      // two-step approach: first try email=username (won't work), then look
+      // up after a temporary sign-in.
+      //
+      // Pragmatic solution: call a DB function that anon can execute.
+      const { data: emailResult, error: rpcError } = await supabase
+        .rpc('get_email_by_username', { lookup_username: usernameOrEmail });
+
+      if (rpcError || !emailResult) {
+        throw new Error('User not found');
+      }
+      email = emailResult;
+    }
 
     const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
@@ -116,7 +132,7 @@ export const loginUserSecure = async (usernameOrEmail, password) => {
       throw new Error('Email not confirmed. Please verify your email before logging in.');
     }
 
-    // Fetch or create user profile
+    // Fetch or create user profile (now authenticated)
     let { data: users } = await supabase
       .from('users')
       .select('*')
