@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
-import { syncUserStats } from '../services/UserService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
 import { getUserLeagues, getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
 import { getCachedLeaderboardData } from '../services/LeaderboardCache';
@@ -71,10 +70,6 @@ export default function LeaderboardScreen() {
 
       // Refresh data in background (non-blocking)
       try {
-        // Sync current user stats
-        await syncUserStats(user.id);
-
-        // Load fresh data
         const [friends, pendingRequests, userLeagues] = await Promise.all([
           getFriendsLeaderboard(user.id),
           getPendingFriendRequests(user.id),

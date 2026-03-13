@@ -196,20 +196,6 @@ export const getCurrentUserSecure = async () => {
   }
 };
 
-export const refreshSession = async () => {
-  const { data, error } = await supabase.auth.refreshSession();
-  if (error) {
-    await logoutUserSecure();
-    throw error;
-  }
-  return data.session;
-};
-
-export const getSession = async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session;
-};
-
 /**
  * Lightweight stats sync used during registration.
  * Full implementation lives in UserService to avoid circular deps.

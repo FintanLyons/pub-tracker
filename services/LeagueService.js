@@ -122,28 +122,6 @@ export const removeLeagueMember = async (leagueId, userId) => {
 };
 
 /**
- * Delete a league (only by creator)
- */
-export const deleteLeague = async (leagueId, userId) => {
-  const { data: leagues, error: fetchErr } = await supabase
-    .from('leagues')
-    .select('*')
-    .eq('id', leagueId)
-    .limit(1);
-
-  if (fetchErr) throw fetchErr;
-  if (!leagues || leagues.length === 0) throw new Error('League not found');
-  if (leagues[0].created_by !== userId) throw new Error('Only the league creator can delete the league');
-
-  // Delete members first, then the league
-  await supabase.from('league_members').delete().eq('league_id', leagueId);
-
-  const { error } = await supabase.from('leagues').delete().eq('id', leagueId);
-  if (error) throw error;
-  return true;
-};
-
-/**
  * Get all leagues for a user
  */
 export const getUserLeagues = async (userId) => {
@@ -197,41 +175,4 @@ export const getLeagueLeaderboard = async (leagueId) => {
   leaderboard.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
   return leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
-};
-
-/**
- * Get league details
- */
-export const getLeagueById = async (leagueId) => {
-  const { data, error } = await supabase
-    .from('leagues')
-    .select('*')
-    .eq('id', leagueId)
-    .limit(1);
-
-  if (error) throw error;
-  return data && data.length > 0 ? data[0] : null;
-};
-
-/**
- * Get all members of a league
- */
-export const getLeagueMembers = async (leagueId) => {
-  const { data: members, error } = await supabase
-    .from('league_members')
-    .select('user_id')
-    .eq('league_id', leagueId);
-
-  if (error) throw error;
-  if (!members || members.length === 0) return [];
-
-  const memberIds = members.map(m => m.user_id);
-
-  const { data: users, error: usersErr } = await supabase
-    .from('users')
-    .select('*')
-    .in('id', memberIds);
-
-  if (usersErr) throw usersErr;
-  return users || [];
 };

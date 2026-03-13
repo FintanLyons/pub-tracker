@@ -14,6 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   togglePubVisited,
   togglePubFavorite,
+  searchPubsByName,
 } from '../services/PubService';
 import { submitMissingPubReport } from '../services/ReportService';
 import AreaIcon from '../components/AreaIcon';
@@ -333,8 +334,10 @@ export default function MapScreen() {
     if (matchingBorough) { await searchBorough(matchingBorough); return; }
     const matchingArea = allAreas.find((a) => a.toLowerCase().includes(query));
     if (matchingArea) { await searchArea(matchingArea); return; }
-    const matchingPub = allPubs.find((p) => p.name?.toLowerCase().trim() === query);
-    if (matchingPub) { searchPub(matchingPub); return; }
+    try {
+      const pubResults = await searchPubsByName(query, 1);
+      if (pubResults.length > 0) { searchPub(pubResults[0]); return; }
+    } catch { /* fall through to geocoding */ }
     try {
       const resp = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${queryToUse}, UK`)}&format=json&limit=1`, { headers: { 'User-Agent': 'PubTrackerApp/1.0' } });
       const data = await resp.json();
@@ -346,7 +349,7 @@ export default function MapScreen() {
         setTimeout(() => loadPubsForViewportRegion?.(newRegion), 1100);
       }
     } catch (error) { console.error('Search error:', error); }
-  }, [searchQuery, allAreas, allPubs, allBoroughNames, searchArea, searchPub, searchBorough, commitMapRegion, loadPubsForViewportRegion]);
+  }, [searchQuery, allAreas, allBoroughNames, searchArea, searchPub, searchBorough, commitMapRegion, loadPubsForViewportRegion]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
@@ -400,17 +403,24 @@ export default function MapScreen() {
   );
 
   // --- Suggestions ---
-  const sortedPubs = useMemo(() => [...allPubs].sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase())), [allPubs]);
   const areaSuggestions = useMemo(() => {
     if (!searchQuery.trim()) return allAreas.slice(0, 3);
     const q = searchQuery.trim().toLowerCase();
     return allAreas.filter((a) => a.toLowerCase().includes(q)).slice(0, 3);
   }, [searchQuery, allAreas]);
-  const pubSuggestions = useMemo(() => {
-    if (!searchQuery.trim()) return sortedPubs.slice(0, 3);
-    const q = searchQuery.trim().toLowerCase();
-    return allPubs.filter((p) => p.name?.toLowerCase().includes(q)).slice(0, 3);
-  }, [searchQuery, allPubs, sortedPubs]);
+
+  const [pubSuggestions, setPubSuggestions] = useState([]);
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q || !showSuggestions) { setPubSuggestions([]); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchPubsByName(q, 5);
+        setPubSuggestions(results);
+      } catch { setPubSuggestions([]); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, showSuggestions]);
 
   // --- Area marker press ---
   const handleAreaMarkerPress = useCallback(async (areaName) => {

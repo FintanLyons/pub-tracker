@@ -11,7 +11,6 @@ import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchBoroughSummaries, migrateLocalDataToServer } from '../services/PubService';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
-import { syncUserStats } from '../services/UserService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
 import { getUserLeagues, getLeagueLeaderboard } from '../services/LeagueService';
 import { cacheLeaderboardData } from '../services/LeaderboardCache';
@@ -73,7 +72,6 @@ export default function TabNavigator() {
           const user = await getCurrentUserSecure();
           if (!user?.id) return;
 
-          await syncUserStats(user.id);
           const [friends, pendingRequests, leagues] = await Promise.all([
             getFriendsLeaderboard(user.id),
             getPendingFriendRequests(user.id),

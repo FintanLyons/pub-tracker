@@ -400,6 +400,29 @@ export const fetchBoroughSummaries = async () => {
 };
 
 // ---------------------------------------------------------------------------
+// Server-side pub search (uses search_pubs RPC)
+// ---------------------------------------------------------------------------
+
+export const searchPubsByName = async (query, limit = 5) => {
+	if (!query || typeof query !== 'string' || !query.trim()) return [];
+
+	const { data, error } = await supabase.rpc('search_pubs', {
+		p_query: query.trim(),
+		p_limit: limit,
+	});
+
+	if (error) throw error;
+	return (data || []).map((p) => ({
+		id: p.id,
+		name: p.name,
+		lat: parseFloat(p.lat),
+		lon: parseFloat(p.lon),
+		area: p.area,
+		borough: p.borough,
+	}));
+};
+
+// ---------------------------------------------------------------------------
 // Toggle visited / favorite
 // ---------------------------------------------------------------------------
 
