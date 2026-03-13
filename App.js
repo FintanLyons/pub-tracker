@@ -10,6 +10,8 @@ import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NetworkProvider } from './contexts/NetworkContext';
+import { UserStatsProvider } from './contexts/UserStatsContext';
+import { LocationProvider } from './contexts/LocationContext';
 
 const DARK_CHARCOAL = '#1C1C1C';
 const AMBER = '#D4A017';
@@ -37,7 +39,11 @@ function AppContent() {
       <PaperProvider>
         <View style={styles.appContainer}>
           {user ? (
-            <TabNavigator />
+            <LocationProvider>
+              <UserStatsProvider userId={user.id}>
+                <TabNavigator />
+              </UserStatsProvider>
+            </LocationProvider>
           ) : (
             <AuthScreen onAuthSuccess={refreshUser} />
           )}

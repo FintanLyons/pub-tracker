@@ -2,12 +2,11 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert, InteractionManager } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { supabase } from '../config/supabase';
-import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { distanceKm } from '../utils/geo';
+import { useUserStats } from '../contexts/UserStatsContext';
+import { useUserLocation } from '../contexts/LocationContext';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -28,22 +27,26 @@ const VIEW_MODES = {
 
 export default function ProfileScreen() {
   const navigation = useNavigation();
-  const { logout } = useAuth();
-  const [visitedCount, setVisitedCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+  const { logout, user } = useAuth();
+  const {
+    areaStats: baseAreaStats,
+    boroughStats: baseBoroughStats,
+    totalVisited,
+    totalPubs,
+    loading: statsLoading,
+    lastUpdated,
+    refreshUserStats,
+  } = useUserStats();
+  const location = useUserLocation();
   const [areaStatsRaw, setAreaStatsRaw] = useState([]);
   const [boroughStatsRaw, setBoroughStatsRaw] = useState([]);
-  const [currentLocation, setCurrentLocation] = useState(null);
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.AREA);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
-  const hasCalculatedDistances = useRef(false);
 
   const handleAreaPress = useCallback((areaName) => {
-    // Navigate to Map tab and pass the area name as a parameter
     navigation.navigate('Map', { areaToSearch: areaName });
   }, [navigation]);
 
@@ -54,88 +57,49 @@ export default function ProfileScreen() {
     navigation.navigate('Map', { boroughToSearch: boroughName });
   }, [navigation]);
 
-  const getCurrentLocation = useCallback(async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return null;
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      return { latitude: location.coords.latitude, longitude: location.coords.longitude };
-    } catch (error) {
-      console.warn('Location unavailable:', error?.message || error);
-      return null;
-    }
-  }, []);
+  useEffect(() => {
+    if (!baseAreaStats || baseAreaStats.length === 0) return;
 
-  const loadStats = useCallback(async () => {
-    const user = await getCurrentUserSecure();
-    setCurrentUser(user);
-    if (!user?.id) return;
+    const areas = baseAreaStats.map((row) => ({
+      area: row.area,
+      borough: row.borough || null,
+      total: Number(row.total),
+      visited: Number(row.visited),
+      percentage: row.percentage,
+      centerLat: row.centerLat,
+      centerLon: row.centerLon,
+      distance: location && row.centerLat != null && row.centerLon != null
+        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+        : null,
+    }));
+    const boroughs = (baseBoroughStats || []).map((row) => ({
+      borough: row.borough,
+      total: Number(row.totalPubs),
+      visited: Number(row.visitedPubs),
+      percentage: row.percentage,
+      totalAreas: Number(row.totalAreas),
+      completedAreas: Number(row.completedAreas),
+      centerLat: row.centerLat,
+      centerLon: row.centerLon,
+      distance: location && row.centerLat != null && row.centerLon != null
+        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+        : null,
+    }));
 
-    const [areaResult, boroughResult] = await Promise.all([
-      supabase.rpc('get_area_stats', { p_user_id: user.id }),
-      supabase.rpc('get_borough_stats', { p_user_id: user.id }),
-    ]);
-
-    if (areaResult.error) console.error('get_area_stats error:', areaResult.error);
-    if (boroughResult.error) console.error('get_borough_stats error:', boroughResult.error);
-
-    const rawAreas = areaResult.data || [];
-    const rawBoroughs = boroughResult.data || [];
-
-    let userLocation = currentLocation;
-    if (!hasCalculatedDistances.current && !userLocation) {
-      userLocation = await getCurrentLocation();
-      if (userLocation) {
-        setCurrentLocation(userLocation);
-        hasCalculatedDistances.current = true;
-      }
-    }
-
-    const areaStats = rawAreas.map((row) => {
-      let distance = null;
-      if (userLocation && row.center_lat != null && row.center_lon != null) {
-        distance = distanceKm(userLocation.latitude, userLocation.longitude, row.center_lat, row.center_lon);
-      }
-      return {
-        area: row.area,
-        borough: row.borough || null,
-        total: Number(row.total),
-        visited: Number(row.visited),
-        percentage: row.percentage,
-        distance,
-      };
-    });
-
-    const boroughStatsData = rawBoroughs.map((row) => {
-      let distance = null;
-      if (userLocation && row.center_lat != null && row.center_lon != null) {
-        distance = distanceKm(userLocation.latitude, userLocation.longitude, row.center_lat, row.center_lon);
-      }
-      return {
-        borough: row.borough,
-        total: Number(row.total_pubs),
-        visited: Number(row.visited_pubs),
-        percentage: row.percentage,
-        totalAreas: Number(row.total_areas),
-        completedAreas: Number(row.completed_areas),
-        distance,
-      };
-    });
-
-    setTotalCount(areaStats.reduce((sum, s) => sum + s.total, 0));
-    setVisitedCount(areaStats.reduce((sum, s) => sum + s.visited, 0));
-    setAreaStatsRaw(areaStats);
-    setBoroughStatsRaw(boroughStatsData);
-  }, [currentLocation, getCurrentLocation]);
+    setAreaStatsRaw(areas);
+    setBoroughStatsRaw(boroughs);
+  }, [baseAreaStats, baseBoroughStats, location]);
 
   useFocusEffect(
     useCallback(() => {
+      const isStale = !lastUpdated || (Date.now() - lastUpdated > 30000);
+      if (!isStale && baseAreaStats.length > 0) return;
       InteractionManager.runAfterInteractions(() => {
-        loadStats().catch((error) => {
-          console.error('Error loading profile stats:', error);
+        refreshUserStats().catch((error) => {
+          console.error('Error refreshing profile stats:', error);
         });
       });
-    }, [loadStats])
+    }, [lastUpdated, baseAreaStats.length, refreshUserStats])
   );
 
   const sortStats = useCallback(
@@ -256,7 +220,7 @@ export default function ProfileScreen() {
     );
   };
 
-  const progressPercentage = totalCount > 0 ? Math.round((visitedCount / totalCount) * 100) : 0;
+  const progressPercentage = totalPubs > 0 ? Math.round((totalVisited / totalPubs) * 100) : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -265,11 +229,11 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <PintGlassIcon size={48} color={DARK_GREY} />
         <Text style={styles.title}>Pub Tracker</Text>
-          {currentUser && (
-            <Text style={styles.username}>@{currentUser.username}</Text>
+          {user && (
+            <Text style={styles.username}>@{user.username}</Text>
           )}
         </View>
-        {currentUser && (
+        {user && (
           <TouchableOpacity 
             onPress={handleLogout}
             style={styles.logoutButtonHeader}
@@ -281,8 +245,8 @@ export default function ProfileScreen() {
 
       <View style={styles.statsCard}>
         <View style={styles.mainStat}>
-          <Text style={styles.visitedNumber}>{visitedCount}</Text>
-          <Text style={styles.totalNumber}>/ {totalCount}</Text>
+          <Text style={styles.visitedNumber}>{totalVisited}</Text>
+          <Text style={styles.totalNumber}>/ {totalPubs}</Text>
         </View>
         <Text style={styles.statLabel}>Pubs Visited</Text>
         
