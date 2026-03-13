@@ -1,9 +1,11 @@
 import React, { createContext } from 'react';
 
-export const LoadingContext = createContext({ 
-  isLocationLoaded: false, 
+export const LoadingContext = createContext({
+  isLocationLoaded: false,
   setIsLocationLoaded: () => {},
   isInitialPubsLoaded: false,
   setIsInitialPubsLoaded: () => {},
+  boroughSummaries: [],
+  isLoadingBoroughs: true,
 });
 

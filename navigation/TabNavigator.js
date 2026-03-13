@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Image, InteractionManager } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -9,8 +9,14 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { preloadProfileStats } from '../services/ProfileStatsCache';
-import { migrateLocalDataToServer } from '../services/PubService';
+import { fetchLondonPubs, fetchBoroughSummaries, migrateLocalDataToServer } from '../services/PubService';
+import { primeProfileStatsFromPubs } from '../services/ProfileStatsCache';
+import { getCurrentUserSecure } from '../services/SecureAuthService';
+import { syncUserStats } from '../services/UserService';
+import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
+import { getUserLeagues, getLeagueLeaderboard } from '../services/LeagueService';
+import { cacheLeaderboardData } from '../services/LeaderboardCache';
+import { serializeBoroughSummaries } from '../screens/map/utils';
 
 const withErrorBoundary = (Screen, message) => (props) => (
   <ErrorBoundary fallbackMessage={message}>
@@ -32,25 +38,98 @@ export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
-  
+  const [boroughSummaries, setBoroughSummaries] = useState([]);
+  const [isLoadingBoroughs, setIsLoadingBoroughs] = useState(true);
+
   useEffect(() => {
+    let isCancelled = false;
+
     migrateLocalDataToServer().catch((error) => {
       console.warn('Migration check failed:', error?.message || error);
     });
-    preloadProfileStats().catch((error) => {
-      console.warn('Unable to preload profile stats:', error?.message || error);
-    });
+
+    const loadBoroughSummaries = async () => {
+      try {
+        setIsLoadingBoroughs(true);
+        const summaries = await fetchBoroughSummaries();
+        if (!isCancelled) {
+          setBoroughSummaries((prev) => {
+            const nextArray = Array.isArray(summaries) ? summaries : [];
+            if (serializeBoroughSummaries(prev) === serializeBoroughSummaries(nextArray)) return prev;
+            return nextArray;
+          });
+        }
+      } catch (error) {
+        console.error('Error loading borough summaries:', error);
+        if (!isCancelled) setBoroughSummaries([]);
+      } finally {
+        if (!isCancelled) setIsLoadingBoroughs(false);
+      }
+    };
+
+    const loadAllPubsInBackground = () => {
+      InteractionManager.runAfterInteractions(async () => {
+        if (isCancelled) return;
+        try {
+          const allPubsData = await fetchLondonPubs();
+          if (!isCancelled && Array.isArray(allPubsData) && allPubsData.length > 0) {
+            primeProfileStatsFromPubs(allPubsData);
+          }
+        } catch (error) {
+          console.error('Error loading all pubs in background:', error);
+        }
+      });
+    };
+
+    const preloadLeaderboardData = () => {
+      InteractionManager.runAfterInteractions(async () => {
+        if (isCancelled) return;
+        try {
+          const user = await getCurrentUserSecure();
+          if (!user?.id) return;
+
+          await syncUserStats(user.id);
+          const [friends, pendingRequests, leagues] = await Promise.all([
+            getFriendsLeaderboard(user.id),
+            getPendingFriendRequests(user.id),
+            getUserLeagues(user.id),
+          ]);
+
+          let leagueLeaderboard = [];
+          if (leagues?.length > 0) {
+            try { leagueLeaderboard = await getLeagueLeaderboard(leagues[0].id); } catch {}
+          }
+
+          cacheLeaderboardData({
+            friendsLeaderboard: friends || [],
+            pendingRequestsCount: pendingRequests?.length || 0,
+            leagues: leagues || [],
+            leagueLeaderboard: leagueLeaderboard || [],
+            selectedLeagueId: leagues?.length > 0 ? leagues[0].id : null,
+          });
+        } catch (error) {
+          console.warn('Error preloading leaderboard data:', error);
+        }
+      });
+    };
+
+    loadBoroughSummaries();
+    loadAllPubsInBackground();
+    preloadLeaderboardData();
+
+    return () => { isCancelled = true; };
   }, []);
-  
-  // Show loading screen until both location and initial pubs are loaded
+
   const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
   
   return (
-    <LoadingContext.Provider value={{ 
-      isLocationLoaded, 
+    <LoadingContext.Provider value={{
+      isLocationLoaded,
       setIsLocationLoaded,
       isInitialPubsLoaded,
       setIsInitialPubsLoaded,
+      boroughSummaries,
+      isLoadingBoroughs,
     }}>
       <View style={styles.container}>
         <Tab.Navigator

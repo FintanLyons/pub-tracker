@@ -47,7 +47,6 @@ import { useMapRegion } from './map/hooks/useMapRegion';
 import { useLocation } from './map/hooks/useLocation';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
-import { usePreloading } from './map/hooks/usePreloading';
 
 const AMBER = COLORS.amber;
 const DARK_CHARCOAL = COLORS.charcoal;
@@ -56,7 +55,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute();
-  const { isLocationLoaded, setIsLocationLoaded, setIsInitialPubsLoaded } = useContext(LoadingContext);
+  const { isLocationLoaded, setIsLocationLoaded, setIsInitialPubsLoaded, boroughSummaries, isLoadingBoroughs } = useContext(LoadingContext);
   const mapRef = useRef(null);
 
   // --- Core state ---
@@ -66,8 +65,6 @@ export default function MapScreen() {
   const [selectedArea, setSelectedArea] = useState(null);
   const [focusedBorough, setFocusedBorough] = useState(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [boroughSummaries, setBoroughSummaries] = useState([]);
-  const [isLoadingBoroughs, setIsLoadingBoroughs] = useState(true);
   const [activeBoroughs, setActiveBoroughs] = useState([]);
   const [shouldTrackBoroughViews, setShouldTrackBoroughViews] = useState(true);
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
@@ -147,9 +144,6 @@ export default function MapScreen() {
       return () => clearTimeout(timer);
     }
   }, [isLoadingViewportPubs, setIsInitialPubsLoaded]);
-
-  // --- Preloading (boroughs, all pubs, leaderboard) ---
-  usePreloading(setBoroughSummaries, setIsLoadingBoroughs);
 
   // --- Borough tracking ---
   useEffect(() => {
