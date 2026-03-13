@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Location from 'expo-location';
 import { Keyboard, Dimensions } from 'react-native';
-import { updateCachedProfileLocation } from '../../../services/ProfileStatsCache';
 import {
   LOCATION_MIN_DISTANCE_METERS,
   LOCATION_UPDATE_MIN_INTERVAL_MS,
@@ -38,7 +37,6 @@ export function useLocation(commitMapRegion, mapRef, setIsLocationLoaded) {
             longitude: location.coords.longitude,
           };
           setCurrentLocation(userLocation);
-          updateCachedProfileLocation(userLocation);
           lastLocationUpdateRef.current = Date.now();
           lastLocationRef.current = userLocation;
           const initialHeading = location.coords.heading;

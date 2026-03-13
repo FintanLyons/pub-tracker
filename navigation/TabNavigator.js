@@ -9,8 +9,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { fetchLondonPubs, fetchBoroughSummaries, migrateLocalDataToServer } from '../services/PubService';
-import { primeProfileStatsFromPubs } from '../services/ProfileStatsCache';
+import { fetchBoroughSummaries, migrateLocalDataToServer } from '../services/PubService';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { syncUserStats } from '../services/UserService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
@@ -67,20 +66,6 @@ export default function TabNavigator() {
       }
     };
 
-    const loadAllPubsInBackground = () => {
-      InteractionManager.runAfterInteractions(async () => {
-        if (isCancelled) return;
-        try {
-          const allPubsData = await fetchLondonPubs();
-          if (!isCancelled && Array.isArray(allPubsData) && allPubsData.length > 0) {
-            primeProfileStatsFromPubs(allPubsData);
-          }
-        } catch (error) {
-          console.error('Error loading all pubs in background:', error);
-        }
-      });
-    };
-
     const preloadLeaderboardData = () => {
       InteractionManager.runAfterInteractions(async () => {
         if (isCancelled) return;
@@ -114,7 +99,6 @@ export default function TabNavigator() {
     };
 
     loadBoroughSummaries();
-    loadAllPubsInBackground();
     preloadLeaderboardData();
 
     return () => { isCancelled = true; };

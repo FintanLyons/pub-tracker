@@ -3,15 +3,10 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, 
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { fetchLondonPubs, fetchBoroughSummaries } from '../services/PubService';
+import { supabase } from '../config/supabase';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { useAuth } from '../contexts/AuthContext';
 import PintGlassIcon from '../components/PintGlassIcon';
-import {
-  cacheProfileStats,
-  getCachedProfileStats,
-  preloadProfileStats,
-} from '../services/ProfileStatsCache';
 import { distanceKm } from '../utils/geo';
 
 const DARK_GREY = '#2C2C2C';
@@ -34,39 +29,18 @@ const VIEW_MODES = {
 export default function ProfileScreen() {
   const navigation = useNavigation();
   const { logout } = useAuth();
-  const initialCachedStats = getCachedProfileStats();
-  const [pubs, setPubs] = useState(initialCachedStats?.pubs || []);
-  const [visitedCount, setVisitedCount] = useState(
-    initialCachedStats?.visitedCount || 0
-  );
-  
-  // Use totalCount from cached stats (set by primeProfileStatsFromPubs when all pubs loaded)
-  const [totalCount, setTotalCount] = useState(initialCachedStats?.totalCount || 0);
-  const [areaStatsRaw, setAreaStatsRaw] = useState(
-    initialCachedStats?.areaStats || []
-  );
-  const [boroughStatsRaw, setBoroughStatsRaw] = useState(
-    initialCachedStats?.boroughStats || []
-  );
-  const [currentLocation, setCurrentLocation] = useState(
-    initialCachedStats?.location || null
-  );
+  const [visitedCount, setVisitedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [areaStatsRaw, setAreaStatsRaw] = useState([]);
+  const [boroughStatsRaw, setBoroughStatsRaw] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.AREA);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
-  const distanceCacheRef = useRef({
-    areas: initialCachedStats?.areaDistanceMap
-      ? { ...initialCachedStats.areaDistanceMap }
-      : {},
-    boroughs: initialCachedStats?.boroughDistanceMap
-      ? { ...initialCachedStats.boroughDistanceMap }
-      : {},
-  });
-  const hasCalculatedDistances = useRef(!!initialCachedStats?.location);
-  const boroughSummariesCacheRef = useRef(null); // Cache borough summaries to avoid repeated fetches
+  const hasCalculatedDistances = useRef(false);
 
   const handleAreaPress = useCallback((areaName) => {
     // Navigate to Map tab and pass the area name as a parameter
@@ -80,356 +54,88 @@ export default function ProfileScreen() {
     navigation.navigate('Map', { boroughToSearch: boroughName });
   }, [navigation]);
 
-  // Get user's current location
   const getCurrentLocation = useCallback(async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        return null;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      return {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      };
+      if (status !== 'granted') return null;
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      return { latitude: location.coords.latitude, longitude: location.coords.longitude };
     } catch (error) {
-      console.warn('Location unavailable, continuing without distance sorting:', error?.message || error);
+      console.warn('Location unavailable:', error?.message || error);
       return null;
     }
   }, []);
 
-  const applyProfileStats = useCallback(
-    (stats) => {
-      if (!stats) {
-        return;
-      }
-
-      setPubs(stats.pubs || []);
-      setVisitedCount(stats.visitedCount || 0);
-      
-      // Use totalCount from cached stats (accurate total from all pubs)
-      setTotalCount(stats.totalCount || 0);
-      
-      setAreaStatsRaw(
-        Array.isArray(stats.areaStats) ? stats.areaStats : []
-      );
-      setBoroughStatsRaw(
-        Array.isArray(stats.boroughStats) ? stats.boroughStats : []
-      );
-
-      if (stats.location) {
-        setCurrentLocation(stats.location);
-        hasCalculatedDistances.current = true;
-      }
-
-      distanceCacheRef.current = {
-        areas: stats.areaDistanceMap ? { ...stats.areaDistanceMap } : {},
-        boroughs: stats.boroughDistanceMap
-          ? { ...stats.boroughDistanceMap }
-          : {},
-      };
-    },
-    [distanceCacheRef, hasCalculatedDistances]
-  );
-
-  // Calculate total pub count from borough summaries (non-intensive)
-  // Handles both boroughSummaries (with totalPubs) and boroughStats (with total)
-  const calculateTotalCountFromBoroughs = useCallback((boroughData) => {
-    if (!Array.isArray(boroughData) || boroughData.length === 0) {
-      return 0;
-    }
-    // Sum up total pubs from all boroughs
-    // Handle both structures: boroughSummaries use 'totalPubs', boroughStats use 'total'
-    return boroughData.reduce((sum, borough) => {
-      return sum + (borough.totalPubs || borough.total || 0);
-    }, 0);
-  }, []);
-
   const loadStats = useCallback(async () => {
-    // Load current user
     const user = await getCurrentUserSecure();
     setCurrentUser(user);
+    if (!user?.id) return;
 
-    // Get cached stats for totalCount (total count doesn't change when visiting pubs)
-    const cachedStats = getCachedProfileStats();
+    const [areaResult, boroughResult] = await Promise.all([
+      supabase.rpc('get_area_stats', { p_user_id: user.id }),
+      supabase.rpc('get_borough_stats', { p_user_id: user.id }),
+    ]);
 
-    // Always fetch fresh pubs to get latest visited status from AsyncStorage
-    // This ensures that visiting a pub is immediately reflected when switching to ProfileScreen
-    let allPubs = [];
-    try {
-      allPubs = await fetchLondonPubs();
-    } catch (error) {
-      console.error('Error fetching pubs in ProfileScreen:', error);
-      // Fallback to cached data if fetch fails
-      allPubs = cachedStats?.pubs || [];
-    }
-    
-    setPubs(allPubs);
-    
-    // Use totalCount from cached stats (set by primeProfileStatsFromPubs when all pubs loaded)
-    // This is the accurate total from all pubs in the database
-    // Note: totalCount doesn't change when visiting pubs, so using cached value is safe
-    const cachedTotalCount = cachedStats?.totalCount;
-    if (typeof cachedTotalCount === 'number' && cachedTotalCount > 0) {
-      setTotalCount(cachedTotalCount);
-    } else {
-      // Fallback: use allPubs length if cache doesn't have totalCount yet
-      setTotalCount(allPubs.length);
-    }
-    
-    const visited = allPubs.filter(p => p.isVisited);
-    setVisitedCount(visited.length);
+    if (areaResult.error) console.error('get_area_stats error:', areaResult.error);
+    if (boroughResult.error) console.error('get_borough_stats error:', boroughResult.error);
 
-    // Get current location once (on first load) for distance calculations
+    const rawAreas = areaResult.data || [];
+    const rawBoroughs = boroughResult.data || [];
+
     let userLocation = currentLocation;
-    const shouldCalculateDistances = !hasCalculatedDistances.current;
-    if (shouldCalculateDistances && !userLocation) {
+    if (!hasCalculatedDistances.current && !userLocation) {
       userLocation = await getCurrentLocation();
       if (userLocation) {
         setCurrentLocation(userLocation);
+        hasCalculatedDistances.current = true;
       }
     }
 
-    // Calculate area breakdown
-    const areaMap = {};
-    const boroughMap = {};
-    
-    allPubs.forEach(pub => {
-      const areaName =
-        typeof pub.area === 'string' && pub.area.trim().length > 0
-          ? pub.area.trim()
-          : 'Unknown';
-      const boroughName =
-        typeof pub.borough === 'string' && pub.borough.trim().length > 0
-          ? pub.borough.trim()
-          : 'Unknown';
-
-      if (!areaMap[areaName]) {
-        areaMap[areaName] = {
-          total: 0,
-          visited: 0,
-          borough: boroughName !== 'Unknown' ? boroughName : null,
-          sumLat: 0,
-          sumLon: 0,
-          coordCount: 0,
-        };
+    const areaStats = rawAreas.map((row) => {
+      let distance = null;
+      if (userLocation && row.center_lat != null && row.center_lon != null) {
+        distance = distanceKm(userLocation.latitude, userLocation.longitude, row.center_lat, row.center_lon);
       }
-
-      areaMap[areaName].total++;
-      if (pub.isVisited) {
-        areaMap[areaName].visited++;
-      }
-      if (!areaMap[areaName].borough && boroughName !== 'Unknown') {
-        areaMap[areaName].borough = boroughName;
-      }
-
-      const lat = Number.parseFloat(pub.lat);
-      const lon = Number.parseFloat(pub.lon);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        areaMap[areaName].sumLat += lat;
-        areaMap[areaName].sumLon += lon;
-        areaMap[areaName].coordCount += 1;
-      }
-
-      if (!boroughMap[boroughName]) {
-        boroughMap[boroughName] = {
-          total: 0,
-          visited: 0,
-          sumLat: 0,
-          sumLon: 0,
-          coordCount: 0,
-          areas: new Set(),
-        };
-      }
-
-      boroughMap[boroughName].total += 1;
-      if (pub.isVisited) {
-        boroughMap[boroughName].visited += 1;
-      }
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        boroughMap[boroughName].sumLat += lat;
-        boroughMap[boroughName].sumLon += lon;
-        boroughMap[boroughName].coordCount += 1;
-      }
-      if (areaName !== 'Unknown') {
-        boroughMap[boroughName].areas.add(areaName);
-      }
+      return {
+        area: row.area,
+        borough: row.borough || null,
+        total: Number(row.total),
+        visited: Number(row.visited),
+        percentage: row.percentage,
+        distance,
+      };
     });
 
-    // Ensure distance caches exist
-    if (!distanceCacheRef.current.areas) {
-      distanceCacheRef.current.areas = {};
-    }
-    if (!distanceCacheRef.current.boroughs) {
-      distanceCacheRef.current.boroughs = {};
-    }
-
-    // Create stats with distance if location is available
-    const areaDistanceCache = distanceCacheRef.current.areas;
-    const stats = Object.entries(areaMap)
-      .map(([area, counts]) => {
-        const { total, visited, borough, sumLat, sumLon, coordCount } = counts;
-        const percentage = total > 0 ? Math.round((visited / total) * 100) : 0;
-        let distance = null;
-
-        if (Object.prototype.hasOwnProperty.call(areaDistanceCache, area)) {
-          distance = areaDistanceCache[area];
-        } else if (userLocation && coordCount > 0) {
-          try {
-            const centerLat = sumLat / coordCount;
-            const centerLon = sumLon / coordCount;
-            distance = distanceKm(
-              userLocation.latitude,
-              userLocation.longitude,
-              centerLat,
-              centerLon
-            );
-          } catch (error) {
-            console.warn(`Error calculating distance for area ${area}:`, error?.message || error);
-            distance = null;
-          }
-          areaDistanceCache[area] = distance;
-        }
-
-        return {
-          area,
-          total,
-          visited,
-          borough: borough || null,
-          percentage,
-          distance,
-        };
-      });
-
-    const areaStatsByName = stats.reduce((acc, stat) => {
-      acc[stat.area] = stat;
-      return acc;
-    }, {});
-
-    const boroughDistanceCache = distanceCacheRef.current.boroughs;
-    const boroughStats = Object.entries(boroughMap).map(
-      ([boroughName, boroughCounts]) => {
-        const percentage =
-          boroughCounts.total > 0
-            ? Math.round((boroughCounts.visited / boroughCounts.total) * 100)
-            : 0;
-
-        let distance = null;
-        if (Object.prototype.hasOwnProperty.call(boroughDistanceCache, boroughName)) {
-          distance = boroughDistanceCache[boroughName];
-        } else if (userLocation && boroughCounts.coordCount > 0) {
-          try {
-            const centerLat = boroughCounts.sumLat / boroughCounts.coordCount;
-            const centerLon = boroughCounts.sumLon / boroughCounts.coordCount;
-            distance = distanceKm(
-              userLocation.latitude,
-              userLocation.longitude,
-              centerLat,
-              centerLon
-            );
-          } catch (error) {
-            console.warn(
-              `Error calculating distance for borough ${boroughName}:`,
-              error?.message || error
-            );
-            distance = null;
-          }
-          boroughDistanceCache[boroughName] = distance;
-        }
-
-        const areaNames = Array.from(boroughCounts.areas);
-        const totalAreas = areaNames.length;
-        const completedAreas = areaNames.filter((areaName) => {
-          const areaStat = areaStatsByName[areaName];
-          if (!areaStat) {
-            return false;
-          }
-          return areaStat.visited >= areaStat.total && areaStat.total > 0;
-        }).length;
-
-        return {
-          borough: boroughName,
-          total: boroughCounts.total,
-          visited: boroughCounts.visited,
-          percentage,
-          distance,
-          totalAreas,
-          completedAreas,
-        };
+    const boroughStatsData = rawBoroughs.map((row) => {
+      let distance = null;
+      if (userLocation && row.center_lat != null && row.center_lon != null) {
+        distance = distanceKm(userLocation.latitude, userLocation.longitude, row.center_lat, row.center_lon);
       }
-    );
-
-    if (shouldCalculateDistances && userLocation) {
-      hasCalculatedDistances.current = true;
-    }
-
-    setAreaStatsRaw(stats);
-    setBoroughStatsRaw(boroughStats);
-    
-    // Calculate accurate total count from borough stats (not just loaded pubs)
-    const accurateTotalCount = calculateTotalCountFromBoroughs(boroughStats);
-    
-    cacheProfileStats({
-      pubs: allPubs,
-      totalCount: accurateTotalCount, // Use accurate total from borough stats
-      visitedCount: visited.length,
-      areaStats: stats,
-      boroughStats,
-      areaDistanceMap: { ...distanceCacheRef.current.areas },
-      boroughDistanceMap: { ...distanceCacheRef.current.boroughs },
-      location: userLocation || null,
+      return {
+        borough: row.borough,
+        total: Number(row.total_pubs),
+        visited: Number(row.visited_pubs),
+        percentage: row.percentage,
+        totalAreas: Number(row.total_areas),
+        completedAreas: Number(row.completed_areas),
+        distance,
+      };
     });
-  }, [cacheProfileStats, currentLocation, distanceCacheRef, getCurrentLocation, hasCalculatedDistances, calculateTotalCountFromBoroughs]);
 
-  // Update total count when cached stats update (from background pub loading)
-  useEffect(() => {
-    const cachedStats = getCachedProfileStats();
-    if (cachedStats?.totalCount && cachedStats.totalCount !== totalCount) {
-      setTotalCount(cachedStats.totalCount);
-    }
-  }, [totalCount]);
-
-  useEffect(() => {
-    let isActive = true;
-
-    preloadProfileStats()
-      .then((stats) => {
-        if (isActive && stats) {
-          applyProfileStats(stats);
-        }
-      })
-      .catch((error) => {
-        console.warn(
-          'Unable to preload profile stats:',
-          error?.message || error
-        );
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [applyProfileStats]);
+    setTotalCount(areaStats.reduce((sum, s) => sum + s.total, 0));
+    setVisitedCount(areaStats.reduce((sum, s) => sum + s.visited, 0));
+    setAreaStatsRaw(areaStats);
+    setBoroughStatsRaw(boroughStatsData);
+  }, [currentLocation, getCurrentLocation]);
 
   useFocusEffect(
     useCallback(() => {
-      // Show cached data immediately for instant display
-      const cached = getCachedProfileStats();
-      if (cached) {
-        applyProfileStats(cached);
-      }
-
-      // Refresh in background (non-blocking)
-      // Use InteractionManager to defer heavy computation
       InteractionManager.runAfterInteractions(() => {
         loadStats().catch((error) => {
           console.error('Error loading profile stats:', error);
         });
       });
-    }, [applyProfileStats, loadStats])
+    }, [loadStats])
   );
 
   const sortStats = useCallback(

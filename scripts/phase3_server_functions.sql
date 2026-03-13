@@ -150,7 +150,9 @@ RETURNS TABLE (
   borough     TEXT,
   total       BIGINT,
   visited     BIGINT,
-  percentage  INT
+  percentage  INT,
+  center_lat  DOUBLE PRECISION,
+  center_lon  DOUBLE PRECISION
 )
 LANGUAGE sql
 STABLE
@@ -170,7 +172,9 @@ AS $$
     CASE WHEN COUNT(*) > 0
       THEN ROUND((COUNT(v.pub_id)::NUMERIC / COUNT(*)) * 100)::INT
       ELSE 0
-    END                                                AS percentage
+    END                                                AS percentage,
+    AVG(pa.lat::DOUBLE PRECISION)                      AS center_lat,
+    AVG(pa.lon::DOUBLE PRECISION)                      AS center_lon
   FROM public.pubs_all pa
   LEFT JOIN visited_ids v ON v.pub_id = pa.id
   GROUP BY COALESCE(NULLIF(TRIM(pa.area), ''), 'Unknown')

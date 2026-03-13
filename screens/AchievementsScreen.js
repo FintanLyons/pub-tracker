@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { fetchLondonPubs } from '../services/PubService';
-import { getCachedProfileStats } from '../services/ProfileStatsCache';
+import { supabase } from '../config/supabase';
+import { getCurrentUserSecure } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
 
@@ -16,199 +16,42 @@ const BURGUNDY = '#A1183C';
 const SAPPHIRE = '#2F4AA1';
 
 export default function AchievementsScreen() {
-  // Initialize with cached data for instant display
-  const initialCachedStats = getCachedProfileStats();
-  const initialPubs = initialCachedStats?.pubs || [];
-  
-  const [pubs, setPubs] = useState(initialPubs);
   const [currentScore, setCurrentScore] = useState(0);
   const [trophies, setTrophies] = useState([]);
-  
-  // Calculate score and trophies from pubs data
-  const calculateScoreAndTrophies = useCallback((allPubs) => {
-    if (!Array.isArray(allPubs) || allPubs.length === 0) {
-      setCurrentScore(0);
-      setTrophies([]);
+
+  const loadAchievements = useCallback(async () => {
+    const user = await getCurrentUserSecure();
+    if (!user?.id) return;
+
+    const { data, error } = await supabase.rpc('get_achievements', { p_user_id: user.id });
+    if (error) {
+      console.error('get_achievements error:', error);
       return;
     }
 
-    // Calculate points from visited pubs
-    const visitedPubs = allPubs.filter(p => p.isVisited);
-    const pointsFromPubs = visitedPubs.reduce((sum, pub) => sum + (pub.points || 0), 0);
+    setCurrentScore(data.totalScore || 0);
 
-    // Calculate area & borough completion bonuses
-    const areaMap = {};
-    const boroughMap = {};
-    allPubs.forEach(pub => {
-      const area = pub.area || 'Unknown';
-      if (!areaMap[area]) {
-        areaMap[area] = { total: 0, visited: 0 };
-      }
-      areaMap[area].total++;
-      if (pub.isVisited) {
-        areaMap[area].visited++;
-      }
+    const allTrophies = [
+      ...(data.areaTrophies || []),
+      ...(data.boroughTrophies || []),
+      ...(data.pubAchievements || []),
+    ];
 
-      const borough =
-        typeof pub.borough === 'string' && pub.borough.trim().length > 0
-          ? pub.borough.trim()
-          : 'Unknown';
-      if (!boroughMap[borough]) {
-        boroughMap[borough] = {
-          total: 0,
-          visited: 0,
-          areas: new Set(),
-        };
-      }
-      boroughMap[borough].total++;
-      if (pub.isVisited) {
-        boroughMap[borough].visited++;
-      }
-      if (area && area !== 'Unknown') {
-        boroughMap[borough].areas.add(area);
-      }
-    });
-
-    // Count completed areas (100% completion)
-    const completedAreas = Object.entries(areaMap)
-      .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0)
-      .map(([area, _]) => area);
-    const areaBonusPoints = completedAreas.length * 50;
-
-    const completedBoroughs = Object.entries(boroughMap)
-      .filter(([_, counts]) => counts.visited === counts.total && counts.total > 0);
-    const boroughBonusPoints = completedBoroughs.length * 200;
-
-    // Current score = visited pub points + area bonuses
-    const currentTotalScore = pointsFromPubs + areaBonusPoints + boroughBonusPoints;
-
-    setCurrentScore(currentTotalScore);
-
-    // Generate trophies
-    const trophyList = [];
-
-    // Add one trophy for each area (both completed and uncompleted)
-    Object.entries(areaMap).forEach(([area, counts]) => {
-      const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
-      const isCompleted = counts.visited === counts.total && counts.total > 0;
-
-      trophyList.push({
-        id: `area-${area}`,
-        type: 'area',
-        title: `${area} Complete`,
-        description: `${percentage}%`,
-        isAchieved: isCompleted,
-        area: area,
-      });
-    });
-
-    // Add borough trophies
-    Object.entries(boroughMap).forEach(([borough, counts]) => {
-      if (borough === 'Unknown') {
-        return;
-      }
-      const percentage = counts.total > 0 ? Math.round((counts.visited / counts.total) * 100) : 0;
-      const isCompleted = counts.visited === counts.total && counts.total > 0;
-
-      trophyList.push({
-        id: `borough-${borough}`,
-        type: 'borough',
-        title: `${borough} Champion`,
-        description: `${percentage}%`,
-        isAchieved: isCompleted,
-        borough,
-        completionPercentage: percentage,
-      });
-    });
-
-    // Add one trophy for each pub achievement (only if the pub is visited)
-    allPubs.forEach(pub => {
-      if (pub.isVisited && pub.achievements && pub.achievements.length > 0) {
-        pub.achievements.forEach((achievement, index) => {
-          trophyList.push({
-            id: `achievement-${pub.id}-${index}`,
-            type: 'achievement',
-            title: achievement,
-            description: pub.name,
-            isAchieved: true,
-            pub: pub.name,
-            achievement: achievement,
-          });
-        });
-      }
-    });
-
-    // Add placeholder trophies for unvisited pub achievements
-    allPubs.forEach(pub => {
-      if (!pub.isVisited && pub.achievements && pub.achievements.length > 0) {
-        pub.achievements.forEach((achievement, index) => {
-          // Check if we already have a trophy for this achievement
-          if (!trophyList.find(t => 
-            t.type === 'achievement' && 
-            t.pub === pub.name && 
-            t.achievement === achievement
-          )) {
-            trophyList.push({
-              id: `achievement-${pub.id}-${index}`,
-              type: 'achievement',
-              title: achievement,
-              description: pub.name,
-              isAchieved: false,
-              pub: pub.name,
-              achievement: achievement,
-            });
-          }
-        });
-      }
-    });
-
-    // Sort trophies so achieved ones appear first
-    trophyList.sort((a, b) => {
+    allTrophies.sort((a, b) => {
       if (a.isAchieved && !b.isAchieved) return -1;
       if (!a.isAchieved && b.isAchieved) return 1;
-      return 0; // Keep original order for trophies with same achievement status
+      return 0;
     });
 
-    setTrophies(trophyList);
+    setTrophies(allTrophies);
   }, []);
-
-  const loadAchievements = useCallback(async () => {
-    // Always fetch fresh pubs to get latest visited status from AsyncStorage
-    // This ensures that visiting a pub is immediately reflected when switching to AchievementsScreen
-    let allPubs = [];
-    try {
-      allPubs = await fetchLondonPubs();
-    } catch (error) {
-      console.error('Error fetching pubs in AchievementsScreen:', error);
-      // Fallback to cached data if fetch fails
-      const cachedStats = getCachedProfileStats();
-      allPubs = cachedStats?.pubs || [];
-    }
-    
-    setPubs(allPubs);
-    calculateScoreAndTrophies(allPubs);
-  }, [calculateScoreAndTrophies]);
-
-  // Calculate initial data from cached pubs on mount
-  useEffect(() => {
-    if (initialPubs.length > 0) {
-      calculateScoreAndTrophies(initialPubs);
-    }
-  }, []); // Only run on mount
 
   useFocusEffect(
     useCallback(() => {
-      // Show cached data immediately for instant display
-      const cached = getCachedProfileStats();
-      if (cached?.pubs && Array.isArray(cached.pubs) && cached.pubs.length > 0) {
-        calculateScoreAndTrophies(cached.pubs);
-      }
-
-      // Refresh in background (non-blocking)
       InteractionManager.runAfterInteractions(() => {
         loadAchievements();
       });
-    }, [loadAchievements, calculateScoreAndTrophies])
+    }, [loadAchievements])
   );
 
   // Calculate level progress
