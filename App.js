@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider as PaperProvider } from 'react-native-paper';
 import * as NavigationBar from 'expo-navigation-bar';
+import ErrorBoundary from './components/ErrorBoundary';
 import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -45,9 +46,11 @@ function AppContent() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }

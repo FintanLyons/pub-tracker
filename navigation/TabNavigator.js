@@ -3,6 +3,7 @@ import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import ErrorBoundary from '../components/ErrorBoundary';
 import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
@@ -10,6 +11,17 @@ import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { preloadProfileStats } from '../services/ProfileStatsCache';
 import { migrateLocalDataToServer } from '../services/PubService';
+
+const withErrorBoundary = (Screen, message) => (props) => (
+  <ErrorBoundary fallbackMessage={message}>
+    <Screen {...props} />
+  </ErrorBoundary>
+);
+
+const SafeMapScreen = withErrorBoundary(MapScreen, 'The map failed to load. Please try again.');
+const SafeProfileScreen = withErrorBoundary(ProfileScreen, 'Your profile failed to load. Please try again.');
+const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderboard failed to load. Please try again.');
+const SafeAchievementsScreen = withErrorBoundary(AchievementsScreen, 'Achievements failed to load. Please try again.');
 
 const Tab = createBottomTabNavigator();
 
@@ -63,7 +75,7 @@ export default function TabNavigator() {
         >
           <Tab.Screen 
             name="Map" 
-            component={MapScreen}
+            component={SafeMapScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="map-outline" size={size} color={color} />
@@ -72,7 +84,7 @@ export default function TabNavigator() {
           />
           <Tab.Screen 
             name="Profile" 
-            component={ProfileScreen}
+            component={SafeProfileScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="account-outline" size={size} color={color} />
@@ -81,7 +93,7 @@ export default function TabNavigator() {
           />
           <Tab.Screen 
             name="Leaderboard" 
-            component={LeaderboardScreen}
+            component={SafeLeaderboardScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="podium" size={size} color={color} />
@@ -90,7 +102,7 @@ export default function TabNavigator() {
           />
           <Tab.Screen 
             name="Achievements" 
-            component={AchievementsScreen}
+            component={SafeAchievementsScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="trophy-outline" size={size} color={color} />

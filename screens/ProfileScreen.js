@@ -129,7 +129,9 @@ export default function ProfileScreen() {
       setAreaStatsRaw(
         Array.isArray(stats.areaStats) ? stats.areaStats : []
       );
-      setBoroughStatsRaw(boroughStats);
+      setBoroughStatsRaw(
+        Array.isArray(stats.boroughStats) ? stats.boroughStats : []
+      );
 
       if (stats.location) {
         setCurrentLocation(stats.location);
