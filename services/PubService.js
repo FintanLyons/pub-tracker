@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import boroughCoordinates from '../data/boroughCoordinates.json';
 import { supabase } from '../config/supabase';
 
@@ -11,41 +10,6 @@ const BOROUGH_COORDINATE_MAP = new Map(
 		},
 	]),
 );
-
-function coerceToPubArray(value) {
-	if (!value && value !== 0) return [];
-	if (Array.isArray(value)) return value;
-	if (typeof value === 'object') {
-		if (Array.isArray(value.pubs)) return value.pubs;
-		if (Array.isArray(value.pub)) return value.pub;
-		if (value.pub && typeof value.pub === 'object' && value.pub.id) return [value.pub];
-		for (const k of Object.keys(value)) {
-			if (Array.isArray(value[k])) return value[k];
-		}
-		if (value.id && value.lat && value.lon) return [value];
-	}
-	return [];
-}
-
-async function loadIdSet(storageKey) {
-	const set = new Set();
-	const raw = await AsyncStorage.getItem(storageKey);
-	if (!raw) return set;
-
-	try {
-		const parsed = JSON.parse(raw);
-		const arr = Array.isArray(parsed) ? parsed : coerceToPubArray(parsed);
-		if (Array.isArray(arr)) {
-			arr.forEach((id) => {
-				if (typeof id === 'string') set.add(id);
-			});
-		}
-	} catch (error) {
-		console.warn(`${storageKey} in AsyncStorage is malformed, clearing it`, error);
-		await AsyncStorage.removeItem(storageKey);
-	}
-	return set;
-}
 
 // ---------------------------------------------------------------------------
 // Server-side visited / favorite tracking
@@ -97,58 +61,18 @@ const loadVisitedAndFavoriteSets = async () => {
 				return { visitedSet: visited, favoritesSet: favorites };
 			}
 		} catch (e) {
-			console.warn('Server visited/favorite fetch failed, using local cache:', e.message);
+			console.warn('Server visited/favorite fetch failed:', e.message);
 		}
 	}
 
-	const [visitedSet, favoritesSet] = await Promise.all([
-		loadIdSet('visitedPubs'),
-		loadIdSet('favoritePubs'),
-	]);
-	return { visitedSet, favoritesSet };
+	// No authenticated user or server fetch failed – treat as no visits/favourites.
+	return { visitedSet: new Set(), favoritesSet: new Set() };
 };
 
 export const clearVisitedFavoriteCache = () => {
 	_visitedSet = null;
 	_favoritesSet = null;
 	_cacheUserId = null;
-};
-
-export const migrateLocalDataToServer = async () => {
-	try {
-		const migrated = await AsyncStorage.getItem('server_migration_done');
-		if (migrated === 'true') return;
-
-		const session = await getCurrentSession();
-		if (!session?.userId) return;
-
-		const [visitedSet, favoritesSet] = await Promise.all([
-			loadIdSet('visitedPubs'),
-			loadIdSet('favoritePubs'),
-		]);
-
-		if (visitedSet.size > 0) {
-			const rows = [...visitedSet].map((pubId) => ({
-				user_id: session.userId,
-				pub_id: pubId,
-			}));
-			await supabase.from('visited_pubs').upsert(rows, { onConflict: 'user_id,pub_id' });
-		}
-
-		if (favoritesSet.size > 0) {
-			const rows = [...favoritesSet].map((pubId) => ({
-				user_id: session.userId,
-				pub_id: pubId,
-			}));
-			await supabase.from('favorite_pubs').upsert(rows, { onConflict: 'user_id,pub_id' });
-		}
-
-		await AsyncStorage.setItem('server_migration_done', 'true');
-		clearVisitedFavoriteCache();
-		console.log(`Migration complete: ${visitedSet.size} visits, ${favoritesSet.size} favorites`);
-	} catch (error) {
-		console.error('Migration error (will retry next launch):', error);
-	}
 };
 
 // ---------------------------------------------------------------------------
@@ -430,76 +354,70 @@ export const togglePubVisited = async (pubId) => {
 	if (!pubId) throw new Error('togglePubVisited called without pubId');
 
 	const session = await getCurrentSession();
-	const hasServer = !!session?.userId;
-
-	const isCurrentlyVisited = _visitedSet
-		? _visitedSet.has(pubId)
-		: (await loadIdSet('visitedPubs')).has(pubId);
-
-	if (hasServer) {
-		if (isCurrentlyVisited) {
-			const { error } = await supabase
-				.from('visited_pubs')
-				.delete()
-				.eq('user_id', session.userId)
-				.eq('pub_id', pubId);
-			if (error) throw error;
-		} else {
-			const { error } = await supabase
-				.from('visited_pubs')
-				.insert({ user_id: session.userId, pub_id: pubId });
-			if (error) throw error;
-		}
+	if (!session?.userId) {
+		throw new Error('You need to be logged in and online to track visited pubs.');
 	}
 
-	if (_visitedSet) {
-		if (isCurrentlyVisited) _visitedSet.delete(pubId);
-		else _visitedSet.add(pubId);
+	// Ensure we have the latest server-backed set in memory
+	if (!_visitedSet || _cacheUserId !== session.userId) {
+		const { visitedSet } = await loadVisitedAndFavoriteSets();
+		_visitedSet = visitedSet;
+		_cacheUserId = session.userId;
 	}
 
-	const localSet = await loadIdSet('visitedPubs');
-	if (localSet.has(pubId)) localSet.delete(pubId);
-	else localSet.add(pubId);
-	await AsyncStorage.setItem('visitedPubs', JSON.stringify([...localSet]));
+	const isCurrentlyVisited = _visitedSet.has(pubId);
 
-	return _visitedSet || localSet;
+	if (isCurrentlyVisited) {
+		const { error } = await supabase
+			.from('visited_pubs')
+			.delete()
+			.eq('user_id', session.userId)
+			.eq('pub_id', pubId);
+		if (error) throw error;
+		_visitedSet.delete(pubId);
+	} else {
+		const { error } = await supabase
+			.from('visited_pubs')
+			.insert({ user_id: session.userId, pub_id: pubId });
+		if (error) throw error;
+		_visitedSet.add(pubId);
+	}
+
+	return _visitedSet;
 };
 
 export const togglePubFavorite = async (pubId) => {
 	if (!pubId) throw new Error('togglePubFavorite called without pubId');
 
 	const session = await getCurrentSession();
-	const hasServer = !!session?.userId;
-
-	const isCurrentlyFavorite = _favoritesSet
-		? _favoritesSet.has(pubId)
-		: (await loadIdSet('favoritePubs')).has(pubId);
-
-	if (hasServer) {
-		if (isCurrentlyFavorite) {
-			const { error } = await supabase
-				.from('favorite_pubs')
-				.delete()
-				.eq('user_id', session.userId)
-				.eq('pub_id', pubId);
-			if (error) throw error;
-		} else {
-			const { error } = await supabase
-				.from('favorite_pubs')
-				.insert({ user_id: session.userId, pub_id: pubId });
-			if (error) throw error;
-		}
+	if (!session?.userId) {
+		throw new Error('You need to be logged in and online to track favourite pubs.');
 	}
 
-	if (_favoritesSet) {
-		if (isCurrentlyFavorite) _favoritesSet.delete(pubId);
-		else _favoritesSet.add(pubId);
+	// Ensure we have the latest server-backed set in memory
+	if (!_favoritesSet || _cacheUserId !== session.userId) {
+		const { favoritesSet } = await loadVisitedAndFavoriteSets();
+		_favoritesSet = favoritesSet;
+		_cacheUserId = session.userId;
 	}
 
-	const localSet = await loadIdSet('favoritePubs');
-	if (localSet.has(pubId)) localSet.delete(pubId);
-	else localSet.add(pubId);
-	await AsyncStorage.setItem('favoritePubs', JSON.stringify([...localSet]));
+	const isCurrentlyFavorite = _favoritesSet.has(pubId);
 
-	return _favoritesSet || localSet;
+	if (isCurrentlyFavorite) {
+		const { error } = await supabase
+			.from('favorite_pubs')
+			.delete()
+			.eq('user_id', session.userId)
+			.eq('pub_id', pubId);
+		if (error) throw error;
+		_favoritesSet.delete(pubId);
+	} else {
+		const { error } = await supabase
+			.from('favorite_pubs')
+			.insert({ user_id: session.userId, pub_id: pubId });
+		if (error) throw error;
+		_favoritesSet.add(pubId);
+	}
+
+	return _favoritesSet;
 };

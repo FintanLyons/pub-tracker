@@ -9,7 +9,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { fetchBoroughSummaries, migrateLocalDataToServer } from '../services/PubService';
+import { fetchBoroughSummaries } from '../services/PubService';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
 import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
 import { getUserLeagues, getLeagueLeaderboard } from '../services/LeagueService';
@@ -41,10 +41,6 @@ export default function TabNavigator() {
 
   useEffect(() => {
     let isCancelled = false;
-
-    migrateLocalDataToServer().catch((error) => {
-      console.warn('Migration check failed:', error?.message || error);
-    });
 
     const loadBoroughSummaries = async () => {
       try {
