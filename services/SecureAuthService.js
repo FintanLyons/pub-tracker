@@ -9,7 +9,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SUPABASE_CONFIG } from '../config/supabase';
-import { fetchLondonPubs } from './PubService';
+import { fetchLondonPubs, clearVisitedFavoriteCache } from './PubService';
 import { getLevelProgress } from '../utils/levelSystem';
 
 // Initialize Supabase client
@@ -481,8 +481,9 @@ export const logoutUserSecure = async () => {
       });
     }
 
-    // Clear local session
+    // Clear local session and in-memory caches
     await AsyncStorage.multiRemove(['supabase_session', 'currentUser']);
+    clearVisitedFavoriteCache();
   } catch (error) {
     console.error('Logout error:', error);
     throw error;

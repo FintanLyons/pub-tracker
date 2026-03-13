@@ -9,6 +9,7 @@ import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { preloadProfileStats } from '../services/ProfileStatsCache';
+import { migrateLocalDataToServer } from '../services/PubService';
 
 const Tab = createBottomTabNavigator();
 
@@ -21,6 +22,9 @@ export default function TabNavigator() {
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   
   useEffect(() => {
+    migrateLocalDataToServer().catch((error) => {
+      console.warn('Migration check failed:', error?.message || error);
+    });
     preloadProfileStats().catch((error) => {
       console.warn('Unable to preload profile stats:', error?.message || error);
     });

@@ -58,6 +58,136 @@ async function loadIdSet(storageKey) {
 	return set;
 }
 
+// ---------------------------------------------------------------------------
+// Server-side visited / favorite tracking
+// ---------------------------------------------------------------------------
+
+let _visitedSet = null;
+let _favoritesSet = null;
+let _cacheUserId = null;
+
+const getCurrentSession = async () => {
+	try {
+		const sessionJson = await AsyncStorage.getItem('supabase_session');
+		if (!sessionJson) return null;
+		const session = JSON.parse(sessionJson);
+		if (!session?.access_token) return null;
+		const userJson = await AsyncStorage.getItem('currentUser');
+		const user = userJson ? JSON.parse(userJson) : null;
+		return {
+			accessToken: session.access_token,
+			userId: user?.id || session?.user?.id || null,
+		};
+	} catch {
+		return null;
+	}
+};
+
+const fetchServerIdSet = async (table, userId, accessToken) => {
+	const supabaseUrl = getSupabaseUrl();
+	if (!supabaseUrl) return null;
+	const headers = getSupabaseHeaders(accessToken);
+	if (!headers) return null;
+	const response = await fetch(
+		`${supabaseUrl}/${table}?user_id=eq.${userId}&select=pub_id`,
+		{ headers },
+	);
+	if (!response.ok) return null;
+	const rows = await response.json();
+	return new Set(rows.map((r) => r.pub_id));
+};
+
+const loadVisitedAndFavoriteSets = async () => {
+	const session = await getCurrentSession();
+
+	if (session?.userId && session?.accessToken) {
+		if (_cacheUserId === session.userId && _visitedSet && _favoritesSet) {
+			return { visitedSet: _visitedSet, favoritesSet: _favoritesSet };
+		}
+		try {
+			const [visited, favorites] = await Promise.all([
+				fetchServerIdSet('visited_pubs', session.userId, session.accessToken),
+				fetchServerIdSet('favorite_pubs', session.userId, session.accessToken),
+			]);
+			if (visited !== null && favorites !== null) {
+				_visitedSet = visited;
+				_favoritesSet = favorites;
+				_cacheUserId = session.userId;
+				return { visitedSet: visited, favoritesSet: favorites };
+			}
+		} catch (e) {
+			console.warn('Server visited/favorite fetch failed, using local cache:', e.message);
+		}
+	}
+
+	const [visitedSet, favoritesSet] = await Promise.all([
+		loadIdSet('visitedPubs'),
+		loadIdSet('favoritePubs'),
+	]);
+	return { visitedSet, favoritesSet };
+};
+
+export const clearVisitedFavoriteCache = () => {
+	_visitedSet = null;
+	_favoritesSet = null;
+	_cacheUserId = null;
+};
+
+export const migrateLocalDataToServer = async () => {
+	try {
+		const migrated = await AsyncStorage.getItem('server_migration_done');
+		if (migrated === 'true') return;
+
+		const session = await getCurrentSession();
+		if (!session?.userId || !session?.accessToken) return;
+
+		const supabaseUrl = getSupabaseUrl();
+		if (!supabaseUrl) return;
+
+		const headers = getSupabaseHeaders(session.accessToken);
+		const [visitedSet, favoritesSet] = await Promise.all([
+			loadIdSet('visitedPubs'),
+			loadIdSet('favoritePubs'),
+		]);
+
+		if (visitedSet.size > 0) {
+			const rows = [...visitedSet].map((pubId) => ({
+				user_id: session.userId,
+				pub_id: pubId,
+			}));
+			await fetch(
+				`${supabaseUrl}/visited_pubs?on_conflict=user_id,pub_id`,
+				{
+					method: 'POST',
+					headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+					body: JSON.stringify(rows),
+				},
+			);
+		}
+
+		if (favoritesSet.size > 0) {
+			const rows = [...favoritesSet].map((pubId) => ({
+				user_id: session.userId,
+				pub_id: pubId,
+			}));
+			await fetch(
+				`${supabaseUrl}/favorite_pubs?on_conflict=user_id,pub_id`,
+				{
+					method: 'POST',
+					headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+					body: JSON.stringify(rows),
+				},
+			);
+		}
+
+		await AsyncStorage.setItem('server_migration_done', 'true');
+		clearVisitedFavoriteCache();
+		console.log(`Migration complete: ${visitedSet.size} visits, ${favoritesSet.size} favorites`);
+	} catch (error) {
+		console.error('Migration error (will retry next launch):', error);
+	}
+};
+
 export const fetchLondonPubs = async (options = {}) => {
 	try {
 		const { bounds, boroughs } = options || {};
@@ -75,11 +205,7 @@ export const fetchLondonPubs = async (options = {}) => {
 			return Number.parseFloat(value.toFixed(6));
 		};
 
-		// Get visited pubs from local storage
-		const [visitedSet, favoritesSet] = await Promise.all([
-			loadIdSet('visitedPubs'),
-			loadIdSet('favoritePubs'),
-		]);
+		const { visitedSet, favoritesSet } = await loadVisitedAndFavoriteSets();
 
 		// Try to fetch from Supabase
 		const supabaseUrl = getSupabaseUrl();
@@ -294,7 +420,7 @@ export const fetchLondonPubs = async (options = {}) => {
 
 export const fetchBoroughSummaries = async () => {
 	try {
-		const visitedSet = await loadIdSet('visitedPubs');
+		const { visitedSet } = await loadVisitedAndFavoriteSets();
 		const supabaseUrl = getSupabaseUrl();
 		const headers = getSupabaseHeaders();
 
@@ -597,56 +723,84 @@ export const fetchBoroughSummaries = async () => {
 
 export const togglePubVisited = async (pubId) => {
 	if (!pubId) throw new Error('togglePubVisited called without pubId');
-	try {
-		const raw = await AsyncStorage.getItem('visitedPubs');
-		let visited = new Set();
-		if (raw) {
-			try {
-				const parsed = JSON.parse(raw);
-				// Expecting array of ids
-				const arr = Array.isArray(parsed) ? parsed : coerceToPubArray(parsed);
-				arr.forEach(id => { if (typeof id === 'string') visited.add(id); });
-			} catch (e) {
-				console.warn('Corrupted visitedPubs; resetting', e);
-				visited = new Set();
-			}
+
+	const session = await getCurrentSession();
+	const supabaseUrl = getSupabaseUrl();
+	const hasServer = !!(session?.userId && session?.accessToken && supabaseUrl);
+
+	const isCurrentlyVisited = _visitedSet
+		? _visitedSet.has(pubId)
+		: (await loadIdSet('visitedPubs')).has(pubId);
+
+	if (hasServer) {
+		const headers = getSupabaseHeaders(session.accessToken);
+		if (isCurrentlyVisited) {
+			const resp = await fetch(
+				`${supabaseUrl}/visited_pubs?user_id=eq.${session.userId}&pub_id=eq.${pubId}`,
+				{ method: 'DELETE', headers },
+			);
+			if (!resp.ok) throw new Error(`Failed to remove visit: ${resp.status}`);
+		} else {
+			const resp = await fetch(`${supabaseUrl}/visited_pubs`, {
+				method: 'POST',
+				headers,
+				body: JSON.stringify({ user_id: session.userId, pub_id: pubId }),
+			});
+			if (!resp.ok) throw new Error(`Failed to record visit: ${resp.status}`);
 		}
-
-		if (visited.has(pubId)) visited.delete(pubId);
-		else visited.add(pubId);
-
-		await AsyncStorage.setItem('visitedPubs', JSON.stringify([...visited]));
-		return visited;
-	} catch (error) {
-		console.error('togglePubVisited error:', error);
-		throw error;
 	}
+
+	if (_visitedSet) {
+		if (isCurrentlyVisited) _visitedSet.delete(pubId);
+		else _visitedSet.add(pubId);
+	}
+
+	const localSet = await loadIdSet('visitedPubs');
+	if (localSet.has(pubId)) localSet.delete(pubId);
+	else localSet.add(pubId);
+	await AsyncStorage.setItem('visitedPubs', JSON.stringify([...localSet]));
+
+	return _visitedSet || localSet;
 };
 
 export const togglePubFavorite = async (pubId) => {
 	if (!pubId) throw new Error('togglePubFavorite called without pubId');
-	try {
-		const raw = await AsyncStorage.getItem('favoritePubs');
-		let favorites = new Set();
-		if (raw) {
-			try {
-				const parsed = JSON.parse(raw);
-				// Expecting array of ids
-				const arr = Array.isArray(parsed) ? parsed : coerceToPubArray(parsed);
-				arr.forEach(id => { if (typeof id === 'string') favorites.add(id); });
-			} catch (e) {
-				console.warn('Corrupted favoritePubs; resetting', e);
-				favorites = new Set();
-			}
+
+	const session = await getCurrentSession();
+	const supabaseUrl = getSupabaseUrl();
+	const hasServer = !!(session?.userId && session?.accessToken && supabaseUrl);
+
+	const isCurrentlyFavorite = _favoritesSet
+		? _favoritesSet.has(pubId)
+		: (await loadIdSet('favoritePubs')).has(pubId);
+
+	if (hasServer) {
+		const headers = getSupabaseHeaders(session.accessToken);
+		if (isCurrentlyFavorite) {
+			const resp = await fetch(
+				`${supabaseUrl}/favorite_pubs?user_id=eq.${session.userId}&pub_id=eq.${pubId}`,
+				{ method: 'DELETE', headers },
+			);
+			if (!resp.ok) throw new Error(`Failed to remove favorite: ${resp.status}`);
+		} else {
+			const resp = await fetch(`${supabaseUrl}/favorite_pubs`, {
+				method: 'POST',
+				headers,
+				body: JSON.stringify({ user_id: session.userId, pub_id: pubId }),
+			});
+			if (!resp.ok) throw new Error(`Failed to record favorite: ${resp.status}`);
 		}
-
-		if (favorites.has(pubId)) favorites.delete(pubId);
-		else favorites.add(pubId);
-
-		await AsyncStorage.setItem('favoritePubs', JSON.stringify([...favorites]));
-		return favorites;
-	} catch (error) {
-		console.error('togglePubFavorite error:', error);
-		throw error;
 	}
+
+	if (_favoritesSet) {
+		if (isCurrentlyFavorite) _favoritesSet.delete(pubId);
+		else _favoritesSet.add(pubId);
+	}
+
+	const localSet = await loadIdSet('favoritePubs');
+	if (localSet.has(pubId)) localSet.delete(pubId);
+	else localSet.add(pubId);
+	await AsyncStorage.setItem('favoritePubs', JSON.stringify([...localSet]));
+
+	return _favoritesSet || localSet;
 };
