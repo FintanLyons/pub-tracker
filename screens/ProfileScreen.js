@@ -12,6 +12,7 @@ import {
   getCachedProfileStats,
   preloadProfileStats,
 } from '../services/ProfileStatsCache';
+import { distanceKm } from '../utils/geo';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -78,19 +79,6 @@ export default function ProfileScreen() {
     }
     navigation.navigate('Map', { boroughToSearch: boroughName });
   }, [navigation]);
-
-  // Calculate distance between two coordinates using Haversine formula (in km)
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
 
   // Get user's current location
   const getCurrentLocation = useCallback(async () => {
@@ -294,7 +282,7 @@ export default function ProfileScreen() {
           try {
             const centerLat = sumLat / coordCount;
             const centerLon = sumLon / coordCount;
-            distance = calculateDistance(
+            distance = distanceKm(
               userLocation.latitude,
               userLocation.longitude,
               centerLat,
@@ -337,7 +325,7 @@ export default function ProfileScreen() {
           try {
             const centerLat = boroughCounts.sumLat / boroughCounts.coordCount;
             const centerLon = boroughCounts.sumLon / boroughCounts.coordCount;
-            distance = calculateDistance(
+            distance = distanceKm(
               userLocation.latitude,
               userLocation.longitude,
               centerLat,

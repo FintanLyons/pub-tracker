@@ -1,23 +1,10 @@
 import * as Location from 'expo-location';
 import { fetchLondonPubs } from './PubService';
+import { distanceKm } from '../utils/geo';
 
 let cachedStats = null;
 let cachedLocation = null;
 let preloadPromise = null;
-
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
 
 const isFiniteCoordinate = (value) => Number.isFinite(value) && !Number.isNaN(value);
 
@@ -126,7 +113,7 @@ const buildStatsFromPubs = (pubs, location) => {
     let distance = null;
     if (location && center) {
       try {
-        distance = calculateDistance(
+        distance = distanceKm(
           location.latitude,
           location.longitude,
           center.latitude,
@@ -173,7 +160,7 @@ const buildStatsFromPubs = (pubs, location) => {
       let distance = null;
       if (location && center) {
         try {
-          distance = calculateDistance(
+          distance = distanceKm(
             location.latitude,
             location.longitude,
             center.latitude,

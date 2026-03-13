@@ -1,3 +1,5 @@
+export { distanceMeters as distanceBetween, distanceMeters as calculateDistanceMeters } from '../../utils/geo';
+
 export const serializeBoroughSummaries = (summaries) =>
   JSON.stringify(
     (Array.isArray(summaries) ? summaries : [])
@@ -17,42 +19,6 @@ export const serializeBoroughSummaries = (summaries) =>
       }))
       .sort((a, b) => a.borough.localeCompare(b.borough))
   );
-
-export const distanceBetween = (a, b) => {
-  if (!a || !b) return Infinity;
-  const toRadians = (deg) => (deg * Math.PI) / 180;
-  const earthRadius = 6371000;
-  const lat1 = toRadians(a.latitude);
-  const lat2 = toRadians(b.latitude);
-  const deltaLat = toRadians(b.latitude - a.latitude);
-  const deltaLon = toRadians(b.longitude - a.longitude);
-
-  const sinLat = Math.sin(deltaLat / 2);
-  const sinLon = Math.sin(deltaLon / 2);
-
-  const h =
-    sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
-  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-
-  return earthRadius * c;
-};
-
-export const calculateDistanceMeters = (pointA, pointB) => {
-  if (!pointA || !pointB) return Infinity;
-
-  const toRadians = (degrees) => (degrees * Math.PI) / 180;
-  const earthRadius = 6371000; // meters
-  const lat1 = toRadians(pointA.latitude);
-  const lat2 = toRadians(pointB.latitude);
-  const deltaLat = toRadians(pointB.latitude - pointA.latitude);
-  const deltaLon = toRadians(pointB.longitude - pointA.longitude);
-
-  const a =
-    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return earthRadius * c;
-};
 
 export const getAreaCenter = (pubsInArea) => {
   const validPubs = pubsInArea.filter((pub) => pub.lat && pub.lon);

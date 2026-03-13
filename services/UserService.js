@@ -2,30 +2,6 @@ import { supabase } from '../config/supabase';
 import { fetchLondonPubs } from './PubService';
 import { getLevelProgress } from '../utils/levelSystem';
 
-/**
- * Get current authenticated user from Supabase session
- */
-export const getCurrentUser = async () => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return null;
-
-    const { data: users } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', session.user.id)
-      .limit(1);
-
-    return users && users.length > 0 ? users[0] : null;
-  } catch (error) {
-    console.error('Error getting current user:', error);
-    return null;
-  }
-};
-
-/**
- * Calculate user stats from pub data
- */
 const calculateUserStats = async () => {
   const allPubs = await fetchLondonPubs();
   const visitedPubs = allPubs.filter(p => p.isVisited);
@@ -108,23 +84,6 @@ export const syncUserStats = async (userId) => {
   }
 };
 
-/**
- * Get user stats by user ID
- */
-export const getUserStats = async (userId) => {
-  const { data, error } = await supabase
-    .from('user_stats')
-    .select('*')
-    .eq('user_id', userId)
-    .limit(1);
-
-  if (error) throw error;
-  return data && data.length > 0 ? data[0] : null;
-};
-
-/**
- * Search users by username
- */
 export const searchUsers = async (query) => {
   const { data, error } = await supabase
     .from('users')
@@ -135,22 +94,3 @@ export const searchUsers = async (query) => {
   return data || [];
 };
 
-/**
- * Get user by ID
- */
-export const getUserById = async (userId) => {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', userId)
-    .limit(1);
-
-  if (error) throw error;
-  return data && data.length > 0 ? data[0] : null;
-};
-
-// Legacy exports - kept so existing callers don't break at import time.
-// These should be removed once SecureAuthService is the sole auth path.
-export const registerUser = async () => { throw new Error('Use SecureAuthService.registerUserSecure instead'); };
-export const loginUser = async () => { throw new Error('Use SecureAuthService.loginUserSecure instead'); };
-export const logoutUser = async () => { throw new Error('Use SecureAuthService.logoutUserSecure instead'); };
