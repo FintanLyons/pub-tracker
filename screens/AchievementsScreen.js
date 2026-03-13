@@ -1,11 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../config/supabase';
-import { getCurrentUserSecure } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
+import { useUserStats } from '../contexts/UserStatsContext';
 
 const DARK_GREY = '#2C2C2C';
 const LIGHT_GREY = '#F5F5F5';
@@ -16,48 +15,43 @@ const BURGUNDY = '#A1183C';
 const SAPPHIRE = '#2F4AA1';
 
 export default function AchievementsScreen() {
-  const [currentScore, setCurrentScore] = useState(0);
-  const [trophies, setTrophies] = useState([]);
+  const {
+    achievements,
+    lastUpdated,
+    refreshUserStats,
+  } = useUserStats();
 
-  const loadAchievements = useCallback(async () => {
-    const user = await getCurrentUserSecure();
-    if (!user?.id) return;
+  const currentScore = achievements?.totalScore || 0;
 
-    const { data, error } = await supabase.rpc('get_achievements', { p_user_id: user.id });
-    if (error) {
-      console.error('get_achievements error:', error);
-      return;
-    }
-
-    setCurrentScore(data.totalScore || 0);
-
-    const allTrophies = [
-      ...(data.areaTrophies || []),
-      ...(data.boroughTrophies || []),
-      ...(data.pubAchievements || []),
+  const trophies = useMemo(() => {
+    if (!achievements) return [];
+    const all = [
+      ...(achievements.areaTrophies || []),
+      ...(achievements.boroughTrophies || []),
+      ...(achievements.pubAchievements || []),
     ];
-
-    allTrophies.sort((a, b) => {
+    all.sort((a, b) => {
       if (a.isAchieved && !b.isAchieved) return -1;
       if (!a.isAchieved && b.isAchieved) return 1;
       return 0;
     });
-
-    setTrophies(allTrophies);
-  }, []);
+    return all;
+  }, [achievements]);
 
   useFocusEffect(
     useCallback(() => {
+      const isStale = !lastUpdated || (Date.now() - lastUpdated > 30000);
+      if (!isStale && achievements) return;
       InteractionManager.runAfterInteractions(() => {
-        loadAchievements();
+        refreshUserStats().catch((error) => {
+          console.error('Error refreshing achievements:', error);
+        });
       });
-    }, [loadAchievements])
+    }, [lastUpdated, achievements, refreshUserStats])
   );
 
-  // Calculate level progress
   const levelProgress = getLevelProgress(currentScore);
 
-  // Group trophies into rows of 3
   const trophyRows = [];
   for (let i = 0; i < trophies.length; i += 3) {
     trophyRows.push(trophies.slice(i, i + 3));
@@ -150,7 +144,6 @@ export default function AchievementsScreen() {
                   </Text>
                 </View>
               ))}
-              {/* Fill empty spaces in the last row to maintain grid layout */}
               {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, idx) => (
                 <View key={`empty-${idx}`} style={styles.trophyContainer} />
               ))}
@@ -289,4 +282,3 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 });
-
