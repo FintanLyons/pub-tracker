@@ -1,35 +1,29 @@
-// Supabase Configuration
-// Replace these values with your actual Supabase project credentials
-// Get them from: Supabase Dashboard -> Project Settings -> API
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createClient } from '@supabase/supabase-js';
 
 export const SUPABASE_CONFIG = {
-  // Your Supabase project URL (e.g., 'https://xxxxx.supabase.co')
   url: 'https://ddfdwxrnouneqqzactus.supabase.co',
-  
-  // Your Supabase anon/public key
   anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRkZmR3eHJub3VuZXFxemFjdHVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxODA2ODUsImV4cCI6MjA3Nzc1NjY4NX0.DNi_BOgu4nACv708u3n-p0ZzP0TE4Jqufp1jOsXXro0',
 };
 
-// Helper function to get the Supabase REST API URL
+export const supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+// Legacy helpers kept during migration -- new code should use `supabase` directly.
 export const getSupabaseUrl = () => {
-  if (!SUPABASE_CONFIG.url) {
-    console.error('⚠️  Supabase URL not configured!');
-    return null;
-  }
+  if (!SUPABASE_CONFIG.url) return null;
   return `${SUPABASE_CONFIG.url}/rest/v1`;
 };
 
-// Helper function to get headers for Supabase requests
-// Pass accessToken for authenticated requests (needed for RLS)
 export const getSupabaseHeaders = (accessToken = null) => {
-  if (!SUPABASE_CONFIG.anonKey) {
-    console.error('⚠️  Supabase API key not configured!');
-    return null;
-  }
-  
-  // Use the provided access token if available, otherwise use anon key
+  if (!SUPABASE_CONFIG.anonKey) return null;
   const authToken = accessToken || SUPABASE_CONFIG.anonKey;
-  
   return {
     'apikey': SUPABASE_CONFIG.anonKey,
     'Authorization': `Bearer ${authToken}`,
@@ -37,4 +31,3 @@ export const getSupabaseHeaders = (accessToken = null) => {
     'Prefer': 'return=representation',
   };
 };
-

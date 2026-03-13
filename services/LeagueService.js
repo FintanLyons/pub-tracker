@@ -1,15 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getSupabaseUrl, getSupabaseHeaders } from '../config/supabase';
-
-/**
- * Helper to get authenticated headers
- */
-const getAuthHeaders = async () => {
-  const sessionJson = await AsyncStorage.getItem('supabase_session');
-  const session = sessionJson ? JSON.parse(sessionJson) : null;
-  const accessToken = session?.access_token;
-  return getSupabaseHeaders(accessToken);
-};
+import { supabase } from '../config/supabase';
 
 const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const LEAGUE_CODE_LENGTH = 6;
@@ -18,33 +7,22 @@ const MAX_CODE_GENERATION_ATTEMPTS = 10;
 const generateLeagueCode = () => {
   let code = '';
   for (let i = 0; i < LEAGUE_CODE_LENGTH; i += 1) {
-    const randomIndex = Math.floor(Math.random() * LEAGUE_CODE_ALPHABET.length);
-    code += LEAGUE_CODE_ALPHABET[randomIndex];
+    const idx = Math.floor(Math.random() * LEAGUE_CODE_ALPHABET.length);
+    code += LEAGUE_CODE_ALPHABET[idx];
   }
   return code;
 };
 
-const validateUniqueLeagueCode = async (supabaseUrl, headers, code) => {
-  const response = await fetch(`${supabaseUrl}/leagues?code=eq.${code}`, {
-    method: 'GET',
-    headers,
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to validate league code uniqueness');
-  }
-
-  const leagues = await response.json();
-  return leagues.length === 0;
-};
-
-const generateUniqueLeagueCode = async (supabaseUrl, headers) => {
+const generateUniqueLeagueCode = async () => {
   for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt += 1) {
     const code = generateLeagueCode();
-    const isUnique = await validateUniqueLeagueCode(supabaseUrl, headers, code);
-    if (isUnique) {
-      return code;
-    }
+    const { data } = await supabase
+      .from('leagues')
+      .select('id')
+      .eq('code', code)
+      .limit(1);
+
+    if (!data || data.length === 0) return code;
   }
   throw new Error('Unable to generate unique league code');
 };
@@ -53,153 +31,79 @@ const generateUniqueLeagueCode = async (supabaseUrl, headers) => {
  * Create a new league
  */
 export const createLeague = async (userId, leagueName) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const code = await generateUniqueLeagueCode();
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
-
-    const code = await generateUniqueLeagueCode(supabaseUrl, headers);
-
-    // Create league
-    const leagueData = {
+  const { data, error } = await supabase
+    .from('leagues')
+    .insert({
       name: leagueName,
       created_by: userId,
       created_at: new Date().toISOString(),
       code,
-    };
+    })
+    .select()
+    .single();
 
-    const response = await fetch(`${supabaseUrl}/leagues`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(leagueData),
-    });
+  if (error) throw error;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create league: ${errorText}`);
-    }
-
-    const league = await response.json();
-    const leagueRecord = Array.isArray(league) ? league[0] : league;
-    const leagueId = leagueRecord.id;
-
-    // Add creator as first member
-    await addLeagueMember(leagueId, userId);
-
-    return leagueRecord;
-  } catch (error) {
-    console.error('Error creating league:', error);
-    throw error;
-  }
+  await addLeagueMember(data.id, userId);
+  return data;
 };
 
 /**
  * Add a member to a league
  */
 export const addLeagueMember = async (leagueId, userId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data: existing } = await supabase
+    .from('league_members')
+    .select('id')
+    .eq('league_id', leagueId)
+    .eq('user_id', userId)
+    .limit(1);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
+  if (existing && existing.length > 0) {
+    throw new Error('User is already a member of this league');
+  }
 
-    // Check if user is already a member
-    const checkResponse = await fetch(
-      `${supabaseUrl}/league_members?league_id=eq.${leagueId}&user_id=eq.${userId}`,
-      { headers }
-    );
-
-    if (!checkResponse.ok) {
-      throw new Error('Failed to check league membership');
-    }
-
-    const existing = await checkResponse.json();
-    if (existing.length > 0) {
-      throw new Error('User is already a member of this league');
-    }
-
-    // Add member
-    const memberData = {
+  const { data, error } = await supabase
+    .from('league_members')
+    .insert({
       league_id: leagueId,
       user_id: userId,
       joined_at: new Date().toISOString(),
-    };
+    })
+    .select();
 
-    const response = await fetch(`${supabaseUrl}/league_members`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(memberData),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to add league member: ${errorText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error adding league member:', error);
-    throw error;
-  }
+  if (error) throw error;
+  return data;
 };
 
 /**
  * Join a league using its code
  */
 export const joinLeagueByCode = async (userId, code) => {
+  const normalizedCode = code.trim().toUpperCase();
+  if (!normalizedCode) throw new Error('League code is required');
+
+  const { data: leagues, error } = await supabase
+    .from('leagues')
+    .select('*')
+    .eq('code', normalizedCode)
+    .limit(1);
+
+  if (error) throw error;
+  if (!leagues || leagues.length === 0) throw new Error('League not found');
+
+  const league = leagues[0];
+
   try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
-
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
+    await addLeagueMember(league.id, userId);
+    return { league, alreadyMember: false };
+  } catch (err) {
+    if (err.message.includes('already a member')) {
+      return { league, alreadyMember: true };
     }
-
-    const normalizedCode = code.trim().toUpperCase();
-    if (!normalizedCode) {
-      throw new Error('League code is required');
-    }
-
-    const leagueResponse = await fetch(
-      `${supabaseUrl}/leagues?code=eq.${normalizedCode}`,
-      { headers }
-    );
-
-    if (!leagueResponse.ok) {
-      const errorText = await leagueResponse.text();
-      throw new Error(`Failed to look up league: ${errorText}`);
-    }
-
-    const leagues = await leagueResponse.json();
-    if (leagues.length === 0) {
-      throw new Error('League not found');
-    }
-
-    const league = leagues[0];
-
-    try {
-      await addLeagueMember(league.id, userId);
-      return {
-        league,
-        alreadyMember: false,
-      };
-    } catch (error) {
-      if (error.message.includes('already a member')) {
-        return {
-          league,
-          alreadyMember: true,
-        };
-      }
-      throw error;
-    }
-  } catch (error) {
-    console.error('Error joining league by code:', error);
-    throw error;
+    throw err;
   }
 };
 
@@ -207,285 +111,127 @@ export const joinLeagueByCode = async (userId, code) => {
  * Remove a member from a league
  */
 export const removeLeagueMember = async (leagueId, userId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { error } = await supabase
+    .from('league_members')
+    .delete()
+    .eq('league_id', leagueId)
+    .eq('user_id', userId);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
-
-    const response = await fetch(
-      `${supabaseUrl}/league_members?league_id=eq.${leagueId}&user_id=eq.${userId}`,
-      {
-        method: 'DELETE',
-        headers,
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to remove league member: ${errorText}`);
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error removing league member:', error);
-    throw error;
-  }
+  if (error) throw error;
+  return true;
 };
 
 /**
  * Delete a league (only by creator)
  */
 export const deleteLeague = async (leagueId, userId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data: leagues, error: fetchErr } = await supabase
+    .from('leagues')
+    .select('*')
+    .eq('id', leagueId)
+    .limit(1);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
+  if (fetchErr) throw fetchErr;
+  if (!leagues || leagues.length === 0) throw new Error('League not found');
+  if (leagues[0].created_by !== userId) throw new Error('Only the league creator can delete the league');
 
-    // Verify user is the creator
-    const leagueResponse = await fetch(
-      `${supabaseUrl}/leagues?id=eq.${leagueId}`,
-      { headers }
-    );
+  // Delete members first, then the league
+  await supabase.from('league_members').delete().eq('league_id', leagueId);
 
-    if (!leagueResponse.ok) {
-      throw new Error('Failed to fetch league');
-    }
-
-    const leagues = await leagueResponse.json();
-    if (leagues.length === 0) {
-      throw new Error('League not found');
-    }
-
-    if (leagues[0].created_by !== userId) {
-      throw new Error('Only the league creator can delete the league');
-    }
-
-    // Delete all members first
-    await fetch(
-      `${supabaseUrl}/league_members?league_id=eq.${leagueId}`,
-      {
-        method: 'DELETE',
-        headers,
-      }
-    );
-
-    // Delete the league
-    const response = await fetch(
-      `${supabaseUrl}/leagues?id=eq.${leagueId}`,
-      {
-        method: 'DELETE',
-        headers,
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to delete league: ${errorText}`);
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error deleting league:', error);
-    throw error;
-  }
+  const { error } = await supabase.from('leagues').delete().eq('id', leagueId);
+  if (error) throw error;
+  return true;
 };
 
 /**
  * Get all leagues for a user
  */
 export const getUserLeagues = async (userId) => {
-  try {
-    console.log('=== GETTING USER LEAGUES ===');
-    console.log('User ID:', userId);
-    
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data: memberships, error } = await supabase
+    .from('league_members')
+    .select('league_id')
+    .eq('user_id', userId);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
+  if (error) throw error;
+  if (!memberships || memberships.length === 0) return [];
 
-    // Get league memberships
-    console.log('Fetching league memberships...');
-    const membershipsResponse = await fetch(
-      `${supabaseUrl}/league_members?user_id=eq.${userId}`,
-      { headers }
-    );
+  const leagueIds = memberships.map(m => m.league_id);
 
-    console.log('Memberships response status:', membershipsResponse.status);
+  const { data: leagues, error: leagueErr } = await supabase
+    .from('leagues')
+    .select('*')
+    .in('id', leagueIds);
 
-    if (!membershipsResponse.ok) {
-      const errorText = await membershipsResponse.text();
-      console.log('❌ Failed to fetch memberships:', errorText);
-      throw new Error(`Failed to fetch league memberships: ${membershipsResponse.status}`);
-    }
-
-    const memberships = await membershipsResponse.json();
-    console.log('Found memberships:', memberships.length);
-
-    if (memberships.length === 0) {
-      console.log('✅ User has no leagues');
-      return [];
-    }
-
-    // Get league details
-    const leagueIds = memberships.map(m => m.league_id);
-    console.log('Fetching details for leagues:', leagueIds);
-    
-    const leaguePromises = leagueIds.map(async (leagueId) => {
-      const response = await fetch(
-        `${supabaseUrl}/leagues?id=eq.${leagueId}`,
-        { headers }
-      );
-      const leagues = await response.json();
-      return leagues[0];
-    });
-
-    const result = await Promise.all(leaguePromises);
-    console.log('✅ Fetched leagues:', result);
-    return result;
-  } catch (error) {
-    console.error('Error getting user leagues:', error);
-    throw error;
-  }
+  if (leagueErr) throw leagueErr;
+  return leagues || [];
 };
 
 /**
  * Get leaderboard for a specific league
  */
 export const getLeagueLeaderboard = async (leagueId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data: members, error } = await supabase
+    .from('league_members')
+    .select('user_id')
+    .eq('league_id', leagueId);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
+  if (error) throw error;
+  if (!members || members.length === 0) return [];
 
-    // Get all members of the league
-    const membersResponse = await fetch(
-      `${supabaseUrl}/league_members?league_id=eq.${leagueId}`,
-      { headers }
-    );
+  const memberIds = members.map(m => m.user_id);
 
-    if (!membersResponse.ok) {
-      throw new Error('Failed to fetch league members');
-    }
+  // Batch fetch users and stats
+  const [{ data: users }, { data: stats }] = await Promise.all([
+    supabase.from('users').select('*').in('id', memberIds),
+    supabase.from('user_stats').select('*').in('user_id', memberIds),
+  ]);
 
-    const members = await membersResponse.json();
+  const statsMap = {};
+  (stats || []).forEach(s => { statsMap[s.user_id] = s; });
 
-    if (members.length === 0) {
-      return [];
-    }
+  const leaderboard = (users || []).map(u => ({
+    ...u,
+    stats: statsMap[u.id] || { pubs_visited: 0, total_score: 0, level: 1 },
+  }));
 
-    // Get user details and stats for each member
-    const memberPromises = members.map(async (member) => {
-      const userResponse = await fetch(
-        `${supabaseUrl}/users?id=eq.${member.user_id}`,
-        { headers }
-      );
-      const statsResponse = await fetch(
-        `${supabaseUrl}/user_stats?user_id=eq.${member.user_id}`,
-        { headers }
-      );
+  leaderboard.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
-      const users = await userResponse.json();
-      const stats = await statsResponse.json();
-
-      return {
-        ...users[0],
-        stats: stats.length > 0 ? stats[0] : { pubs_visited: 0, total_score: 0, level: 1 },
-      };
-    });
-
-    const leaderboard = await Promise.all(memberPromises);
-
-    // Sort by total score (descending)
-    leaderboard.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
-
-    // Add rank
-    return leaderboard.map((user, index) => ({
-      ...user,
-      rank: index + 1,
-    }));
-  } catch (error) {
-    console.error('Error getting league leaderboard:', error);
-    throw error;
-  }
+  return leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
 };
 
 /**
  * Get league details
  */
 export const getLeagueById = async (leagueId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data, error } = await supabase
+    .from('leagues')
+    .select('*')
+    .eq('id', leagueId)
+    .limit(1);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
-
-    const response = await fetch(
-      `${supabaseUrl}/leagues?id=eq.${leagueId}`,
-      { headers }
-    );
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch league');
-    }
-
-    const leagues = await response.json();
-    return leagues.length > 0 ? leagues[0] : null;
-  } catch (error) {
-    console.error('Error getting league:', error);
-    throw error;
-  }
+  if (error) throw error;
+  return data && data.length > 0 ? data[0] : null;
 };
 
 /**
  * Get all members of a league
  */
 export const getLeagueMembers = async (leagueId) => {
-  try {
-    const supabaseUrl = getSupabaseUrl();
-    const headers = await getAuthHeaders();
+  const { data: members, error } = await supabase
+    .from('league_members')
+    .select('user_id')
+    .eq('league_id', leagueId);
 
-    if (!supabaseUrl || !headers) {
-      throw new Error('Supabase not configured');
-    }
+  if (error) throw error;
+  if (!members || members.length === 0) return [];
 
-    const membersResponse = await fetch(
-      `${supabaseUrl}/league_members?league_id=eq.${leagueId}`,
-      { headers }
-    );
+  const memberIds = members.map(m => m.user_id);
 
-    if (!membersResponse.ok) {
-      throw new Error('Failed to fetch league members');
-    }
+  const { data: users, error: usersErr } = await supabase
+    .from('users')
+    .select('*')
+    .in('id', memberIds);
 
-    const members = await membersResponse.json();
-
-    // Get user details for each member
-    const memberPromises = members.map(async (member) => {
-      const userResponse = await fetch(
-        `${supabaseUrl}/users?id=eq.${member.user_id}`,
-        { headers }
-      );
-      const users = await userResponse.json();
-      return users[0];
-    });
-
-    return await Promise.all(memberPromises);
-  } catch (error) {
-    console.error('Error getting league members:', error);
-    throw error;
-  }
+  if (usersErr) throw usersErr;
+  return users || [];
 };
-

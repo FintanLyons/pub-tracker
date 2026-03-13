@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import { getCurrentUserSecure, logoutUserSecure } from '../services/SecureAuthService';
+import { supabase } from '../config/supabase';
+import { logoutUserSecure } from '../services/SecureAuthService';
 
 const AuthContext = createContext();
 
@@ -15,20 +16,46 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const checkUser = async () => {
-    try {
-      const currentUser = await getCurrentUserSecure();
-      setUser(currentUser);
-    } catch (error) {
-      console.error('Error checking user:', error);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    checkUser();
+    // Check existing session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .limit(1)
+          .then(({ data: users }) => {
+            setUser(users && users.length > 0 ? users[0] : null);
+            setLoading(false);
+          });
+      } else {
+        setUser(null);
+        setLoading(false);
+      }
+    });
+
+    // Listen for auth changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          setUser(null);
+          return;
+        }
+
+        if (session?.user) {
+          const { data: users } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .limit(1);
+
+          setUser(users && users.length > 0 ? users[0] : null);
+        }
+      },
+    );
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const logout = async () => {
@@ -37,7 +64,17 @@ export const AuthProvider = ({ children }) => {
   };
 
   const refreshUser = async () => {
-    await checkUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      setUser(null);
+      return;
+    }
+    const { data: users } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.user.id)
+      .limit(1);
+    setUser(users && users.length > 0 ? users[0] : null);
   };
 
   return (
@@ -46,4 +83,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
-
