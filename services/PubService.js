@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MOCK_PUBS from '../pubs_data_short.js';
 import boroughCoordinates from '../data/boroughCoordinates.json';
 import { supabase } from '../config/supabase';
 
@@ -213,101 +212,70 @@ export const fetchLondonPubs = async (options = {}) => {
 
 		const { visitedSet, favoritesSet } = await loadVisitedAndFavoriteSets();
 
-		try {
-			let allPubs = [];
-			let from = 0;
-			let hasMore = true;
+		let allPubs = [];
+		let from = 0;
+		let hasMore = true;
 
-			while (hasMore) {
-				let query = supabase.from('pubs_all').select('*');
+		while (hasMore) {
+			let query = supabase.from('pubs_all').select('*');
 
-				if (hasBounds) {
-					query = query
-						.lte('lat', bounds.north)
-						.gte('lat', bounds.south)
-						.gte('lon', bounds.west)
-						.lte('lon', bounds.east);
-				}
-				if (hasBoroughFilter) {
-					query = query.in('borough', requestedBoroughs);
-				}
+			if (hasBounds) {
+				query = query
+					.lte('lat', bounds.north)
+					.gte('lat', bounds.south)
+					.gte('lon', bounds.west)
+					.lte('lon', bounds.east);
+			}
+			if (hasBoroughFilter) {
+				query = query.in('borough', requestedBoroughs);
+			}
 
-				const to = from + PAGE_SIZE - 1;
-				query = query.range(from, to);
+			const to = from + PAGE_SIZE - 1;
+			query = query.range(from, to);
 
-				const { data: batch, error } = await query;
+			const { data: batch, error } = await query;
 
-				if (error) throw error;
+			if (error) throw error;
 
-				if (batch && batch.length > 0) {
-					allPubs = allPubs.concat(batch);
-					from += batch.length;
-					hasMore = batch.length === PAGE_SIZE;
+			if (batch && batch.length > 0) {
+				allPubs = allPubs.concat(batch);
+				from += batch.length;
+				hasMore = batch.length === PAGE_SIZE;
 
-					if (allPubs.length > SAFETY_LIMIT) {
-						console.warn('Reached safety limit of pubs, stopping pagination');
-						hasMore = false;
-					}
-				} else {
+				if (allPubs.length > SAFETY_LIMIT) {
+					console.warn('Reached safety limit of pubs, stopping pagination');
 					hasMore = false;
 				}
+			} else {
+				hasMore = false;
 			}
-
-			const formattedPubs = allPubs.map((p) => formatPub(p, visitedSet, favoritesSet));
-			console.log(`Fetched ${formattedPubs.length} pubs from Supabase`);
-
-			let filteredPubs = hasBounds
-				? formattedPubs.filter((pub) => {
-					if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
-					return (
-						pub.lat <= bounds.north &&
-						pub.lat >= bounds.south &&
-						pub.lon >= bounds.west &&
-						pub.lon <= bounds.east
-					);
-				})
-				: formattedPubs;
-
-			if (hasBoroughFilter) {
-				const boroughFilterSet = new Set(requestedBoroughs.map((b) => b.toLowerCase()));
-				filteredPubs = filteredPubs.filter(
-					(pub) => pub.borough && boroughFilterSet.has(pub.borough.toLowerCase()),
-				);
-			}
-
-			return filteredPubs;
-		} catch (supabaseError) {
-			console.error('Supabase fetch error:', supabaseError);
-			console.log('Falling back to mock data');
 		}
 
-		// Fallback to mock data
-		let pubs = MOCK_PUBS.map((pub) => ({
-			...pub,
-			borough:
-				typeof pub.borough === 'string' && pub.borough.trim().length > 0
-					? pub.borough.trim()
-					: null,
-			isVisited: visitedSet.has(pub.id),
-			isFavorite: favoritesSet.has(pub.id),
-		}));
+		const formattedPubs = allPubs.map((p) => formatPub(p, visitedSet, favoritesSet));
+
+		let filteredPubs = hasBounds
+			? formattedPubs.filter((pub) => {
+				if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
+				return (
+					pub.lat <= bounds.north &&
+					pub.lat >= bounds.south &&
+					pub.lon >= bounds.west &&
+					pub.lon <= bounds.east
+				);
+			})
+			: formattedPubs;
 
 		if (hasBoroughFilter) {
 			const boroughFilterSet = new Set(requestedBoroughs.map((b) => b.toLowerCase()));
-			pubs = pubs.filter((pub) => pub.borough && boroughFilterSet.has(pub.borough.toLowerCase()));
+			filteredPubs = filteredPubs.filter(
+				(pub) => pub.borough && boroughFilterSet.has(pub.borough.toLowerCase()),
+			);
 		}
 
-		return hasBounds
-			? pubs.filter((pub) => {
-				const lat = Number.parseFloat(pub.lat);
-				const lon = Number.parseFloat(pub.lon);
-				if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-				return lat <= bounds.north && lat >= bounds.south && lon >= bounds.west && lon <= bounds.east;
-			})
-			: pubs;
+		return filteredPubs;
 	} catch (error) {
 		console.error('fetchLondonPubs error:', error);
-		return MOCK_PUBS.map((pub) => ({ ...pub, isVisited: false, isFavorite: false }));
+		return [];
 	}
 };
 
@@ -315,201 +283,116 @@ export const fetchBoroughSummaries = async () => {
 	try {
 		const { visitedSet } = await loadVisitedAndFavoriteSets();
 
-		try {
-			let allRows = [];
-			let from = 0;
-			let hasMore = true;
+		let allRows = [];
+		let from = 0;
+		let hasMore = true;
 
-			while (hasMore) {
-				const to = from + PAGE_SIZE - 1;
-				const { data: batch, error } = await supabase
-					.from('pubs_all')
-					.select('id, borough, lat, lon')
-					.not('borough', 'is', null)
-					.range(from, to);
+		while (hasMore) {
+			const to = from + PAGE_SIZE - 1;
+			const { data: batch, error } = await supabase
+				.from('pubs_all')
+				.select('id, borough, lat, lon')
+				.not('borough', 'is', null)
+				.range(from, to);
 
-				if (error) throw error;
+			if (error) throw error;
 
-				if (batch && batch.length > 0) {
-					allRows = allRows.concat(batch);
-					from += batch.length;
-					hasMore = batch.length === PAGE_SIZE;
-					if (allRows.length > SAFETY_LIMIT) {
-						hasMore = false;
-					}
-				} else {
+			if (batch && batch.length > 0) {
+				allRows = allRows.concat(batch);
+				from += batch.length;
+				hasMore = batch.length === PAGE_SIZE;
+				if (allRows.length > SAFETY_LIMIT) {
 					hasMore = false;
 				}
+			} else {
+				hasMore = false;
 			}
-
-			const aggregated = new Map();
-
-			allRows.forEach((row) => {
-				if (!row || typeof row.borough !== 'string') return;
-				const rawName = row.borough.trim();
-				if (!rawName) return;
-
-				const coordinateEntry = BOROUGH_COORDINATE_MAP.get(rawName.toLowerCase());
-				const canonicalName = coordinateEntry ? coordinateEntry.name : rawName;
-
-				const idString =
-					typeof row.id === 'string' ? row.id : row.id != null ? String(row.id) : null;
-				const lat = Number.parseFloat(row.lat);
-				const lon = Number.parseFloat(row.lon);
-
-				let bucket = aggregated.get(canonicalName);
-				if (!bucket) {
-					bucket = {
-						borough: canonicalName,
-						totalPubs: 0,
-						visitedPubs: 0,
-						minLat: Infinity,
-						maxLat: -Infinity,
-						minLon: Infinity,
-						maxLon: -Infinity,
-					};
-					aggregated.set(canonicalName, bucket);
-				}
-
-				bucket.totalPubs += 1;
-				if (idString && visitedSet.has(idString)) bucket.visitedPubs += 1;
-
-				if (Number.isFinite(lat) && Number.isFinite(lon)) {
-					bucket.minLat = Math.min(bucket.minLat, lat);
-					bucket.maxLat = Math.max(bucket.maxLat, lat);
-					bucket.minLon = Math.min(bucket.minLon, lon);
-					bucket.maxLon = Math.max(bucket.maxLon, lon);
-				}
-			});
-
-			const summaries = boroughCoordinates.map((entry) => {
-				const stats = aggregated.get(entry.borough);
-				if (stats) aggregated.delete(entry.borough);
-
-				const totalPubs = stats?.totalPubs ?? 0;
-				const visitedPubs = stats?.visitedPubs ?? 0;
-				const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
-
-				return {
-					borough: entry.borough,
-					center: entry.center,
-					bounds:
-						stats && Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
-							? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
-							: null,
-					totalPubs,
-					visitedPubs,
-					completionPercentage,
-				};
-			});
-
-			aggregated.forEach((stats, boroughName) => {
-				const totalPubs = stats.totalPubs;
-				const visitedPubs = stats.visitedPubs;
-				const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
-				const bounds =
-					Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
-						? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
-						: null;
-
-				summaries.push({
-					borough: boroughName,
-					center:
-						bounds != null
-							? { latitude: (stats.minLat + stats.maxLat) / 2, longitude: (stats.minLon + stats.maxLon) / 2 }
-							: null,
-					bounds,
-					totalPubs,
-					visitedPubs,
-					completionPercentage,
-				});
-			});
-
-			return summaries.sort((a, b) => a.borough.localeCompare(b.borough));
-		} catch (error) {
-			console.error('Supabase fetchBoroughSummaries error:', error);
 		}
 
-		// Fallback to mock data
-		const grouped = new Map();
-		MOCK_PUBS.forEach((pub) => {
-			if (!pub) return;
-			const rawName =
-				typeof pub.borough === 'string' && pub.borough.trim().length > 0
-					? pub.borough.trim()
-					: null;
+		const aggregated = new Map();
+
+		allRows.forEach((row) => {
+			if (!row || typeof row.borough !== 'string') return;
+			const rawName = row.borough.trim();
 			if (!rawName) return;
+
 			const coordinateEntry = BOROUGH_COORDINATE_MAP.get(rawName.toLowerCase());
 			const canonicalName = coordinateEntry ? coordinateEntry.name : rawName;
-			if (!grouped.has(canonicalName)) grouped.set(canonicalName, []);
-			grouped.get(canonicalName).push(pub);
+
+			const idString =
+				typeof row.id === 'string' ? row.id : row.id != null ? String(row.id) : null;
+			const lat = Number.parseFloat(row.lat);
+			const lon = Number.parseFloat(row.lon);
+
+			let bucket = aggregated.get(canonicalName);
+			if (!bucket) {
+				bucket = {
+					borough: canonicalName,
+					totalPubs: 0,
+					visitedPubs: 0,
+					minLat: Infinity,
+					maxLat: -Infinity,
+					minLon: Infinity,
+					maxLon: -Infinity,
+				};
+				aggregated.set(canonicalName, bucket);
+			}
+
+			bucket.totalPubs += 1;
+			if (idString && visitedSet.has(idString)) bucket.visitedPubs += 1;
+
+			if (Number.isFinite(lat) && Number.isFinite(lon)) {
+				bucket.minLat = Math.min(bucket.minLat, lat);
+				bucket.maxLat = Math.max(bucket.maxLat, lat);
+				bucket.minLon = Math.min(bucket.minLon, lon);
+				bucket.maxLon = Math.max(bucket.maxLon, lon);
+			}
 		});
 
-		const fallbackSummaries = boroughCoordinates.map((entry) => {
-			const pubs = grouped.get(entry.borough) || [];
-			const latitudes = [];
-			const longitudes = [];
+		const summaries = boroughCoordinates.map((entry) => {
+			const stats = aggregated.get(entry.borough);
+			if (stats) aggregated.delete(entry.borough);
 
-			pubs.forEach((pub) => {
-				const lat = Number.parseFloat(pub.lat);
-				const lon = Number.parseFloat(pub.lon);
-				if (Number.isFinite(lat) && Number.isFinite(lon)) {
-					latitudes.push(lat);
-					longitudes.push(lon);
-				}
-			});
-
-			const visitedPubs = pubs.reduce((count, pub) => (visitedSet.has(pub.id) ? count + 1 : count), 0);
-			const completionPercentage = pubs.length > 0 ? (visitedPubs / pubs.length) * 100 : 0;
+			const totalPubs = stats?.totalPubs ?? 0;
+			const visitedPubs = stats?.visitedPubs ?? 0;
+			const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
 
 			return {
 				borough: entry.borough,
 				center: entry.center,
 				bounds:
-					latitudes.length > 0 && longitudes.length > 0
-						? { north: Math.max(...latitudes), south: Math.min(...latitudes), east: Math.max(...longitudes), west: Math.min(...longitudes) }
+					stats && Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
+						? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
 						: null,
-				totalPubs: pubs.length,
+				totalPubs,
 				visitedPubs,
 				completionPercentage,
 			};
 		});
 
-		grouped.forEach((pubs, boroughName) => {
-			const hasCoordinate = BOROUGH_COORDINATE_MAP.has(boroughName.toLowerCase());
-			if (hasCoordinate) return;
+		aggregated.forEach((stats, boroughName) => {
+			const totalPubs = stats.totalPubs;
+			const visitedPubs = stats.visitedPubs;
+			const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
+			const bounds =
+				Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
+					? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
+					: null;
 
-			const latitudes = [];
-			const longitudes = [];
-			pubs.forEach((pub) => {
-				const lat = Number.parseFloat(pub.lat);
-				const lon = Number.parseFloat(pub.lon);
-				if (Number.isFinite(lat) && Number.isFinite(lon)) {
-					latitudes.push(lat);
-					longitudes.push(lon);
-				}
-			});
-
-			const visitedPubs = pubs.reduce((count, pub) => (visitedSet.has(pub.id) ? count + 1 : count), 0);
-			const completionPercentage = pubs.length > 0 ? (visitedPubs / pubs.length) * 100 : 0;
-
-			fallbackSummaries.push({
+			summaries.push({
 				borough: boroughName,
 				center:
-					latitudes.length > 0 && longitudes.length > 0
-						? { latitude: latitudes.reduce((s, v) => s + v, 0) / latitudes.length, longitude: longitudes.reduce((s, v) => s + v, 0) / longitudes.length }
+					bounds != null
+						? { latitude: (stats.minLat + stats.maxLat) / 2, longitude: (stats.minLon + stats.maxLon) / 2 }
 						: null,
-				bounds:
-					latitudes.length > 0 && longitudes.length > 0
-						? { north: Math.max(...latitudes), south: Math.min(...latitudes), east: Math.max(...longitudes), west: Math.min(...longitudes) }
-						: null,
-				totalPubs: pubs.length,
+				bounds,
+				totalPubs,
 				visitedPubs,
 				completionPercentage,
 			});
 		});
 
-		return fallbackSummaries.sort((a, b) => a.borough.localeCompare(b.borough));
+		return summaries.sort((a, b) => a.borough.localeCompare(b.borough));
 	} catch (error) {
 		console.error('fetchBoroughSummaries error:', error);
 		return [];
