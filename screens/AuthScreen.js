@@ -14,11 +14,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { registerUserSecure, loginUserSecure } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function AuthScreen({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -218,7 +214,7 @@ export default function AuthScreen({ onAuthSuccess }) {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <PintGlassIcon size={64} color={AMBER} />
+            <PintGlassIcon size={64} color={COLORS.amber} />
             <Text style={styles.title}>Pub Tracker</Text>
             <Text style={styles.subtitle}>
               {isLogin ? 'Welcome Back!' : 'Join the Community'}
@@ -251,7 +247,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                   <MaterialCommunityIcons
                     name="email-outline"
                     size={20}
-                    color={MEDIUM_GREY}
+                    color={COLORS.mediumGrey}
                     style={styles.inputIcon}
                   />
                   <TextInput
@@ -270,7 +266,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                 <MaterialCommunityIcons
                   name="account-outline"
                   size={20}
-                  color={MEDIUM_GREY}
+                  color={COLORS.mediumGrey}
                   style={styles.inputIcon}
                 />
                 <TextInput
@@ -287,7 +283,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                 <MaterialCommunityIcons
                   name="lock-outline"
                   size={20}
-                  color={MEDIUM_GREY}
+                  color={COLORS.mediumGrey}
                   style={styles.inputIcon}
                 />
                 <TextInput
@@ -305,7 +301,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                   <MaterialCommunityIcons
                     name={showPassword ? "eye-off-outline" : "eye-outline"}
                     size={20}
-                    color={MEDIUM_GREY}
+                    color={COLORS.mediumGrey}
                   />
                 </TouchableOpacity>
               </View>
@@ -315,7 +311,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                   <MaterialCommunityIcons
                     name="lock-check-outline"
                     size={20}
-                    color={MEDIUM_GREY}
+                    color={COLORS.mediumGrey}
                     style={styles.inputIcon}
                   />
                   <TextInput
@@ -333,7 +329,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                     <MaterialCommunityIcons
                       name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
                       size={20}
-                      color={MEDIUM_GREY}
+                      color={COLORS.mediumGrey}
                     />
                   </TouchableOpacity>
                 </View>
@@ -387,16 +383,16 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginTop: 16,
   },
   subtitle: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 8,
   },
   card: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 20,
     padding: 24,
     shadowColor: '#000',
@@ -429,10 +425,10 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   activeTabText: {
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   form: {
     gap: 16,
@@ -456,14 +452,14 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 16,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   eyeIcon: {
     padding: 4,
     marginLeft: 8,
   },
   button: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -486,7 +482,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textAlign: 'center',
     marginTop: -8,
   },

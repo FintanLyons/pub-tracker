@@ -5,14 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
 import { useUserStats } from '../contexts/UserStatsContext';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const ACCENT_GREY = '#424242';
-const AMBER = '#D4A017';
-const BURGUNDY = '#A1183C';
-const SAPPHIRE = '#2F4AA1';
+import { COLORS } from '../constants/theme';
 
 export default function AchievementsScreen() {
   const {
@@ -71,23 +64,23 @@ export default function AchievementsScreen() {
 
   const getTrophyColor = (trophy) => {
     if (!trophy.isAchieved) {
-      return MEDIUM_GREY;
+      return COLORS.mediumGrey;
     }
     switch (trophy.type) {
       case 'borough':
-        return BURGUNDY;
+        return COLORS.burgundy;
       case 'achievement':
-        return SAPPHIRE;
+        return COLORS.sapphire;
       case 'area':
       default:
-        return AMBER;
+        return COLORS.amber;
     }
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
-        <PintGlassIcon size={48} color={DARK_GREY} />
+        <PintGlassIcon size={48} color={COLORS.darkGrey} />
         <Text style={styles.title}>Achievements</Text>
       </View>
 
@@ -171,11 +164,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginTop: 12,
   },
   statsCard: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
@@ -188,7 +181,7 @@ const styles = StyleSheet.create({
   },
   levelLabel: {
     fontSize: 18,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 20,
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -202,7 +195,7 @@ const styles = StyleSheet.create({
   },
   scoreText: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textAlign: 'center',
   },
   progressBarBackground: {
@@ -214,7 +207,7 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: 6,
   },
   section: {
@@ -223,12 +216,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 16,
   },
   emptyText: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textAlign: 'center',
     paddingVertical: 20,
   },
@@ -247,7 +240,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -264,21 +257,21 @@ const styles = StyleSheet.create({
   trophyTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     textAlign: 'center',
     marginBottom: 4,
   },
   trophyTitleLocked: {
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     opacity: 0.6,
   },
   trophyDescription: {
     fontSize: 11,
-    color: ACCENT_GREY,
+    color: COLORS.accentGrey,
     textAlign: 'center',
   },
   trophyDescriptionLocked: {
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     opacity: 0.5,
   },
 });

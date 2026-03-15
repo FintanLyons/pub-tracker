@@ -2,10 +2,8 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { COLORS } from '../constants/theme';
 
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-const MEDIUM_GREY = '#757575';
 const WHITE = '#FFFFFF';
 
 function SearchSuggestions({ 
@@ -42,7 +40,7 @@ function SearchSuggestions({
                   style={styles.suggestionItem}
                   onPress={() => onAreaPress(area)}
                 >
-                  <MaterialCommunityIcons name="map-marker-outline" size={18} color={AMBER} />
+                  <MaterialCommunityIcons name="map-marker-outline" size={18} color={COLORS.amber} />
                   <Text style={styles.suggestionText}>{area}</Text>
                 </TouchableOpacity>
               ))}
@@ -60,7 +58,7 @@ function SearchSuggestions({
                   style={styles.suggestionItem}
                   onPress={() => onPubPress(pub)}
                 >
-                  <MaterialCommunityIcons name="glass-pint-outline" size={18} color={AMBER} />
+                  <MaterialCommunityIcons name="glass-pint-outline" size={18} color={COLORS.amber} />
                   <Text style={styles.suggestionText}>{pub.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -103,7 +101,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: AMBER,
+    color: COLORS.amber,
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -121,7 +119,7 @@ const styles = StyleSheet.create({
   },
   suggestionText: {
     fontSize: 16,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     marginLeft: 12,
     flex: 1,
   },
@@ -133,7 +131,7 @@ const styles = StyleSheet.create({
   },
   noResultsText: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
 });
 

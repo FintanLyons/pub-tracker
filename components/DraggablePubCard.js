@@ -15,9 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
 import ReportModal from './ReportModal';
 import { submitReport } from '../services/ReportService';
-
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
 
@@ -428,7 +426,7 @@ export default function DraggablePubCard({
             <MaterialCommunityIcons 
               name="flag-outline" 
               size={24} 
-              color={MEDIUM_GREY} 
+              color={COLORS.mediumGrey} 
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -439,7 +437,7 @@ export default function DraggablePubCard({
             <MaterialCommunityIcons 
               name={pub.isFavorite ? "star" : "star-outline"} 
               size={24} 
-              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+              color={pub.isFavorite ? COLORS.amber : COLORS.mediumGrey} 
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -447,7 +445,7 @@ export default function DraggablePubCard({
             onPress={handleClose}
             activeOpacity={0.7}
           >
-            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+            <MaterialCommunityIcons name="close" size={24} color={COLORS.mediumGrey} />
           </TouchableOpacity>
         </>
       ) : (
@@ -475,7 +473,7 @@ export default function DraggablePubCard({
             <MaterialCommunityIcons 
               name="flag-outline" 
               size={24} 
-              color={MEDIUM_GREY} 
+              color={COLORS.mediumGrey} 
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -486,7 +484,7 @@ export default function DraggablePubCard({
             <MaterialCommunityIcons 
               name={pub.isFavorite ? "star" : "star-outline"} 
               size={24} 
-              color={pub.isFavorite ? AMBER : MEDIUM_GREY} 
+              color={pub.isFavorite ? COLORS.amber : COLORS.mediumGrey} 
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -494,7 +492,7 @@ export default function DraggablePubCard({
             onPress={handleClose}
             activeOpacity={0.7}
           >
-            <MaterialCommunityIcons name="close" size={24} color={MEDIUM_GREY} />
+            <MaterialCommunityIcons name="close" size={24} color={COLORS.mediumGrey} />
           </TouchableOpacity>
         </>
       )}
@@ -568,7 +566,7 @@ const styles = StyleSheet.create({
   cardHandle: {
     width: 40,
     height: 4,
-    backgroundColor: MEDIUM_GREY,
+    backgroundColor: COLORS.mediumGrey,
     borderRadius: 2,
     opacity: 0.5,
   },

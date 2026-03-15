@@ -27,9 +27,5 @@ export const LOCATION_UPDATE_MIN_INTERVAL_MS = 10000;
 export const LOCATION_HEADING_EPSILON_DEGREES = 5;
 export const LOCATION_WATCH_DISTANCE_METERS = 80;
 
-export const COLORS = {
-  amber: '#D4A017',
-  grey: '#757575',
-  charcoal: '#1C1C1C',
-};
+export { COLORS } from '../../constants/theme';
 

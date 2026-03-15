@@ -13,11 +13,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createLeague, addLeagueMember } from '../services/LeagueService';
 import { getFriends } from '../services/FriendsService';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function CreateLeagueModal({ visible, onClose, currentUserId, onLeagueCreated }) {
   const [leagueName, setLeagueName] = useState('');
@@ -103,7 +99,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
         onPress={() => toggleFriendSelection(item.id)}
       >
         <View style={styles.userIcon}>
-          <MaterialCommunityIcons name="account" size={32} color={MEDIUM_GREY} />
+          <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
         </View>
         <View style={styles.userInfo}>
           <Text style={styles.username}>{item.username}</Text>
@@ -112,7 +108,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
           </Text>
         </View>
         {isSelected && (
-          <MaterialCommunityIcons name="check-circle" size={24} color={AMBER} />
+          <MaterialCommunityIcons name="check-circle" size={24} color={COLORS.amber} />
         )}
       </TouchableOpacity>
     );
@@ -132,7 +128,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
               {step === 1 ? 'Create League' : 'Add Friends'}
             </Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
             </TouchableOpacity>
           </View>
 
@@ -185,7 +181,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
                   <MaterialCommunityIcons
                     name="account-group-outline"
                     size={64}
-                    color={MEDIUM_GREY}
+                    color={COLORS.mediumGrey}
                   />
                   <Text style={styles.emptyText}>No friends yet</Text>
                   <Text style={styles.emptySubtext}>
@@ -206,7 +202,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
                   style={styles.backButton}
                   onPress={() => setStep(1)}
                 >
-                  <MaterialCommunityIcons name="arrow-left" size={20} color={DARK_GREY} />
+                  <MaterialCommunityIcons name="arrow-left" size={20} color={COLORS.darkGrey} />
                   <Text style={styles.backButtonText}>Back</Text>
                 </TouchableOpacity>
 
@@ -254,12 +250,12 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GREY,
+    borderBottomColor: COLORS.lightGrey,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   closeButton: {
     padding: 4,
@@ -274,19 +270,19 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
   },
   activeDot: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
   },
   stepLine: {
     width: 60,
     height: 2,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     marginHorizontal: 8,
   },
   activeStepLine: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
   },
   stepContent: {
     flex: 1,
@@ -295,12 +291,12 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 8,
   },
   input: {
     height: 48,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
@@ -308,14 +304,14 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 24,
   },
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,
@@ -332,7 +328,7 @@ const styles = StyleSheet.create({
   friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
@@ -340,7 +336,7 @@ const styles = StyleSheet.create({
   selectedFriendItem: {
     backgroundColor: '#FFF8E1',
     borderWidth: 2,
-    borderColor: AMBER,
+    borderColor: COLORS.amber,
   },
   userIcon: {
     width: 48,
@@ -357,12 +353,12 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 2,
   },
   userStats: {
     fontSize: 12,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -374,7 +370,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,
@@ -382,14 +378,14 @@ const styles = StyleSheet.create({
   backButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   createButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,
@@ -410,12 +406,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 8,
     textAlign: 'center',
     paddingHorizontal: 40,

@@ -10,11 +10,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RangeSlider from '../components/RangeSlider';
-
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-const MEDIUM_GREY = '#757575';
-const LIGHT_GREY = '#F5F5F5';
+import { COLORS } from '../constants/theme';
 
 // All possible features with their icons (in display order)
 const ALL_FEATURES_WITH_ICONS = [
@@ -115,7 +111,7 @@ export default function FilterScreen({
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Filter Pubs</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={AMBER} />
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.amber} />
             </TouchableOpacity>
           </View>
 
@@ -262,12 +258,12 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GREY,
+    borderBottomColor: COLORS.lightGrey,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
   },
   closeButton: {
     padding: 4,
@@ -284,7 +280,7 @@ const styles = StyleSheet.create({
   },
   quickFilterBox: {
     width: '48%',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
@@ -301,7 +297,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     marginHorizontal: 20,
     marginTop: 16,
     marginBottom: 12,
@@ -317,7 +313,7 @@ const styles = StyleSheet.create({
   },
   featureBox: {
     width: '48%',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
@@ -333,16 +329,16 @@ const styles = StyleSheet.create({
   },
   featureBoxSelected: {
     backgroundColor: '#FFF8E7',
-    borderColor: AMBER,
+    borderColor: COLORS.amber,
   },
   featureBoxText: {
     fontSize: 13,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     textAlign: 'center',
     fontWeight: '500',
   },
   featureBoxTextSelected: {
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     fontWeight: '700',
   },
   ownershipScrollContainer: {
@@ -359,7 +355,7 @@ const styles = StyleSheet.create({
   },
   ownershipBox: {
     width: 165, // Same as features boxes for consistency
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 8,
     borderWidth: 2,
     borderColor: 'transparent',
@@ -372,16 +368,16 @@ const styles = StyleSheet.create({
   },
   ownershipBoxSelected: {
     backgroundColor: '#FFF8E7',
-    borderColor: AMBER,
+    borderColor: COLORS.amber,
   },
   ownershipBoxText: {
     fontSize: 13,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     textAlign: 'center',
     fontWeight: '500',
   },
   ownershipBoxTextSelected: {
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     fontWeight: '700',
   },
   checkIcon: {
@@ -392,7 +388,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: LIGHT_GREY,
+    borderTopColor: COLORS.lightGrey,
   },
   button: {
     flex: 1,
@@ -402,18 +398,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   clearButton: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderWidth: 2,
-    borderColor: MEDIUM_GREY,
+    borderColor: COLORS.mediumGrey,
     marginRight: 12,
   },
   clearButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
   },
   applyButton: {
-    backgroundColor: DARK_CHARCOAL,
+    backgroundColor: COLORS.charcoal,
   },
   applyButtonText: {
     fontSize: 16,

@@ -13,11 +13,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { joinLeagueByCode } from '../services/LeagueService';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function JoinLeagueModal({
   visible,
@@ -92,7 +88,7 @@ export default function JoinLeagueModal({
           <View style={styles.header}>
             <Text style={styles.title}>Join a League</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
             </TouchableOpacity>
           </View>
 
@@ -154,38 +150,38 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   closeButton: {
     padding: 4,
   },
   description: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 16,
   },
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 8,
   },
   input: {
     height: 48,
     borderRadius: 12,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     paddingHorizontal: 16,
     fontSize: 18,
     fontWeight: '600',
     letterSpacing: 2,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 24,
   },
   joinButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,

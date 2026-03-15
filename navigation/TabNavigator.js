@@ -11,6 +11,8 @@ import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchBoroughSummaries } from '../services/PubService';
 import { serializeBoroughSummaries } from '../screens/map/utils';
+import { useAuth } from '../contexts/AuthContext';
+import { COLORS } from '../constants/theme';
 
 const withErrorBoundary = (Screen, message) => (props) => (
   <ErrorBoundary fallbackMessage={message}>
@@ -25,11 +27,9 @@ const SafeAchievementsScreen = withErrorBoundary(AchievementsScreen, 'Achievemen
 
 const Tab = createBottomTabNavigator();
 
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   const [boroughSummaries, setBoroughSummaries] = useState([]);
@@ -41,7 +41,7 @@ export default function TabNavigator() {
     const loadBoroughSummaries = async () => {
       try {
         setIsLoadingBoroughs(true);
-        const summaries = await fetchBoroughSummaries();
+        const summaries = await fetchBoroughSummaries(user?.id);
         if (!isCancelled) {
           setBoroughSummaries((prev) => {
             const nextArray = Array.isArray(summaries) ? summaries : [];
@@ -77,11 +77,11 @@ export default function TabNavigator() {
         <Tab.Navigator
           screenOptions={{
             headerShown: false,
-            tabBarActiveTintColor: AMBER,
-            tabBarInactiveTintColor: AMBER,
+            tabBarActiveTintColor: COLORS.amber,
+            tabBarInactiveTintColor: COLORS.amber,
             tabBarStyle: {
-              backgroundColor: DARK_CHARCOAL,
-              borderTopColor: DARK_CHARCOAL,
+              backgroundColor: COLORS.charcoal,
+              borderTopColor: COLORS.charcoal,
               borderTopWidth: 1,
               height: 60 + insets.bottom,
               paddingBottom: Math.max(insets.bottom, 8),
@@ -90,7 +90,7 @@ export default function TabNavigator() {
             tabBarLabelStyle: {
               fontSize: 12,
               fontWeight: '600',
-              color: AMBER,
+              color: COLORS.amber,
             },
           }}
         >
@@ -138,7 +138,7 @@ export default function TabNavigator() {
               style={styles.loadingLogo}
               resizeMode="contain"
             />
-            <ActivityIndicator size="large" color={AMBER} style={styles.loadingSpinner} />
+            <ActivityIndicator size="large" color={COLORS.amber} style={styles.loadingSpinner} />
           </View>
         )}
       </View>

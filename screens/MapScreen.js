@@ -24,6 +24,7 @@ import DraggablePubCard from '../components/DraggablePubCard';
 import ReportMissingPubModal from '../components/ReportMissingPubModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
+import { useUserStats } from '../contexts/UserStatsContext';
 import {
   LONDON_REGION,
   MARKER_MODES,
@@ -31,8 +32,8 @@ import {
   AREA_ENTER_DELTA,
   AREA_EXIT_DELTA,
   BOROUGH_LIMIT,
-  COLORS,
 } from './map/constants';
+import { COLORS } from '../constants/theme';
 import {
   distanceBetween,
   getAreaCenter,
@@ -49,8 +50,6 @@ import { useLocation } from './map/hooks/useLocation';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
 
-const AMBER = COLORS.amber;
-const DARK_CHARCOAL = COLORS.charcoal;
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -67,11 +66,11 @@ export default function MapScreen() {
   const [focusedBorough, setFocusedBorough] = useState(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeBoroughs, setActiveBoroughs] = useState([]);
-  const [shouldTrackBoroughViews, setShouldTrackBoroughViews] = useState(true);
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
   const [isSubmittingMissingPub, setIsSubmittingMissingPub] = useState(false);
   const [missingPubError, setMissingPubError] = useState(null);
   const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
+
   const clearedAreaRef = useRef(null);
   const clearedBoroughRef = useRef(null);
   const processedAreaRef = useRef(null);
@@ -89,6 +88,7 @@ export default function MapScreen() {
     handleFilterApply, handleFilterPress, handleFilterClose,
   } = useFilterState(allPubs);
   const { areaStatsMap, allAreas, calculateAreaStats } = useAreaStats(allPubs);
+  const { refreshUserStats } = useUserStats();
 
   // --- Layout ---
   const screenHeight = Dimensions.get('window').height;
@@ -147,13 +147,6 @@ export default function MapScreen() {
   }, [isLoadingViewportPubs, setIsInitialPubsLoaded]);
 
   // --- Borough tracking ---
-  useEffect(() => {
-    if (boroughSummaries.length === 0) { setShouldTrackBoroughViews(true); return; }
-    setShouldTrackBoroughViews(true);
-    const timer = setTimeout(() => setShouldTrackBoroughViews(false), 600);
-    return () => clearTimeout(timer);
-  }, [boroughSummaries]);
-
   useEffect(() => {
     const region = mapRegion || lastCommittedRegionRef.current;
     if (!region || !Array.isArray(boroughSummaries) || boroughSummaries.length === 0) {
@@ -229,11 +222,11 @@ export default function MapScreen() {
     const newState = !allPubs.find((p) => p.id === pubId)?.isVisited;
     if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isVisited: newState });
     setAllPubs(allPubs.map((p) => (p.id === pubId ? { ...p, isVisited: newState } : p)));
-    try { await togglePubVisited(pubId); } catch {
+    try { await togglePubVisited(pubId); refreshUserStats(); } catch {
       setAllPubs(originalPubs);
       if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
     }
-  }, [allPubs, selectedPub]);
+  }, [allPubs, selectedPub, refreshUserStats]);
 
   const handleToggleFavorite = useCallback(async (pubId) => {
     const originalPubs = [...allPubs];
@@ -483,9 +476,6 @@ export default function MapScreen() {
       .map((p) => <PubMarker key={p.id} pub={p} onPress={handlePubPress} />),
   [filteredPubs, handlePubPress]);
 
-  // Borough markers (currently returns empty -- logic retained for future)
-  const boroughMarkerElements = useMemo(() => [], [boroughSummaries, shouldTrackBoroughViews]);
-
   // --- Missing pub ---
   const openMissingPubModal = useCallback(() => { setMissingPubError(null); setIsMissingPubModalVisible(true); }, []);
   const closeMissingPubModal = useCallback(() => { if (!isSubmittingMissingPub) { setIsMissingPubModalVisible(false); setMissingPubError(null); } }, [isSubmittingMissingPub]);
@@ -568,28 +558,26 @@ export default function MapScreen() {
             </View>
           </Marker>
         )}
-        {markerMode === MARKER_MODES.BOROUGHS
-          ? boroughMarkerElements
-          : markerMode === MARKER_MODES.AREAS
-            ? areaMarkerElements
-            : pubMarkerElements}
+        {markerMode !== MARKER_MODES.BOROUGHS && (
+          markerMode === MARKER_MODES.AREAS ? areaMarkerElements : pubMarkerElements
+        )}
       </MapView>
 
       <TouchableOpacity style={[styles.missingPubButton, { bottom: floatingButtonBottom }]} onPress={openMissingPubModal}>
-        <MaterialCommunityIcons name="flag-plus-outline" size={24} color={AMBER} />
+        <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
       </TouchableOpacity>
       <TouchableOpacity style={[styles.locationButton, { bottom: floatingButtonBottom }]} onPress={() => handleCurrentLocation(loadPubsForViewportRegion)}>
-        <MaterialCommunityIcons name="crosshairs-gps" size={24} color={AMBER} />
+        <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
       </TouchableOpacity>
 
       <DraggablePubCard pub={selectedPub} onClose={closeCard} onToggleVisited={handleToggleVisited} onToggleFavorite={handleToggleFavorite} getImageSource={getImageSource} />
       <ReportMissingPubModal visible={isMissingPubModalVisible} onClose={closeMissingPubModal} onSubmit={handleSubmitMissingPub} isSubmitting={isSubmittingMissingPub} errorMessage={missingPubError} />
       {isMissingPubSuccessVisible && (
         <View style={[styles.feedbackToast, { bottom: floatingButtonBottom + 68 }]}>
-          <MaterialCommunityIcons name="check-circle" size={20} color={AMBER} />
+          <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
           <Text style={styles.feedbackToastText}>Missing pub successfully reported</Text>
           <TouchableOpacity onPress={() => setIsMissingPubSuccessVisible(false)} style={styles.feedbackToastCloseButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <MaterialCommunityIcons name="close" size={20} color={DARK_CHARCOAL} />
+            <MaterialCommunityIcons name="close" size={20} color={COLORS.charcoal} />
           </TouchableOpacity>
         </View>
       )}
