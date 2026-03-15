@@ -10,11 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-const MEDIUM_GREY = '#757575';
-const LIGHT_GREY = '#F5F5F5';
+import { COLORS } from '../constants/theme';
 
 export default function ReportMissingPubModal({
   visible,
@@ -73,7 +69,7 @@ export default function ReportMissingPubModal({
             <View style={styles.header}>
               <Text style={styles.title}>Report Missing Pub</Text>
               <TouchableOpacity onPress={handleClose} style={styles.closeButton} disabled={isSubmitting}>
-                <MaterialCommunityIcons name="close" size={20} color={MEDIUM_GREY} />
+                <MaterialCommunityIcons name="close" size={20} color={COLORS.mediumGrey} />
               </TouchableOpacity>
             </View>
 
@@ -85,7 +81,7 @@ export default function ReportMissingPubModal({
             <TextInput
               style={styles.textInput}
               placeholder="Enter pub name"
-              placeholderTextColor={MEDIUM_GREY}
+              placeholderTextColor={COLORS.mediumGrey}
               value={pubName}
               onChangeText={setPubName}
               autoCorrect={false}
@@ -96,7 +92,7 @@ export default function ReportMissingPubModal({
             <TextInput
               style={styles.textInput}
               placeholder="Enter pub location"
-              placeholderTextColor={MEDIUM_GREY}
+              placeholderTextColor={COLORS.mediumGrey}
               value={pubLocation}
               onChangeText={setPubLocation}
               autoCorrect={false}
@@ -104,7 +100,7 @@ export default function ReportMissingPubModal({
             />
 
             <View style={styles.reportTypeContainer}>
-              <MaterialCommunityIcons name="flag-outline" size={20} color={AMBER} />
+              <MaterialCommunityIcons name="flag-outline" size={20} color={COLORS.amber} />
               <Text style={styles.reportTypeText}>Report type: Pub Missing</Text>
             </View>
 
@@ -168,30 +164,30 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
   },
   closeButton: {
     padding: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 16,
   },
   label: {
     fontSize: 14,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     fontWeight: '600',
     marginBottom: 8,
     marginTop: 4,
   },
   textInput: {
     borderWidth: 1,
-    borderColor: LIGHT_GREY,
+    borderColor: COLORS.lightGrey,
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     backgroundColor: '#FAFAFA',
     marginBottom: 12,
   },
@@ -206,7 +202,7 @@ const styles = StyleSheet.create({
   },
   reportTypeText: {
     marginLeft: 8,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     fontWeight: '600',
   },
   errorMessage: {
@@ -214,14 +210,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   submitButton: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   submitButtonDisabled: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     opacity: 0.7,
   },
   submitButtonText: {

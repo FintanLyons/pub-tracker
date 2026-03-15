@@ -2,10 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNetworkStatus } from '../contexts/NetworkContext';
-
-const DARK_CHARCOAL = '#1C1C1C';
-const AMBER = '#D4A017';
-const LIGHT_GREY = '#F5F5F5';
+import { COLORS } from '../constants/theme';
 
 export default function OfflineOverlay() {
 	const { isConnected } = useNetworkStatus();
@@ -15,7 +12,7 @@ export default function OfflineOverlay() {
 	return (
 		<View style={styles.overlay}>
 			<View style={styles.card}>
-				<MaterialCommunityIcons name="wifi-off" size={40} color={AMBER} style={styles.icon} />
+				<MaterialCommunityIcons name="wifi-off" size={40} color={COLORS.amber} style={styles.icon} />
 				<Text style={styles.title}>You&apos;re offline</Text>
 				<Text style={styles.message}>
 					Reconnect to keep tracking your pub adventures, favourites, and leaderboards.
@@ -52,7 +49,7 @@ const styles = StyleSheet.create({
 		borderRadius: 16,
 		paddingHorizontal: 24,
 		paddingVertical: 28,
-		backgroundColor: DARK_CHARCOAL,
+		backgroundColor: COLORS.charcoal,
 		alignItems: 'center',
 	},
 	icon: {
@@ -61,23 +58,23 @@ const styles = StyleSheet.create({
 	title: {
 		fontSize: 20,
 		fontWeight: '700',
-		color: AMBER,
+		color: COLORS.amber,
 		marginBottom: 8,
 	},
 	message: {
 		fontSize: 14,
 		textAlign: 'center',
-		color: LIGHT_GREY,
+		color: COLORS.lightGrey,
 		marginBottom: 20,
 	},
 	button: {
-		backgroundColor: AMBER,
+		backgroundColor: COLORS.amber,
 		borderRadius: 24,
 		paddingHorizontal: 24,
 		paddingVertical: 10,
 	},
 	buttonText: {
-		color: DARK_CHARCOAL,
+		color: COLORS.charcoal,
 		fontSize: 15,
 		fontWeight: '600',
 	},

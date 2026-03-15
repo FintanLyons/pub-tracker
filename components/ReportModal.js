@@ -10,11 +10,7 @@ import {
   Platform
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-const MEDIUM_GREY = '#757575';
-const LIGHT_GREY = '#F5F5F5';
+import { COLORS } from '../constants/theme';
 
 export default function ReportModal({ visible, onClose, onSend, pubName, pubArea }) {
   const [reportText, setReportText] = useState('');
@@ -53,7 +49,7 @@ export default function ReportModal({ visible, onClose, onSend, pubName, pubArea
               <View style={styles.header}>
                 <Text style={styles.title}>Report</Text>
                 <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                  <MaterialCommunityIcons name="close" size={20} color={MEDIUM_GREY} />
+                  <MaterialCommunityIcons name="close" size={20} color={COLORS.mediumGrey} />
                 </TouchableOpacity>
               </View>
 
@@ -64,7 +60,7 @@ export default function ReportModal({ visible, onClose, onSend, pubName, pubArea
               <TextInput
                 style={styles.textInput}
                 placeholder="Describe the incorrect information in this card"
-                placeholderTextColor={MEDIUM_GREY}
+                placeholderTextColor={COLORS.mediumGrey}
                 multiline={true}
                 numberOfLines={6}
                 value={reportText}
@@ -124,36 +120,36 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
   },
   closeButton: {
     padding: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 16,
   },
   textInput: {
     borderWidth: 1,
-    borderColor: LIGHT_GREY,
+    borderColor: COLORS.lightGrey,
     borderRadius: 8,
     padding: 12,
     minHeight: 120,
     fontSize: 16,
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
     backgroundColor: '#FAFAFA',
     marginBottom: 16,
   },
   sendButton: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     opacity: 0.6,
   },
   sendButtonText: {

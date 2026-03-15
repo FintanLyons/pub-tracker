@@ -10,12 +10,7 @@ import AddFriendModal from '../components/AddFriendModal';
 import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
 import LeagueActionsModal from '../components/LeagueActionsModal';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const ACCENT_GREY = '#424242';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function LeaderboardScreen() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -174,7 +169,7 @@ export default function LeaderboardScreen() {
   const renderCurrentUserCard = (user) => {
     if (!user) return null;
     
-    const rankColor = user.rank === 1 ? '#FFD700' : user.rank === 2 ? '#C0C0C0' : user.rank === 3 ? '#CD7F32' : ACCENT_GREY;
+    const rankColor = user.rank === 1 ? '#FFD700' : user.rank === 2 ? '#C0C0C0' : user.rank === 3 ? '#CD7F32' : COLORS.accentGrey;
     const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
@@ -218,7 +213,7 @@ export default function LeaderboardScreen() {
 
   const renderLeaderboardRow = (user, index) => {
     const isCurrentUser = user.id === currentUser?.id;
-    const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : ACCENT_GREY;
+    const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : COLORS.accentGrey;
     const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
@@ -261,7 +256,7 @@ export default function LeaderboardScreen() {
   if (loading && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={AMBER} />
+        <ActivityIndicator size="large" color={COLORS.amber} />
       </View>
     );
   }
@@ -270,7 +265,7 @@ export default function LeaderboardScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <MaterialCommunityIcons name="trophy" size={48} color={DARK_GREY} />
+          <MaterialCommunityIcons name="trophy" size={48} color={COLORS.darkGrey} />
           <Text style={styles.title}>Leaderboard</Text>
         </View>
         <View style={styles.emptyContainer}>
@@ -285,13 +280,13 @@ export default function LeaderboardScreen() {
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[AMBER]} />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.amber]} />
       }
     >
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
         <View style={styles.header}>
-          <MaterialCommunityIcons name="trophy" size={48} color={DARK_GREY} />
+          <MaterialCommunityIcons name="trophy" size={48} color={COLORS.darkGrey} />
           <Text style={styles.title}>Leaderboard</Text>
         </View>
         <TouchableOpacity
@@ -301,7 +296,7 @@ export default function LeaderboardScreen() {
             setShowAddFriendModal(true);
           }}
         >
-          <MaterialCommunityIcons name="bell-outline" size={24} color={DARK_GREY} />
+          <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
           {pendingRequestsCount > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>
@@ -347,7 +342,7 @@ export default function LeaderboardScreen() {
 
           {friendsLeaderboard.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="account-group-outline" size={64} color={MEDIUM_GREY} />
+              <MaterialCommunityIcons name="account-group-outline" size={64} color={COLORS.mediumGrey} />
               <Text style={styles.emptyText}>No friends yet</Text>
               <Text style={styles.emptySubtext}>Add friends to compete with them!</Text>
             </View>
@@ -378,7 +373,7 @@ export default function LeaderboardScreen() {
                   style={styles.switchLeagueButton}
                   onPress={() => setShowLeagueSelector(!showLeagueSelector)}
                 >
-                  <MaterialCommunityIcons name="swap-horizontal" size={20} color={DARK_GREY} />
+                  <MaterialCommunityIcons name="swap-horizontal" size={20} color={COLORS.darkGrey} />
                 </TouchableOpacity>
               )}
             </View>
@@ -430,7 +425,7 @@ export default function LeaderboardScreen() {
                     )}
                   </View>
                   {selectedLeague?.id === league.id && (
-                    <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+                    <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -439,7 +434,7 @@ export default function LeaderboardScreen() {
 
           {!selectedLeague ? (
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="trophy-outline" size={64} color={MEDIUM_GREY} />
+              <MaterialCommunityIcons name="trophy-outline" size={64} color={COLORS.mediumGrey} />
               <Text style={styles.emptyText}>No leagues yet</Text>
               <Text style={styles.emptySubtext}>Create a league to compete with friends!</Text>
             </View>
@@ -526,13 +521,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginTop: 12,
   },
   notificationButton: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     marginTop: 8,
     position: 'relative',
   },
@@ -555,7 +550,7 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 4,
     marginBottom: 24,
@@ -577,10 +572,10 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   activeTabText: {
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   tabContent: {
     marginBottom: 20,
@@ -609,7 +604,7 @@ const styles = StyleSheet.create({
   },
   leagueCodeText: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -618,7 +613,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: MEDIUM_GREY,
+    borderColor: COLORS.mediumGrey,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -635,14 +630,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   switchLeagueButton: {
     marginLeft: 12,
     padding: 4,
   },
   addButton: {
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -655,7 +650,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   leagueSelector: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 8,
     marginBottom: 16,
@@ -679,11 +674,11 @@ const styles = StyleSheet.create({
   },
   leagueOptionText: {
     fontSize: 16,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   leagueOptionCode: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -699,7 +694,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
     borderWidth: 2,
-    borderColor: AMBER,
+    borderColor: COLORS.amber,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
@@ -709,7 +704,7 @@ const styles = StyleSheet.create({
   currentUserLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: AMBER,
+    color: COLORS.amber,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 12,
@@ -720,14 +715,14 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: 2,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     marginVertical: 16,
     borderRadius: 1,
   },
   leaderboardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -752,16 +747,16 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 18,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 4,
   },
   adminLabel: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     letterSpacing: 0.5,
   },
   currentUserText: {
-    color: AMBER,
+    color: COLORS.amber,
   },
   statsRow: {
     flexDirection: 'row',
@@ -769,7 +764,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   scoreContainer: {
     alignItems: 'flex-end',
@@ -777,11 +772,11 @@ const styles = StyleSheet.create({
   scoreText: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   scoreLabel: {
     fontSize: 12,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -792,12 +787,12 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 8,
     textAlign: 'center',
   },

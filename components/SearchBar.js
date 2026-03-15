@@ -2,9 +2,7 @@ import React from 'react';
 import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
+import { COLORS } from '../constants/theme';
 
 export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onClear, onFilterPress, onFocus, onBlur }) {
   const insets = useSafeAreaInsets();
@@ -19,11 +17,11 @@ export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onCle
   return (
     <View style={[styles.searchContainer, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
       <View style={styles.searchBar}>
-        <MaterialCommunityIcons name="magnify" size={20} color={AMBER} style={styles.searchIcon} />
+        <MaterialCommunityIcons name="magnify" size={20} color={COLORS.amber} style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search"
-          placeholderTextColor={AMBER}
+          placeholderTextColor={COLORS.amber}
           value={searchQuery}
           onChangeText={setSearchQuery}
           onSubmitEditing={handleSubmit}
@@ -33,12 +31,12 @@ export default function SearchBar({ searchQuery, setSearchQuery, onSearch, onCle
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={onClear} style={styles.clearButton}>
-            <MaterialCommunityIcons name="close-circle" size={20} color={AMBER} />
+            <MaterialCommunityIcons name="close-circle" size={20} color={COLORS.amber} />
           </TouchableOpacity>
         )}
       </View>
       <TouchableOpacity onPress={onFilterPress} style={styles.filterButton}>
-        <MaterialCommunityIcons name="filter-variant" size={20} color={AMBER} />
+        <MaterialCommunityIcons name="filter-variant" size={20} color={COLORS.amber} />
       </TouchableOpacity>
     </View>
   );
@@ -61,7 +59,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: DARK_CHARCOAL,
+    backgroundColor: COLORS.charcoal,
     borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -77,7 +75,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: AMBER,
+    color: COLORS.amber,
     padding: 0,
   },
   clearButton: {
@@ -88,7 +86,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: DARK_CHARCOAL,
+    backgroundColor: COLORS.charcoal,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,

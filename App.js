@@ -12,16 +12,14 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
-
-const DARK_CHARCOAL = '#1C1C1C';
-const AMBER = '#D4A017';
+import { COLORS } from './constants/theme';
 
 function AppContent() {
   const { user, loading, refreshUser } = useAuth();
 
   useEffect(() => {
     if (Platform.OS === 'android') {
-      NavigationBar.setBackgroundColorAsync(DARK_CHARCOAL);
+      NavigationBar.setBackgroundColorAsync(COLORS.charcoal);
       NavigationBar.setButtonStyleAsync('light');
     }
   }, []);
@@ -29,7 +27,7 @@ function AppContent() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={AMBER} />
+        <ActivityIndicator size="large" color={COLORS.amber} />
       </View>
     );
   }

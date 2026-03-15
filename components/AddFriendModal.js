@@ -13,11 +13,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { searchUsers } from '../services/UserService';
 import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejectFriendRequest, getFriends, removeFriend } from '../services/FriendsService';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function AddFriendModal({ visible, onClose, currentUserId, onFriendAdded, initialTab = 'search' }) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -164,7 +160,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
   const renderSearchResult = ({ item }) => (
     <View style={styles.resultItem}>
       <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={MEDIUM_GREY} />
+        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
       </View>
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.username}</Text>
@@ -184,7 +180,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
   const renderPendingRequest = ({ item }) => (
     <View style={styles.requestItem}>
       <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={MEDIUM_GREY} />
+        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
       </View>
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.requester.username}</Text>
@@ -212,7 +208,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
   const renderFriend = ({ item }) => (
     <View style={styles.friendItem}>
       <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={MEDIUM_GREY} />
+        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
       </View>
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.username}</Text>
@@ -241,7 +237,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Add Friends</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
             </TouchableOpacity>
           </View>
 
@@ -308,7 +304,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
 
               {loading ? (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={AMBER} />
+                  <ActivityIndicator size="large" color={COLORS.amber} />
                 </View>
               ) : searchResults.length > 0 ? (
                 <FlatList
@@ -323,7 +319,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
                 </View>
               ) : (
                 <View style={styles.emptyContainer}>
-                  <MaterialCommunityIcons name="account-search" size={64} color={MEDIUM_GREY} />
+                  <MaterialCommunityIcons name="account-search" size={64} color={COLORS.mediumGrey} />
                   <Text style={styles.emptyText}>Search for friends</Text>
                 </View>
               )}
@@ -342,7 +338,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
                 />
               ) : (
                 <View style={styles.emptyContainer}>
-                  <MaterialCommunityIcons name="account-group" size={64} color={MEDIUM_GREY} />
+                  <MaterialCommunityIcons name="account-group" size={64} color={COLORS.mediumGrey} />
                   <Text style={styles.emptyText}>No friends yet</Text>
                   <Text style={styles.emptySubtext}>
                     Search for users and send friend requests
@@ -364,7 +360,7 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
                 />
               ) : (
                 <View style={styles.emptyContainer}>
-                  <MaterialCommunityIcons name="account-clock" size={64} color={MEDIUM_GREY} />
+                  <MaterialCommunityIcons name="account-clock" size={64} color={COLORS.mediumGrey} />
                   <Text style={styles.emptyText}>No pending requests</Text>
                 </View>
               )}
@@ -397,19 +393,19 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GREY,
+    borderBottomColor: COLORS.lightGrey,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   closeButton: {
     padding: 4,
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     margin: 20,
     marginBottom: 16,
     borderRadius: 12,
@@ -432,15 +428,15 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 16,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   activeTabText: {
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   badge: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: AMBER,
+    color: COLORS.amber,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -450,7 +446,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     height: 48,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
@@ -459,7 +455,7 @@ const styles = StyleSheet.create({
   searchButton: {
     width: 48,
     height: 48,
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -476,7 +472,7 @@ const styles = StyleSheet.create({
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
@@ -484,7 +480,7 @@ const styles = StyleSheet.create({
   requestItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
@@ -492,7 +488,7 @@ const styles = StyleSheet.create({
   friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
@@ -512,17 +508,17 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 2,
   },
   userDate: {
     fontSize: 12,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
   addButton: {
     width: 40,
     height: 40,
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
@@ -561,12 +557,12 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 16,
   },
   emptySubtext: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 8,
     textAlign: 'center',
   },

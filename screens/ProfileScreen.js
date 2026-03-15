@@ -7,11 +7,7 @@ import PintGlassIcon from '../components/PintGlassIcon';
 import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const ACCENT_GREY = '#424242';
+import { COLORS } from '../constants/theme';
 
 const SORT_MODES = {
   LOCATION: 'location',
@@ -227,7 +223,7 @@ export default function ProfileScreen() {
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
       <View style={styles.header}>
-        <PintGlassIcon size={48} color={DARK_GREY} />
+        <PintGlassIcon size={48} color={COLORS.darkGrey} />
         <Text style={styles.title}>Pub Tracker</Text>
           {user && (
             <Text style={styles.username}>@{user.username}</Text>
@@ -275,7 +271,7 @@ export default function ProfileScreen() {
             <MaterialCommunityIcons
               name="chevron-left"
               size={24}
-              color={hasPrevView ? DARK_GREY : '#D9D9D9'}
+              color={hasPrevView ? COLORS.darkGrey : '#D9D9D9'}
             />
           </TouchableOpacity>
           <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
@@ -287,7 +283,7 @@ export default function ProfileScreen() {
               style={styles.filterButton}
               activeOpacity={0.8}
             >
-              <MaterialCommunityIcons name="filter-variant" size={20} color={DARK_GREY} />
+              <MaterialCommunityIcons name="filter-variant" size={20} color={COLORS.darkGrey} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={handleNextView}
@@ -302,7 +298,7 @@ export default function ProfileScreen() {
               <MaterialCommunityIcons
                 name="chevron-right"
                 size={24}
-                color={hasNextView ? DARK_GREY : '#D9D9D9'}
+                color={hasNextView ? COLORS.darkGrey : '#D9D9D9'}
               />
             </TouchableOpacity>
           </View>
@@ -382,7 +378,7 @@ export default function ProfileScreen() {
                   <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
                 </View>
                 <View style={styles.boroughAreaSummary}>
-                  <MaterialCommunityIcons name="map-marker-radius" size={16} color={DARK_GREY} />
+                  <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
                   <Text style={styles.boroughAreaSummaryText}>
                     Areas complete: {stat.completedAreas} / {stat.totalAreas}
                   </Text>
@@ -419,7 +415,7 @@ export default function ProfileScreen() {
                 onPress={() => setShowFilterModal(false)}
                 style={styles.modalCloseButton}
               >
-                <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+                <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
               </TouchableOpacity>
             </View>
             
@@ -440,7 +436,7 @@ export default function ProfileScreen() {
                 Location (Distance)
               </Text>
               {sortMode === SORT_MODES.LOCATION && (
-                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+                <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
               )}
             </TouchableOpacity>
 
@@ -461,7 +457,7 @@ export default function ProfileScreen() {
                 Alphabetical
               </Text>
               {sortMode === SORT_MODES.ALPHABETICAL && (
-                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+                <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
               )}
             </TouchableOpacity>
 
@@ -482,7 +478,7 @@ export default function ProfileScreen() {
                 Most Pubs Visited
               </Text>
               {sortMode === SORT_MODES.MOST_VISITED && (
-                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+                <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
               )}
             </TouchableOpacity>
 
@@ -503,7 +499,7 @@ export default function ProfileScreen() {
                 Percentage Visited
               </Text>
               {sortMode === SORT_MODES.PERCENTAGE && (
-                <MaterialCommunityIcons name="check" size={20} color={DARK_GREY} />
+                <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
               )}
             </TouchableOpacity>
           </Animated.View>
@@ -538,22 +534,22 @@ const styles = StyleSheet.create({
   logoutButtonHeader: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     marginTop: 8,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginTop: 12,
   },
   username: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginTop: 4,
   },
   statsCard: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
@@ -572,17 +568,17 @@ const styles = StyleSheet.create({
   visitedNumber: {
     fontSize: 56,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   totalNumber: {
     fontSize: 32,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginLeft: 4,
   },
   statLabel: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginBottom: 20,
     textTransform: 'uppercase',
     letterSpacing: 1,
@@ -602,13 +598,13 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: DARK_GREY,
+    backgroundColor: COLORS.darkGrey,
     borderRadius: 6,
   },
   progressText: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     minWidth: 50,
     textAlign: 'right',
   },
@@ -624,7 +620,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     flex: 1,
     textAlign: 'center',
   },
@@ -659,17 +655,17 @@ const styles = StyleSheet.create({
   filterButton: {
     padding: 8,
     borderRadius: 8,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     marginRight: 12,
   },
   emptyText: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textAlign: 'center',
     paddingVertical: 20,
   },
   areaCard: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -694,21 +690,21 @@ const styles = StyleSheet.create({
   areaName: {
     fontSize: 17,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     flexShrink: 1,
   },
   areaBoroughInline: {
     marginLeft: 6,
     fontSize: 12,
     fontWeight: '600',
-    color: ACCENT_GREY,
+    color: COLORS.accentGrey,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
   areaCount: {
     fontSize: 16,
     fontWeight: '600',
-    color: ACCENT_GREY,
+    color: COLORS.accentGrey,
   },
   areaProgressBarContainer: {
     flexDirection: 'row',
@@ -724,13 +720,13 @@ const styles = StyleSheet.create({
   },
   areaProgressBarFill: {
     height: '100%',
-    backgroundColor: DARK_GREY,
+    backgroundColor: COLORS.darkGrey,
     borderRadius: 4,
   },
   areaPercentage: {
     fontSize: 14,
     fontWeight: '600',
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     minWidth: 45,
     textAlign: 'right',
   },
@@ -742,7 +738,7 @@ const styles = StyleSheet.create({
   boroughAreaSummaryText: {
     marginLeft: 6,
     fontSize: 14,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   modalOverlay: {
     flex: 1,
@@ -767,12 +763,12 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GREY,
+    borderBottomColor: COLORS.lightGrey,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   modalCloseButton: {
     padding: 4,
@@ -784,14 +780,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: LIGHT_GREY,
+    borderBottomColor: COLORS.lightGrey,
   },
   filterOptionSelected: {
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
   },
   filterOptionText: {
     fontSize: 16,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   filterOptionTextSelected: {
     fontWeight: '600',

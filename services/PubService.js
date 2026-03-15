@@ -203,120 +203,37 @@ export const fetchLondonPubs = async (options = {}) => {
 	}
 };
 
-export const fetchBoroughSummaries = async () => {
+export const fetchBoroughSummaries = async (userId) => {
 	try {
-		const { visitedSet } = await loadVisitedAndFavoriteSets();
+		if (!userId) return [];
 
-		let allRows = [];
-		let from = 0;
-		let hasMore = true;
+		const { data, error } = await supabase.rpc('get_borough_stats', { p_user_id: userId });
+		if (error) throw error;
 
-		while (hasMore) {
-			const to = from + PAGE_SIZE - 1;
-			const { data: batch, error } = await supabase
-				.from('pubs_all')
-				.select('id, borough, lat, lon')
-				.not('borough', 'is', null)
-				.range(from, to);
-
-			if (error) throw error;
-
-			if (batch && batch.length > 0) {
-				allRows = allRows.concat(batch);
-				from += batch.length;
-				hasMore = batch.length === PAGE_SIZE;
-				if (allRows.length > SAFETY_LIMIT) {
-					hasMore = false;
-				}
-			} else {
-				hasMore = false;
-			}
-		}
-
-		const aggregated = new Map();
-
-		allRows.forEach((row) => {
-			if (!row || typeof row.borough !== 'string') return;
-			const rawName = row.borough.trim();
-			if (!rawName) return;
-
-			const coordinateEntry = BOROUGH_COORDINATE_MAP.get(rawName.toLowerCase());
-			const canonicalName = coordinateEntry ? coordinateEntry.name : rawName;
-
-			const idString =
-				typeof row.id === 'string' ? row.id : row.id != null ? String(row.id) : null;
-			const lat = Number.parseFloat(row.lat);
-			const lon = Number.parseFloat(row.lon);
-
-			let bucket = aggregated.get(canonicalName);
-			if (!bucket) {
-				bucket = {
-					borough: canonicalName,
-					totalPubs: 0,
-					visitedPubs: 0,
-					minLat: Infinity,
-					maxLat: -Infinity,
-					minLon: Infinity,
-					maxLon: -Infinity,
-				};
-				aggregated.set(canonicalName, bucket);
-			}
-
-			bucket.totalPubs += 1;
-			if (idString && visitedSet.has(idString)) bucket.visitedPubs += 1;
-
-			if (Number.isFinite(lat) && Number.isFinite(lon)) {
-				bucket.minLat = Math.min(bucket.minLat, lat);
-				bucket.maxLat = Math.max(bucket.maxLat, lat);
-				bucket.minLon = Math.min(bucket.minLon, lon);
-				bucket.maxLon = Math.max(bucket.maxLon, lon);
-			}
-		});
-
-		const summaries = boroughCoordinates.map((entry) => {
-			const stats = aggregated.get(entry.borough);
-			if (stats) aggregated.delete(entry.borough);
-
-			const totalPubs = stats?.totalPubs ?? 0;
-			const visitedPubs = stats?.visitedPubs ?? 0;
-			const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
-
-			return {
-				borough: entry.borough,
-				center: entry.center,
-				bounds:
-					stats && Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
-						? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
-						: null,
-				totalPubs,
-				visitedPubs,
-				completionPercentage,
-			};
-		});
-
-		aggregated.forEach((stats, boroughName) => {
-			const totalPubs = stats.totalPubs;
-			const visitedPubs = stats.visitedPubs;
-			const completionPercentage = totalPubs > 0 ? (visitedPubs / totalPubs) * 100 : 0;
-			const bounds =
-				Number.isFinite(stats.minLat) && Number.isFinite(stats.minLon)
-					? { north: stats.maxLat, south: stats.minLat, east: stats.maxLon, west: stats.minLon }
+		return (data || []).map((row) => {
+			// Use hardcoded coordinates for known boroughs — more accurate than pub-weighted average
+			const coordinateEntry = BOROUGH_COORDINATE_MAP.get(row.borough?.toLowerCase());
+			const center = coordinateEntry
+				? coordinateEntry.center
+				: (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
+					? { latitude: row.center_lat, longitude: row.center_lon }
 					: null;
 
-			summaries.push({
-				borough: boroughName,
-				center:
-					bounds != null
-						? { latitude: (stats.minLat + stats.maxLat) / 2, longitude: (stats.minLon + stats.maxLon) / 2 }
-						: null,
-				bounds,
-				totalPubs,
-				visitedPubs,
-				completionPercentage,
-			});
-		});
+			const hasBounds =
+				Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
+				Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
 
-		return summaries.sort((a, b) => a.borough.localeCompare(b.borough));
+			return {
+				borough: row.borough,
+				center,
+				bounds: hasBounds
+					? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
+					: null,
+				totalPubs: Number(row.total_pubs),
+				visitedPubs: Number(row.visited_pubs),
+				completionPercentage: Number(row.percentage),
+			};
+		});
 	} catch (error) {
 		console.error('fetchBoroughSummaries error:', error);
 		return [];

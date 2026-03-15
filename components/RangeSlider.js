@@ -1,10 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, PanResponder, Dimensions } from 'react-native';
-
-const AMBER = '#D4A017';
-const DARK_CHARCOAL = '#1C1C1C';
-const MEDIUM_GREY = '#757575';
-const LIGHT_GREY = '#F5F5F5';
+import { COLORS } from '../constants/theme';
 
 const HANDLE_SIZE = 32;
 const TRACK_HEIGHT = 4;
@@ -165,7 +161,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_CHARCOAL,
+    color: COLORS.charcoal,
   },
   sliderContainer: {
     height: 50,
@@ -178,14 +174,14 @@ const styles = StyleSheet.create({
     right: HANDLE_SIZE / 2,
     top: (50 - TRACK_HEIGHT) / 2,
     height: TRACK_HEIGHT,
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: TRACK_HEIGHT / 2,
   },
   trackActive: {
     position: 'absolute',
     top: (50 - TRACK_HEIGHT) / 2,
     height: TRACK_HEIGHT,
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     borderRadius: TRACK_HEIGHT / 2,
   },
   handle: {
@@ -195,7 +191,7 @@ const styles = StyleSheet.create({
     borderRadius: HANDLE_SIZE / 2,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: AMBER,
+    borderColor: COLORS.amber,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -216,7 +212,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
   },
 });
 

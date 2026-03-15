@@ -1,11 +1,7 @@
 import React from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
-const DARK_GREY = '#2C2C2C';
-const LIGHT_GREY = '#F5F5F5';
-const MEDIUM_GREY = '#757575';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 export default function LeagueActionsModal({
   visible,
@@ -25,7 +21,7 @@ export default function LeagueActionsModal({
           <View style={styles.header}>
             <Text style={styles.title}>League Options</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={DARK_GREY} />
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
             </TouchableOpacity>
           </View>
 
@@ -43,7 +39,7 @@ export default function LeagueActionsModal({
                 Start a new league and invite your friends with a unique code.
               </Text>
             </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={MEDIUM_GREY} />
+            <MaterialCommunityIcons name="chevron-right" size={24} color={COLORS.mediumGrey} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -60,7 +56,7 @@ export default function LeagueActionsModal({
                 Enter a league code shared by a friend to join their league.
               </Text>
             </View>
-            <MaterialCommunityIcons name="chevron-right" size={24} color={MEDIUM_GREY} />
+            <MaterialCommunityIcons name="chevron-right" size={24} color={COLORS.mediumGrey} />
           </TouchableOpacity>
         </View>
       </View>
@@ -91,7 +87,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
   },
   closeButton: {
     padding: 4,
@@ -99,7 +95,7 @@ const styles = StyleSheet.create({
   optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -108,13 +104,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: AMBER,
+    backgroundColor: COLORS.amber,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
   },
   joinIcon: {
-    backgroundColor: DARK_GREY,
+    backgroundColor: COLORS.darkGrey,
   },
   optionTextContainer: {
     flex: 1,
@@ -122,12 +118,12 @@ const styles = StyleSheet.create({
   optionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 4,
   },
   optionSubtitle: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
   },
 });
 

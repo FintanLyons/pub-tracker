@@ -1,11 +1,7 @@
 import React from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
-const DARK_GREY = '#2C2C2C';
-const MEDIUM_GREY = '#757575';
-const LIGHT_GREY = '#F5F5F5';
-const AMBER = '#D4A017';
+import { COLORS } from '../constants/theme';
 
 // All possible features with their icons (in display order)
 const ALL_FEATURES = [
@@ -77,7 +73,7 @@ export default function PubCardContent({
               <MaterialCommunityIcons 
                 name={feature.icon}
                 size={24} 
-                color={isActive ? AMBER : MEDIUM_GREY}
+                color={isActive ? COLORS.amber : COLORS.mediumGrey}
                 style={[styles.featureIcon, !isActive && styles.featureIconInactive]}
               />
             </View>
@@ -91,7 +87,7 @@ export default function PubCardContent({
           <MaterialCommunityIcons 
             name="trophy" 
             size={16} 
-            color={AMBER} 
+            color={COLORS.amber} 
           />
           <Text style={styles.achievementText}>
             {pub.achievements[0]}
@@ -101,7 +97,7 @@ export default function PubCardContent({
       
       {pub.address && (
         <View style={styles.infoRow}>
-          <MaterialCommunityIcons name="map-marker" size={16} color={MEDIUM_GREY} />
+          <MaterialCommunityIcons name="map-marker" size={16} color={COLORS.mediumGrey} />
           <Text style={styles.address}>
             {pub.address
               .split('\n')
@@ -118,7 +114,7 @@ export default function PubCardContent({
           <View style={styles.columnLeft}>
       {pub.phone && (
               <>
-          <MaterialCommunityIcons name="phone" size={16} color={MEDIUM_GREY} />
+          <MaterialCommunityIcons name="phone" size={16} color={COLORS.mediumGrey} />
           <Text style={styles.phone}>{pub.phone}</Text>
               </>
             )}
@@ -129,7 +125,7 @@ export default function PubCardContent({
           <View style={styles.columnRight}>
       {pub.founded && (
               <>
-          <MaterialCommunityIcons name="calendar" size={16} color={MEDIUM_GREY} />
+          <MaterialCommunityIcons name="calendar" size={16} color={COLORS.mediumGrey} />
                 <Text style={styles.founded}>{pub.founded}</Text>
               </>
             )}
@@ -156,7 +152,7 @@ const styles = StyleSheet.create({
   pubName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginBottom: 4,
     paddingRight: 40,
     paddingLeft: 0, // Remove left padding to align title to the left
@@ -169,14 +165,14 @@ const styles = StyleSheet.create({
   },
   area: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginRight: 12,
   },
   ownershipInline: {
     fontSize: 14,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     fontWeight: '500',
   },
   photoContainer: {
@@ -185,7 +181,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: LIGHT_GREY,
+    backgroundColor: COLORS.lightGrey,
   },
   pubPhoto: {
     width: '100%',
@@ -217,7 +213,7 @@ const styles = StyleSheet.create({
   },
   achievementText: {
     fontSize: 14,
-    color: AMBER,
+    color: COLORS.amber,
     marginLeft: 8,
     fontWeight: '600',
   },
@@ -228,18 +224,18 @@ const styles = StyleSheet.create({
   },
   address: {
     fontSize: 14,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginLeft: 8,
     flex: 1,
   },
   phone: {
     fontSize: 14,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginLeft: 8,
   },
   founded: {
     fontSize: 14,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     marginLeft: 8,
   },
   twoColumnRow: {
@@ -259,7 +255,7 @@ const styles = StyleSheet.create({
   },
   columnSeparator: {
     fontSize: 16,
-    color: MEDIUM_GREY,
+    color: COLORS.mediumGrey,
     marginHorizontal: 12,
   },
   historyContainer: {
@@ -268,7 +264,7 @@ const styles = StyleSheet.create({
   },
   history: {
     fontSize: 14,
-    color: DARK_GREY,
+    color: COLORS.darkGrey,
     lineHeight: 20,
     textAlign: 'justify',
   },
