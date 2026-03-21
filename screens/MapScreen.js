@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Keyboard,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoute, useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -53,6 +54,7 @@ import { useImageSource } from './map/hooks/useImageSource';
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const [mapAreaHeight, setMapAreaHeight] = useState(Dimensions.get('window').height);
   const navigation = useNavigation();
   const route = useRoute();
   const { isLocationLoaded, setIsLocationLoaded, setIsInitialPubsLoaded, boroughSummaries, isLoadingBoroughs } = useContext(LoadingContext);
@@ -91,12 +93,53 @@ export default function MapScreen() {
   const { refreshUserStats } = useUserStats();
 
   // --- Layout ---
-  const screenHeight = Dimensions.get('window').height;
-  const cardHeight = screenHeight * 0.33;
-  const floatingButtonBottom = useMemo(
-    () => insets.bottom - 24 + (selectedPub ? cardHeight - 24 : 0),
-    [insets.bottom, selectedPub, cardHeight],
-  );
+  // Same rule as SearchBar padding from status bar: Math.max(inset, 8) + 8 — here for gap above tab bar.
+  const mapEdgeContentInset = (inset) => Math.max(inset, 8) + 8;
+  const mapSheetMetrics = useMemo(() => {
+    const P = mapAreaHeight > 0 ? mapAreaHeight : Dimensions.get('window').height;
+    const peek = P * 0.33;
+    const fullH = Math.max(P, peek + 1);
+    return { peek, collapsedY: fullH - peek, hiddenY: fullH };
+  }, [mapAreaHeight]);
+
+  const sheetTranslateYRef = useRef(null);
+  if (sheetTranslateYRef.current == null) {
+    sheetTranslateYRef.current = new Animated.Value(Dimensions.get('window').height);
+  }
+  const sheetTranslateY = sheetTranslateYRef.current;
+
+  useEffect(() => {
+    if (!selectedPub) {
+      sheetTranslateY.stopAnimation();
+      sheetTranslateY.setValue(mapSheetMetrics.hiddenY);
+    }
+  }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
+
+  const FLOATING_LIFT_PX = 24;
+  /** After this many px of upward drag from collapsed, map controls are gone (snappy, not a long fade). */
+  const MAP_CONTROLS_HIDE_PX = 20;
+  // Lift tracks peek vs tab bar; opacity hides controls while expanded (they sat above z-index 1000 sheet).
+  const mapFloatingControlsStyle = useMemo(() => {
+    const lift = Math.max(mapSheetMetrics.peek - FLOATING_LIFT_PX, 0);
+    const { collapsedY, hiddenY } = mapSheetMetrics;
+    const translateY = sheetTranslateY.interpolate({
+      inputRange: [0, collapsedY, hiddenY],
+      outputRange: [-lift, -lift, 0],
+      extrapolate: 'clamp',
+    });
+    const tHide =
+      collapsedY > MAP_CONTROLS_HIDE_PX + 2
+        ? collapsedY - MAP_CONTROLS_HIDE_PX
+        : collapsedY * 0.35;
+    const opacity = sheetTranslateY.interpolate({
+      inputRange: [0, tHide, collapsedY, hiddenY],
+      outputRange: [0, 0, 1, 1],
+      extrapolate: 'clamp',
+    });
+    return { opacity, transform: [{ translateY }] };
+  }, [sheetTranslateY, mapSheetMetrics.peek, mapSheetMetrics.collapsedY, mapSheetMetrics.hiddenY]);
+
+  const mapControlsBaseBottom = mapEdgeContentInset(insets.bottom);
 
   // --- Pub merging ---
   const mergePubs = useCallback((incomingPubs) => {
@@ -489,7 +532,7 @@ export default function MapScreen() {
 
   // --- Render ---
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={(e) => setMapAreaHeight(e.nativeEvent.layout.height)}>
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -563,23 +606,54 @@ export default function MapScreen() {
         )}
       </MapView>
 
-      <TouchableOpacity style={[styles.missingPubButton, { bottom: floatingButtonBottom }]} onPress={openMissingPubModal}>
-        <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
-      </TouchableOpacity>
-      <TouchableOpacity style={[styles.locationButton, { bottom: floatingButtonBottom }]} onPress={() => handleCurrentLocation(loadPubsForViewportRegion)}>
-        <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
-      </TouchableOpacity>
+      <DraggablePubCard
+        pub={selectedPub}
+        containerHeight={mapAreaHeight}
+        translateY={sheetTranslateY}
+        onClose={closeCard}
+        onToggleVisited={handleToggleVisited}
+        onToggleFavorite={handleToggleFavorite}
+        getImageSource={getImageSource}
+      />
 
-      <DraggablePubCard pub={selectedPub} onClose={closeCard} onToggleVisited={handleToggleVisited} onToggleFavorite={handleToggleFavorite} getImageSource={getImageSource} />
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          { position: 'absolute', left: 16, bottom: mapControlsBaseBottom, zIndex: 1001, elevation: 6 },
+          mapFloatingControlsStyle,
+        ]}
+      >
+        <TouchableOpacity style={styles.mapFloatingButton} onPress={openMissingPubModal}>
+          <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
+        </TouchableOpacity>
+      </Animated.View>
+      <Animated.View
+        pointerEvents="box-none"
+        style={[
+          { position: 'absolute', right: 16, bottom: mapControlsBaseBottom, zIndex: 1001, elevation: 6 },
+          mapFloatingControlsStyle,
+        ]}
+      >
+        <TouchableOpacity style={styles.mapFloatingButton} onPress={() => handleCurrentLocation(loadPubsForViewportRegion)}>
+          <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
+        </TouchableOpacity>
+      </Animated.View>
+
       <ReportMissingPubModal visible={isMissingPubModalVisible} onClose={closeMissingPubModal} onSubmit={handleSubmitMissingPub} isSubmitting={isSubmittingMissingPub} errorMessage={missingPubError} />
       {isMissingPubSuccessVisible && (
-        <View style={[styles.feedbackToast, { bottom: floatingButtonBottom + 68 }]}>
+        <Animated.View
+          style={[
+            styles.feedbackToast,
+            { position: 'absolute', bottom: mapControlsBaseBottom + 68, zIndex: 1002, elevation: 7 },
+            mapFloatingControlsStyle,
+          ]}
+        >
           <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
           <Text style={styles.feedbackToastText}>Missing pub successfully reported</Text>
           <TouchableOpacity onPress={() => setIsMissingPubSuccessVisible(false)} style={styles.feedbackToastCloseButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <MaterialCommunityIcons name="close" size={20} color={COLORS.charcoal} />
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       )}
     </View>
   );

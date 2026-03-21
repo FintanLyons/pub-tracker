@@ -18,6 +18,11 @@ import { submitReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
+/** Space between safe-area inset (status bar / notch) and the expanded header row */
+const EXPANDED_TOP_GAP = 8;
+/** Approx. height of expanded visited + icon row (minHeight + vertical padding) */
+const EXPANDED_ACTION_ROW_HEIGHT = 60;
+const EXPANDED_HANDLE_GAP = 8;
 
 /**
  * DraggablePubCard - A bottom sheet card with three states: hidden, collapsed, expanded
@@ -25,42 +30,47 @@ const POSITION_EPSILON = 0.5;
  */
 export default function DraggablePubCard({ 
   pub, 
+  containerHeight,
+  translateY,
   onClose, 
   onToggleVisited,
   onToggleFavorite,
   getImageSource
 }) {
   const insets = useSafeAreaInsets();
-  const screenHeight = Dimensions.get('window').height;
+  // Sheet is positioned inside the map tab, not the full window — using window height
+  // made the card taller than its parent so the top sat under the status bar / camera cutout.
+  const parentHeight = containerHeight > 0 ? containerHeight : Dimensions.get('window').height;
   
   // Memoize snap positions to ensure they never change - prevents position variance
   const snapPositions = useMemo(() => {
-    const cardHeight = screenHeight * 0.33;
+    const peek = parentHeight * 0.33;
+    // Full parent height so the sheet background covers the map; content inset uses EXPANDED_TOP_GAP + insets.
+    const fullH = Math.max(parentHeight, peek + 1);
     return {
-      EXPANDED_Y: 0, // Full screen (top aligns with screen top, padding creates safe area)
-      COLLAPSED_Y: screenHeight - cardHeight, // Peek from bottom
-      HIDDEN_Y: screenHeight, // Completely hidden below screen
+      EXPANDED_Y: 0,
+      COLLAPSED_Y: fullH - peek,
+      HIDDEN_Y: fullH,
+      fullHeight: fullH,
+      peekHeight: peek,
     };
-  }, [screenHeight]);
+  }, [parentHeight]);
   
-  const { EXPANDED_Y, COLLAPSED_Y, HIDDEN_Y } = snapPositions;
-  const cardHeight = screenHeight * 0.33;
-  const fullHeight = screenHeight - insets.top;
-  
-  // Single source of truth for card position
-  const translateY = useRef(new Animated.Value(HIDDEN_Y)).current;
+  const { EXPANDED_Y, COLLAPSED_Y, HIDDEN_Y, fullHeight, peekHeight } = snapPositions;
   
   // Refs for PanResponder to always access current snap positions
   const collapsedYRef = useRef(COLLAPSED_Y);
   const expandedYRef = useRef(EXPANDED_Y);
   const hiddenYRef = useRef(HIDDEN_Y);
+  const peekHeightRef = useRef(peekHeight);
   
   // Update refs when snap positions change
   useEffect(() => {
     collapsedYRef.current = COLLAPSED_Y;
     expandedYRef.current = EXPANDED_Y;
     hiddenYRef.current = HIDDEN_Y;
-  }, [COLLAPSED_Y, EXPANDED_Y, HIDDEN_Y]);
+    peekHeightRef.current = peekHeight;
+  }, [COLLAPSED_Y, EXPANDED_Y, HIDDEN_Y, peekHeight]);
   
   // State management
   const [isExpanded, setIsExpanded] = useState(false);
@@ -238,7 +248,7 @@ export default function DraggablePubCard({
           const distToHidden = Math.abs(finalPosition - currentHiddenY);
           const minDist = Math.min(distToExpanded, distToCollapsed, distToHidden);
           
-          if (minDist === distToHidden && dragDistance > cardHeight * 0.3) {
+          if (minDist === distToHidden && dragDistance > peekHeightRef.current * 0.3) {
             targetY = currentHiddenY;
           } else if (minDist === distToExpanded) {
             targetY = currentExpandedY;
@@ -386,6 +396,10 @@ export default function DraggablePubCard({
   
   // Don't render if no pub (must be after all hooks)
   if (!pub) return null;
+
+  // RN positions `absolute` children vs the parent's border, not below padding — use explicit insets.
+  const expandedHeaderTop = insets.top + EXPANDED_TOP_GAP;
+  const expandedHandleTop = expandedHeaderTop + EXPANDED_ACTION_ROW_HEIGHT + EXPANDED_HANDLE_GAP;
   
   return (
     <Animated.View 
@@ -393,7 +407,9 @@ export default function DraggablePubCard({
         styles.cardContainer, 
         { 
           height: fullHeight,
-          paddingTop: isExpanded ? insets.top + 8 : 12,
+          paddingTop: isExpanded ? expandedHeaderTop : 12,
+          borderTopLeftRadius: isExpanded ? 0 : 20,
+          borderTopRightRadius: isExpanded ? 0 : 20,
           transform: [{ translateY }]
         }
       ]}
@@ -405,7 +421,7 @@ export default function DraggablePubCard({
           <TouchableOpacity
             style={[
               styles.visitedButtonTop,
-              { top: insets.top + 8 },
+              { top: expandedHeaderTop },
               pub.isVisited && styles.visitedButtonTopActive
             ]}
             onPress={() => onToggleVisited(pub.id)}
@@ -419,7 +435,7 @@ export default function DraggablePubCard({
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.reportButtonTop, { top: insets.top + 8 }]}
+            style={[styles.reportButtonTop, { top: expandedHeaderTop }]}
             onPress={() => setReportModalVisible(true)}
             activeOpacity={0.7}
           >
@@ -430,7 +446,7 @@ export default function DraggablePubCard({
             />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.favoriteButtonTop, { top: insets.top + 8 }]}
+            style={[styles.favoriteButtonTop, { top: expandedHeaderTop }]}
             onPress={() => onToggleFavorite(pub.id)}
             activeOpacity={0.7}
           >
@@ -441,7 +457,7 @@ export default function DraggablePubCard({
             />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.closeButtonTop, { top: insets.top + 8 }]}
+            style={[styles.closeButtonTop, { top: expandedHeaderTop }]}
             onPress={handleClose}
             activeOpacity={0.7}
           >
@@ -506,10 +522,7 @@ export default function DraggablePubCard({
       )}
 
       {/* Drag handle indicator - positioned between buttons and title */}
-      <View style={[
-        styles.cardHandleContainer,
-        isExpanded && { top: insets.top + 61 } // Keep same visual position as collapsed (12 + 53 = 65, so insets.top + 8 + 53 = insets.top + 61)
-      ]}>
+      <View style={[styles.cardHandleContainer, isExpanded && { top: expandedHandleTop }]}>
         <View style={styles.cardHandle} />
       </View>
 
@@ -557,7 +570,7 @@ const styles = StyleSheet.create({
   },
   cardHandleContainer: {
     position: 'absolute',
-    top: 65, // Moved higher up now that buttons have moved up (buttons at top ~12, height ~40)
+    top: 65, // Collapsed: below button row (~12 + ~40 + gap)
     left: 0,
     right: 0,
     alignItems: 'center',

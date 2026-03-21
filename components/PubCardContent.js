@@ -33,7 +33,10 @@ export default function PubCardContent({
   return (
     <ScrollView
       style={styles.cardContent}
-      contentContainerStyle={styles.contentContainer}
+      contentContainerStyle={[
+        styles.contentContainer,
+        isExpanded && styles.contentContainerExpanded,
+      ]}
       showsVerticalScrollIndicator={false}
       scrollEnabled={scrollEnabled !== undefined ? scrollEnabled : isExpanded}
       pointerEvents={pointerEvents}
@@ -147,7 +150,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingTop: 55, // Moved higher up now that buttons and handle have moved up
+    paddingTop: 55, // Collapsed: clear handle + header row
+  },
+  contentContainerExpanded: {
+    // Match DraggablePubCard: action row (60) + gap (8) + handle (4) + title margin
+    paddingTop: 80,
   },
   pubName: {
     fontSize: 24,
