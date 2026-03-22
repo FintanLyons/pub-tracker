@@ -95,11 +95,25 @@ const convertFeaturesToArray = (pub) => {
 	return features;
 };
 
+const getSpatialAssignment = (pub) => {
+	const embedded = pub?.pub_spatial_assignments;
+	if (Array.isArray(embedded)) return embedded[0] || null;
+	if (embedded && typeof embedded === 'object') return embedded;
+	return null;
+};
+
 const formatPub = (pub, visitedSet, favoritesSet) => {
+	const spatial = getSpatialAssignment(pub);
+	const area =
+		typeof spatial?.corrected_ward_name === 'string' && spatial.corrected_ward_name.trim().length > 0
+			? spatial.corrected_ward_name.trim()
+			: pub.area;
 	const borough =
-		typeof pub.borough === 'string' && pub.borough.trim().length > 0
-			? pub.borough.trim()
-			: null;
+		typeof spatial?.corrected_borough_name === 'string' && spatial.corrected_borough_name.trim().length > 0
+			? spatial.corrected_borough_name.trim()
+			: typeof pub.borough === 'string' && pub.borough.trim().length > 0
+				? pub.borough.trim()
+				: null;
 	return {
 		id: pub.id,
 		name: pub.name,
@@ -110,7 +124,7 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		description: pub.description,
 		founded: pub.founded,
 		history: pub.history,
-		area: pub.area,
+		area,
 		borough,
 		ownership: pub.ownership,
 		photoUrl: pub.photo_url,
@@ -141,7 +155,7 @@ export const fetchLondonPubs = async (options = {}) => {
 		let hasMore = true;
 
 		while (hasMore) {
-			let query = supabase.from('pubs_all').select('*');
+			let query = supabase.from('pubs_all').select(`*, pub_spatial_assignments(corrected_ward_name, corrected_borough_name, corrected_ward_id, corrected_borough_id, assignment_status)`);
 
 			if (hasBounds) {
 				query = query
@@ -150,10 +164,6 @@ export const fetchLondonPubs = async (options = {}) => {
 					.gte('lon', bounds.west)
 					.lte('lon', bounds.east);
 			}
-			if (hasBoroughFilter) {
-				query = query.in('borough', requestedBoroughs);
-			}
-
 			const to = from + PAGE_SIZE - 1;
 			query = query.range(from, to);
 
@@ -258,8 +268,8 @@ export const searchPubsByName = async (query, limit = 5) => {
 		name: p.name,
 		lat: parseFloat(p.lat),
 		lon: parseFloat(p.lon),
-		area: p.area,
-		borough: p.borough,
+		area: p.corrected_area || p.area,
+		borough: p.corrected_borough || p.borough,
 	}));
 };
 

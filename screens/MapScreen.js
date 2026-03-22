@@ -1,24 +1,28 @@
-import React, { useEffect, useState, useRef, useCallback, useContext, useMemo } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  Dimensions,
   TouchableOpacity,
-  StyleSheet,
   Keyboard,
   Animated,
+  StyleSheet,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, useFocusEffect, useNavigation } from '@react-navigation/native';
-import MapView, { Marker } from 'react-native-maps';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
+import * as Location from 'expo-location';
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
+import { point } from '@turf/helpers';
 import {
-  togglePubVisited,
-  togglePubFavorite,
-  searchPubsByName,
-} from '../services/PubService';
+  Camera,
+  GeoJSONSource,
+  Images,
+  Layer,
+  Map,
+} from '@maplibre/maplibre-react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { fetchLondonPubs, togglePubFavorite, togglePubVisited } from '../services/PubService';
 import { submitMissingPubReport } from '../services/ReportService';
-import AreaIcon from '../components/AreaIcon';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
@@ -26,87 +30,270 @@ import ReportMissingPubModal from '../components/ReportMissingPubModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { useUserStats } from '../contexts/UserStatsContext';
-import {
-  LONDON_REGION,
-  MARKER_MODES,
-  BOROUGH_EXIT_DELTA,
-  AREA_ENTER_DELTA,
-  AREA_EXIT_DELTA,
-  BOROUGH_LIMIT,
-} from './map/constants';
-import { COLORS } from '../constants/theme';
-import {
-  distanceBetween,
-  getAreaCenter,
-  interpolateColor,
-} from './map/utils';
-import { customMapStyle } from './map/mapStyle';
-import { PubMarker } from './map/markers';
-import { styles } from './map/mapStyles';
-import { useAreaStats } from './map/hooks/useAreaStats';
-import { useNearestAreaKeys } from './map/hooks/useNearestAreas';
-import { useViewportPubs } from './map/hooks/useViewportPubs';
-import { useMapRegion } from './map/hooks/useMapRegion';
-import { useLocation } from './map/hooks/useLocation';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
+import { COLORS } from '../constants/theme';
+import boroughGeojson from '../data/geo/london_boroughs.min.json';
+import wardGeojson from '../data/geo/london_wards.min.json';
+import { styles as baseStyles } from './map/mapStyles';
+import {
+  buildBoroughFeatureCollection,
+  buildPubFeatureCollection,
+  buildWardFeatureCollection,
+  DEFAULT_CAMERA,
+  getFeatureBounds,
+  MAP_STYLE,
+  ZOOM_LEVELS,
+} from './map/layerUtils';
 
+const PUB_ICON_VISITED = require('../assets/pub_marker_visited.png');
+const PUB_ICON_UNVISITED = require('../assets/pub_marker_unvisited.png');
+const SHEET_FLOATING_LIFT_PX = 24;
+const MAP_CONTROLS_HIDE_PX = 20;
+const ENABLE_PUB_CLUSTERS = true;
+const PUB_FETCH_BUFFER_RATIO = 0.35;
+const MIN_PUB_FETCH_ZOOM = ZOOM_LEVELS.PUBS_MIN - 0.15;
+
+const parseVisibleBounds = (visibleBounds) => {
+  if (!visibleBounds) return null;
+
+  if (Array.isArray(visibleBounds) && visibleBounds.length === 4 && visibleBounds.every(Number.isFinite)) {
+    const [west, south, east, north] = visibleBounds;
+    return { north, south, east, west };
+  }
+
+  if (Array.isArray(visibleBounds) && visibleBounds.length === 2 && visibleBounds.every(Array.isArray)) {
+    const points = visibleBounds.flat();
+    if (points.length === 4 && points.every(Number.isFinite)) {
+      const [lonA, latA, lonB, latB] = points;
+      return {
+        north: Math.max(latA, latB),
+        south: Math.min(latA, latB),
+        east: Math.max(lonA, lonB),
+        west: Math.min(lonA, lonB),
+      };
+    }
+  }
+
+  return null;
+};
+
+const expandBounds = (bounds, ratio = PUB_FETCH_BUFFER_RATIO) => {
+  if (!bounds) return null;
+  const latSpan = Math.max(bounds.north - bounds.south, 0.02);
+  const lonSpan = Math.max(bounds.east - bounds.west, 0.02);
+  const latPad = latSpan * ratio;
+  const lonPad = lonSpan * ratio;
+  return {
+    north: bounds.north + latPad,
+    south: bounds.south - latPad,
+    east: bounds.east + lonPad,
+    west: bounds.west - lonPad,
+  };
+};
+
+const boundsContain = (outer, inner) => {
+  if (!outer || !inner) return false;
+  return (
+    Number.isFinite(outer.north) && Number.isFinite(outer.south) && Number.isFinite(outer.east) && Number.isFinite(outer.west) &&
+    Number.isFinite(inner.north) && Number.isFinite(inner.south) && Number.isFinite(inner.east) && Number.isFinite(inner.west) &&
+    outer.north >= inner.north &&
+    outer.south <= inner.south &&
+    outer.east >= inner.east &&
+    outer.west <= inner.west
+  );
+};
+
+const mergeBounds = (a, b) => {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    north: Math.max(a.north, b.north),
+    south: Math.min(a.south, b.south),
+    east: Math.max(a.east, b.east),
+    west: Math.min(a.west, b.west),
+  };
+};
+
+const pubInsideFeature = (pub, feature) => {
+  if (!feature || !Number.isFinite(pub?.lon) || !Number.isFinite(pub?.lat)) {
+    return false;
+  }
+
+  try {
+    return booleanPointInPolygon(point([pub.lon, pub.lat]), feature);
+  } catch {
+    return false;
+  }
+};
+
+const findFeatureByName = (featureCollection, name) => {
+  if (!name || typeof name !== 'string') return null;
+  const normalized = name.trim().toLowerCase();
+  return (featureCollection?.features || []).find(
+    (feature) => feature?.properties?.name?.trim?.().toLowerCase?.() === normalized,
+  ) || null;
+};
+
+const findFeatureContainingCoordinate = (featureCollection, latitude, longitude) => {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  const candidatePoint = point([longitude, latitude]);
+  return (featureCollection?.features || []).find((feature) => {
+    try {
+      return booleanPointInPolygon(candidatePoint, feature);
+    } catch {
+      return false;
+    }
+  }) || null;
+};
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const [mapAreaHeight, setMapAreaHeight] = useState(Dimensions.get('window').height);
   const navigation = useNavigation();
   const route = useRoute();
-  const { isLocationLoaded, setIsLocationLoaded, setIsInitialPubsLoaded, boroughSummaries, isLoadingBoroughs } = useContext(LoadingContext);
-  const mapRef = useRef(null);
+  const isFocused = useIsFocused();
+  const {
+    setIsLocationLoaded,
+    setIsInitialPubsLoaded,
+    boroughSummaries,
+  } = useContext(LoadingContext);
+  const { refreshUserStats } = useUserStats();
+  const getImageSource = useImageSource();
 
-  // --- Core state ---
   const [allPubs, setAllPubs] = useState([]);
+  const [viewportBounds, setViewportBounds] = useState(null);
   const [selectedPub, setSelectedPub] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedArea, setSelectedArea] = useState(null);
-  const [focusedBorough, setFocusedBorough] = useState(null);
+  const [selectedBoroughName, setSelectedBoroughName] = useState(null);
+  const [selectedAreaName, setSelectedAreaName] = useState(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [activeBoroughs, setActiveBoroughs] = useState([]);
+  const [pubSuggestions, setPubSuggestions] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardTop, setKeyboardTop] = useState(0);
+  const [mapAreaHeight, setMapAreaHeight] = useState(Dimensions.get('window').height);
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
   const [isSubmittingMissingPub, setIsSubmittingMissingPub] = useState(false);
   const [missingPubError, setMissingPubError] = useState(null);
   const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
 
+  const cameraRef = useRef(null);
+  const pubSourceRef = useRef(null);
+  const mapZoomRef = useRef(DEFAULT_CAMERA.zoom);
+  const initialCameraSetRef = useRef(false);
+  const hasUserInteractedRef = useRef(false);
+  const sheetTranslateYRef = useRef(null);
   const clearedAreaRef = useRef(null);
   const clearedBoroughRef = useRef(null);
   const processedAreaRef = useRef(null);
   const processedBoroughRef = useRef(null);
-  const initialPubsLoadedRef = useRef(false);
+  const loadedPubBoundsRef = useRef(null);
+  const inFlightPubFetchRef = useRef(false);
+  const latestPubFetchTokenRef = useRef(0);
+  const pubFetchTimeoutRef = useRef(null);
 
-  // --- Extracted hooks ---
-  const { mapRegion, markerMode, lastCommittedRegionRef, commitMapRegion, regionsAreApproximatelyEqual } = useMapRegion();
-  const { currentLocation, heading, keyboardHeight, keyboardTop, isNavigatingRef, regionChangeTimeoutRef, handleCurrentLocation } = useLocation(commitMapRegion, mapRef, setIsLocationLoaded);
-  const getImageSource = useImageSource();
-  const {
-    selectedFeatures, selectedOwnerships, yearRange,
-    showOnlyFavorites, showOnlyAchievements, showFilterScreen,
-    allFeatures, allOwnerships, availableYearRange,
-    handleFilterApply, handleFilterPress, handleFilterClose,
-  } = useFilterState(allPubs);
-  const { areaStatsMap, allAreas, calculateAreaStats } = useAreaStats(allPubs);
-  const { refreshUserStats } = useUserStats();
-
-  // --- Layout ---
-  // Same rule as SearchBar padding from status bar: Math.max(inset, 8) + 8 — here for gap above tab bar.
-  const mapEdgeContentInset = (inset) => Math.max(inset, 8) + 8;
-  const mapSheetMetrics = useMemo(() => {
-    const P = mapAreaHeight > 0 ? mapAreaHeight : Dimensions.get('window').height;
-    const peek = P * 0.33;
-    const fullH = Math.max(P, peek + 1);
-    return { peek, collapsedY: fullH - peek, hiddenY: fullH };
-  }, [mapAreaHeight]);
-
-  const sheetTranslateYRef = useRef(null);
   if (sheetTranslateYRef.current == null) {
     sheetTranslateYRef.current = new Animated.Value(Dimensions.get('window').height);
   }
   const sheetTranslateY = sheetTranslateYRef.current;
+
+  const {
+    selectedFeatures,
+    selectedOwnerships,
+    yearRange,
+    showOnlyFavorites,
+    showOnlyAchievements,
+    showFilterScreen,
+    allFeatures,
+    allOwnerships,
+    availableYearRange,
+    handleFilterApply,
+    handleFilterPress,
+    handleFilterClose,
+  } = useFilterState(allPubs);
+
+  const boroughFeatures = useMemo(
+    () => buildBoroughFeatureCollection(boroughGeojson, boroughSummaries),
+    [boroughSummaries],
+  );
+
+  const selectedBoroughFeature = useMemo(
+    () => findFeatureByName(boroughFeatures, selectedBoroughName),
+    [boroughFeatures, selectedBoroughName],
+  );
+
+  const selectedWardFeature = useMemo(
+    () => findFeatureByName(wardGeojson, selectedAreaName),
+    [selectedAreaName],
+  );
+
+  const wardFeatures = useMemo(
+    () => buildWardFeatureCollection(wardGeojson, selectedBoroughName, selectedAreaName),
+    [selectedBoroughName, selectedAreaName],
+  );
+
+  const allAreaNames = useMemo(
+    () => (wardGeojson.features || [])
+      .map((feature) => feature?.properties?.name)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
+    [],
+  );
+
+  const allBoroughNames = useMemo(
+    () => boroughFeatures.features
+      .map((feature) => feature?.properties?.name)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b)),
+    [boroughFeatures],
+  );
+
+  const filteredPubs = useMemo(() => {
+    const hasFeatures = selectedFeatures?.length > 0;
+    const hasOwnerships = selectedOwnerships?.length > 0;
+    const hasYearRange = yearRange && yearRange.min !== null && yearRange.max !== null;
+    const hasFavorites = showOnlyFavorites === true;
+    const hasAchievements = showOnlyAchievements === true;
+
+    return allPubs.filter((pub) => {
+      if (selectedWardFeature && !pubInsideFeature(pub, selectedWardFeature)) return false;
+      if (!selectedWardFeature && selectedBoroughFeature && !pubInsideFeature(pub, selectedBoroughFeature)) return false;
+      if (hasFeatures && (!pub.features || !selectedFeatures.every((feature) => pub.features.includes(feature)))) return false;
+      if (hasOwnerships && (!pub.ownership || !selectedOwnerships.includes(pub.ownership))) return false;
+      if (hasYearRange) {
+        const foundedYear = parseInt(pub.founded, 10);
+        if (!Number.isFinite(foundedYear) || foundedYear < yearRange.min || foundedYear > yearRange.max) return false;
+      }
+      if (hasFavorites && pub.isFavorite !== true) return false;
+      if (hasAchievements && (!pub.achievements || pub.achievements.length === 0)) return false;
+      return true;
+    });
+  }, [
+    allPubs,
+    selectedWardFeature,
+    selectedBoroughFeature,
+    selectedFeatures,
+    selectedOwnerships,
+    yearRange,
+    showOnlyFavorites,
+    showOnlyAchievements,
+  ]);
+
+  const pubFeatureCollection = useMemo(
+    () => buildPubFeatureCollection(filteredPubs),
+    [filteredPubs],
+  );
+
+  const mapSheetMetrics = useMemo(() => {
+    const height = mapAreaHeight > 0 ? mapAreaHeight : Dimensions.get('window').height;
+    const peek = height * 0.33;
+    const fullHeight = Math.max(height, peek + 1);
+    return {
+      peek,
+      collapsedY: fullHeight - peek,
+      hiddenY: fullHeight,
+    };
+  }, [mapAreaHeight]);
 
   useEffect(() => {
     if (!selectedPub) {
@@ -115,424 +302,660 @@ export default function MapScreen() {
     }
   }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
 
-  const FLOATING_LIFT_PX = 24;
-  /** After this many px of upward drag from collapsed, map controls are gone (snappy, not a long fade). */
-  const MAP_CONTROLS_HIDE_PX = 20;
-  // Lift tracks peek vs tab bar; opacity hides controls while expanded (they sat above z-index 1000 sheet).
-  const mapFloatingControlsStyle = useMemo(() => {
-    const lift = Math.max(mapSheetMetrics.peek - FLOATING_LIFT_PX, 0);
+  const floatingControlsStyle = useMemo(() => {
+    const lift = Math.max(mapSheetMetrics.peek - SHEET_FLOATING_LIFT_PX, 0);
     const { collapsedY, hiddenY } = mapSheetMetrics;
     const translateY = sheetTranslateY.interpolate({
       inputRange: [0, collapsedY, hiddenY],
       outputRange: [-lift, -lift, 0],
       extrapolate: 'clamp',
     });
-    const tHide =
-      collapsedY > MAP_CONTROLS_HIDE_PX + 2
-        ? collapsedY - MAP_CONTROLS_HIDE_PX
-        : collapsedY * 0.35;
+    const hideThreshold = collapsedY > MAP_CONTROLS_HIDE_PX + 2
+      ? collapsedY - MAP_CONTROLS_HIDE_PX
+      : collapsedY * 0.35;
     const opacity = sheetTranslateY.interpolate({
-      inputRange: [0, tHide, collapsedY, hiddenY],
+      inputRange: [0, hideThreshold, collapsedY, hiddenY],
       outputRange: [0, 0, 1, 1],
       extrapolate: 'clamp',
     });
-    return { opacity, transform: [{ translateY }] };
-  }, [sheetTranslateY, mapSheetMetrics.peek, mapSheetMetrics.collapsedY, mapSheetMetrics.hiddenY]);
+    return {
+      opacity,
+      transform: [{ translateY }],
+    };
+  }, [mapSheetMetrics, sheetTranslateY]);
 
-  const mapControlsBaseBottom = mapEdgeContentInset(insets.bottom);
+  const mapControlsBaseBottom = Math.max(insets.bottom, 8) + 4;
 
-  // --- Pub merging ---
-  const mergePubs = useCallback((incomingPubs) => {
-    if (!Array.isArray(incomingPubs) || incomingPubs.length === 0) return;
-    setAllPubs((current) => {
-      if (!Array.isArray(current) || current.length === 0) return incomingPubs;
-      const pubMap = new Map(current.map((p) => [p.id, p]));
-      let didChange = false;
-      incomingPubs.forEach((pub) => {
-        if (!pub?.id) return;
-        const existing = pubMap.get(pub.id);
-        if (!existing) { pubMap.set(pub.id, pub); didChange = true; return; }
-        if (Object.keys(pub).some((k) => existing[k] !== pub[k])) {
-          pubMap.set(pub.id, { ...existing, ...pub });
-          didChange = true;
-        }
-      });
-      return didChange ? Array.from(pubMap.values()) : current;
+  const fitFeature = useCallback((feature, animationDuration = 800) => {
+    const bounds = getFeatureBounds(feature);
+    if (!bounds || !cameraRef.current) return;
+    cameraRef.current.fitBounds(bounds, {
+      padding: {
+        top: 140,
+        right: 48,
+        bottom: 180,
+        left: 48,
+      },
+      duration: animationDuration,
+      easing: 'ease',
     });
   }, []);
 
-  // --- Viewport pub loading ---
-  const handleViewportPubsLoaded = useCallback((pubs) => {
-    if (Array.isArray(pubs) && pubs.length > 0) {
-      mergePubs(pubs);
-      if (!initialPubsLoadedRef.current && setIsInitialPubsLoaded) {
-        initialPubsLoadedRef.current = true;
-        setIsInitialPubsLoaded(true);
-      }
-    }
-  }, [mergePubs, setIsInitialPubsLoaded]);
-
-  const { loadPubsForRegion: loadPubsForViewportRegion, isLoading: isLoadingViewportPubs } = useViewportPubs(
-    mapRegion || lastCommittedRegionRef.current || null,
-    handleViewportPubsLoaded,
-  );
+  const centerOnPub = useCallback((pub) => {
+    if (!cameraRef.current || !Number.isFinite(pub?.lon) || !Number.isFinite(pub?.lat)) return;
+    cameraRef.current.easeTo({
+      center: [pub.lon, pub.lat],
+      zoom: 15.2,
+      duration: 700,
+    });
+  }, []);
 
   useEffect(() => {
-    if (!isLoadingViewportPubs && !initialPubsLoadedRef.current && setIsInitialPubsLoaded) {
-      const timer = setTimeout(() => {
-        if (!initialPubsLoadedRef.current) {
-          initialPubsLoadedRef.current = true;
-          setIsInitialPubsLoaded(true);
+    setIsInitialPubsLoaded?.(true);
+  }, [setIsInitialPubsLoaded]);
+
+  useEffect(() => () => {
+    if (pubFetchTimeoutRef.current) {
+      clearTimeout(pubFetchTimeoutRef.current);
+    }
+  }, []);
+
+  const mergeFetchedPubs = useCallback((incomingPubs) => {
+    setAllPubs((current) => {
+      const nextById = new Map(current.map((pub) => [pub.id, pub]));
+      (Array.isArray(incomingPubs) ? incomingPubs : []).forEach((pub) => {
+        if (pub?.id) nextById.set(pub.id, pub);
+      });
+      return Array.from(nextById.values());
+    });
+  }, []);
+
+  const scheduleViewportPubFetch = useCallback((nextBounds, zoomLevel) => {
+    if (!isFocused) return;
+    if (!nextBounds) return;
+    const effectiveZoom = Number.isFinite(zoomLevel) ? zoomLevel : mapZoomRef.current;
+    if (!Number.isFinite(effectiveZoom) || effectiveZoom < MIN_PUB_FETCH_ZOOM) return;
+
+    const bufferedBounds = expandBounds(nextBounds);
+    if (!bufferedBounds) return;
+    if (boundsContain(loadedPubBoundsRef.current, bufferedBounds)) return;
+
+    if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+    pubFetchTimeoutRef.current = setTimeout(() => {
+      requestViewportPubs(bufferedBounds);
+    }, 120);
+  }, [isFocused, requestViewportPubs]);
+
+  const requestViewportPubs = useCallback((boundsToFetch) => {
+    if (!boundsToFetch || inFlightPubFetchRef.current) return;
+    inFlightPubFetchRef.current = true;
+    const token = latestPubFetchTokenRef.current + 1;
+    latestPubFetchTokenRef.current = token;
+
+    fetchLondonPubs({ bounds: boundsToFetch })
+      .then((pubs) => {
+        if (latestPubFetchTokenRef.current !== token) return;
+        mergeFetchedPubs(pubs);
+        loadedPubBoundsRef.current = mergeBounds(loadedPubBoundsRef.current, boundsToFetch);
+      })
+      .catch((error) => {
+        console.error('Failed to load viewport pubs:', error);
+      })
+      .finally(() => {
+        if (latestPubFetchTokenRef.current === token) {
+          inFlightPubFetchRef.current = false;
         }
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoadingViewportPubs, setIsInitialPubsLoaded]);
+      });
+  }, [mergeFetchedPubs]);
 
-  // --- Borough tracking ---
   useEffect(() => {
-    const region = mapRegion || lastCommittedRegionRef.current;
-    if (!region || !Array.isArray(boroughSummaries) || boroughSummaries.length === 0) {
-      setActiveBoroughs(focusedBorough ? [focusedBorough] : []);
+    if (!viewportBounds) return;
+    scheduleViewportPubFetch(viewportBounds, mapZoomRef.current);
+
+    return () => {
+      if (pubFetchTimeoutRef.current) {
+        clearTimeout(pubFetchTimeoutRef.current);
+      }
+    };
+  }, [viewportBounds, scheduleViewportPubFetch]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const setupLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          if (cancelled) return;
+          const nextLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          };
+          setCurrentLocation(nextLocation);
+          if (!initialCameraSetRef.current && !hasUserInteractedRef.current && cameraRef.current) {
+            initialCameraSetRef.current = true;
+            cameraRef.current.jumpTo({
+              center: [nextLocation.longitude, nextLocation.latitude],
+              zoom: 11.6,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Location setup error:', error);
+      } finally {
+        if (!cancelled) setIsLocationLoaded?.(true);
+      }
+    };
+
+    setupLocation();
+
+    const keyboardShow = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+      const top = event.endCoordinates.screenY !== undefined
+        ? event.endCoordinates.screenY
+        : Dimensions.get('window').height - event.endCoordinates.height;
+      setKeyboardTop(top);
+    });
+    const keyboardHide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+      setKeyboardTop(0);
+    });
+
+    return () => {
+      cancelled = true;
+      keyboardShow.remove();
+      keyboardHide.remove();
+    };
+  }, [setIsLocationLoaded]);
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (!trimmed || !showSuggestions) {
+      setPubSuggestions([]);
       return;
     }
-    const center = { latitude: region.latitude, longitude: region.longitude };
-    const nearest = boroughSummaries
-      .filter((s) => s?.center && Number.isFinite(s.center.latitude) && Number.isFinite(s.center.longitude))
-      .map((s) => ({ borough: s.borough, distance: distanceBetween(s.center, center) }))
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, BOROUGH_LIMIT)
-      .map((item) => item.borough);
-    if (focusedBorough && nearest.indexOf(focusedBorough) === -1) nearest.unshift(focusedBorough);
-    setActiveBoroughs(nearest);
-  }, [mapRegion, boroughSummaries, focusedBorough]);
 
-  const allBoroughNames = useMemo(() => {
-    const set = new Set();
-    if (Array.isArray(boroughSummaries)) boroughSummaries.forEach((s) => { if (s?.borough) set.add(s.borough); });
-    allPubs.forEach((p) => { if (typeof p?.borough === 'string' && p.borough.trim().length > 0) set.add(p.borough.trim()); });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [boroughSummaries, allPubs]);
+    const results = allPubs
+      .filter((pub) => typeof pub?.name === 'string' && pub.name.toLowerCase().includes(trimmed))
+      .slice(0, 5);
+    setPubSuggestions(results);
+  }, [allPubs, searchQuery, showSuggestions]);
 
-  const nearestAreaKeys = useNearestAreaKeys(mapRegion, areaStatsMap, activeBoroughs, lastCommittedRegionRef);
+  useEffect(() => {
+    if (!selectedPub) return;
+    const existsInFilteredSet = filteredPubs.some((pub) => pub.id === selectedPub.id);
+    if (!existsInFilteredSet) {
+      setSelectedPub(null);
+    }
+  }, [filteredPubs, selectedPub]);
 
-  // --- Filtered pubs ---
-  const filteredPubs = useMemo(() => {
-    if (!allPubs || allPubs.length === 0) return [];
-    const basePubs = allPubs.filter((pub) => {
-      const areaName = pub.area ? pub.area.trim() : '';
-      if (!areaName) return false;
-      const key = areaName.toLowerCase();
-      const stats = areaStatsMap?.[key];
-      if (!stats) return false;
-      if (markerMode === MARKER_MODES.BOROUGHS) return true;
-      if (markerMode === MARKER_MODES.AREAS) {
-        if (!stats.borough) return false;
-        if (focusedBorough) return stats.borough === focusedBorough;
-        return activeBoroughs.length === 0 || activeBoroughs.includes(stats.borough);
-      }
-      if (markerMode === MARKER_MODES.PUBS) {
-        if (focusedBorough && stats?.borough !== focusedBorough) return false;
-        return nearestAreaKeys.length === 0 || nearestAreaKeys.includes(key);
-      }
-      return true;
-    });
-    const hasF = selectedFeatures?.length > 0;
-    const hasO = selectedOwnerships?.length > 0;
-    const hasY = yearRange && yearRange.min !== null && yearRange.max !== null;
-    const hasA = selectedArea && selectedArea.trim().length > 0;
-    const hasFav = showOnlyFavorites === true;
-    const hasAch = showOnlyAchievements === true;
-    if (!hasF && !hasO && !hasY && !hasA && !hasFav && !hasAch) return basePubs;
-    return basePubs.filter((pub) => {
-      if (hasF && (!pub.features || !selectedFeatures.every((f) => pub.features.includes(f)))) return false;
-      if (hasO && (!pub.ownership || !selectedOwnerships.includes(pub.ownership))) return false;
-      if (hasY) { const y = parseInt(pub.founded, 10); if (!pub.founded || isNaN(y) || y < yearRange.min || y > yearRange.max) return false; }
-      if (hasA && (!pub.area || pub.area.trim().toLowerCase() !== selectedArea.trim().toLowerCase())) return false;
-      if (hasFav && pub.isFavorite !== true) return false;
-      if (hasAch && (!pub.achievements || pub.achievements.length === 0)) return false;
-      return true;
-    });
-  }, [allPubs, markerMode, selectedFeatures, selectedOwnerships, yearRange, selectedArea, showOnlyFavorites, showOnlyAchievements, areaStatsMap, activeBoroughs, nearestAreaKeys, focusedBorough]);
+  const areaSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return allAreaNames.slice(0, 4);
+    const query = searchQuery.trim().toLowerCase();
+    return allAreaNames.filter((name) => name.toLowerCase().includes(query)).slice(0, 4);
+  }, [allAreaNames, searchQuery]);
 
-  // --- Pub handlers ---
-  const handlePubPress = useCallback((pub) => setSelectedPub(pub), []);
   const closeCard = useCallback(() => setSelectedPub(null), []);
 
   const handleToggleVisited = useCallback(async (pubId) => {
     const originalPubs = [...allPubs];
     const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const newState = !allPubs.find((p) => p.id === pubId)?.isVisited;
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isVisited: newState });
-    setAllPubs(allPubs.map((p) => (p.id === pubId ? { ...p, isVisited: newState } : p)));
-    try { await togglePubVisited(pubId); refreshUserStats(); } catch {
+    const newState = !allPubs.find((pub) => pub.id === pubId)?.isVisited;
+
+    if (selectedPub?.id === pubId) {
+      setSelectedPub({ ...selectedPub, isVisited: newState });
+    }
+
+    setAllPubs((current) => current.map((pub) => (
+      pub.id === pubId ? { ...pub, isVisited: newState } : pub
+    )));
+
+    try {
+      await togglePubVisited(pubId);
+      refreshUserStats();
+    } catch {
       setAllPubs(originalPubs);
       if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
     }
-  }, [allPubs, selectedPub, refreshUserStats]);
+  }, [allPubs, refreshUserStats, selectedPub]);
 
   const handleToggleFavorite = useCallback(async (pubId) => {
     const originalPubs = [...allPubs];
     const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const newState = !allPubs.find((p) => p.id === pubId)?.isFavorite;
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isFavorite: newState });
-    setAllPubs(allPubs.map((p) => (p.id === pubId ? { ...p, isFavorite: newState } : p)));
-    try { await togglePubFavorite(pubId); } catch {
+    const newState = !allPubs.find((pub) => pub.id === pubId)?.isFavorite;
+
+    if (selectedPub?.id === pubId) {
+      setSelectedPub({ ...selectedPub, isFavorite: newState });
+    }
+
+    setAllPubs((current) => current.map((pub) => (
+      pub.id === pubId ? { ...pub, isFavorite: newState } : pub
+    )));
+
+    try {
+      await togglePubFavorite(pubId);
+    } catch {
       setAllPubs(originalPubs);
       if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
     }
   }, [allPubs, selectedPub]);
 
-  // --- Navigation helpers ---
-  const animateToRegion = useCallback((newRegion, loadPubs = true) => {
-    isNavigatingRef.current = true;
-    commitMapRegion(newRegion);
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(newRegion, 1000);
-      setTimeout(() => {
-        isNavigatingRef.current = false;
-        if (loadPubs) loadPubsForViewportRegion?.(newRegion);
-      }, 1050);
-    } else {
-      isNavigatingRef.current = false;
-      if (loadPubs) loadPubsForViewportRegion?.(newRegion);
-    }
-  }, [commitMapRegion, loadPubsForViewportRegion]);
-
-  // --- Search ---
-  const searchBorough = useCallback(async (boroughName) => {
-    if (!boroughName || typeof boroughName !== 'string' || !boroughName.trim()) return false;
-    const normalizedLower = boroughName.trim().toLowerCase();
-    let summary = boroughSummaries?.find((s) => s?.borough?.toLowerCase() === normalizedLower) || null;
-    let center = summary?.center;
-    let bounds = summary?.bounds;
-    if (!center || !Number.isFinite(center.latitude)) {
-      const boroughPubs = allPubs.filter((p) => p?.borough?.trim().toLowerCase() === normalizedLower);
-      const validCoords = boroughPubs.map((p) => ({ lat: parseFloat(p.lat), lon: parseFloat(p.lon) })).filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon));
-      if (validCoords.length > 0) {
-        center = { latitude: validCoords.reduce((s, c) => s + c.lat, 0) / validCoords.length, longitude: validCoords.reduce((s, c) => s + c.lon, 0) / validCoords.length };
-        bounds = { north: Math.max(...validCoords.map((c) => c.lat)), south: Math.min(...validCoords.map((c) => c.lat)), east: Math.max(...validCoords.map((c) => c.lon)), west: Math.min(...validCoords.map((c) => c.lon)) };
-      }
-    }
-    if (!center || !Number.isFinite(center.latitude)) return false;
-    const latSpan = bounds ? Math.max(Math.abs(bounds.north - bounds.south) * 1.2, AREA_ENTER_DELTA) : BOROUGH_EXIT_DELTA * 0.6;
-    const lonSpan = bounds ? Math.max(Math.abs(bounds.east - bounds.west) * 1.2, AREA_ENTER_DELTA) : BOROUGH_EXIT_DELTA * 0.6;
-    const maxDelta = Math.max(BOROUGH_EXIT_DELTA - 0.01, AREA_ENTER_DELTA);
-    setSelectedArea(null);
-    setFocusedBorough(boroughName.trim());
+  const selectBorough = useCallback((feature, updateSearch = true) => {
+    const boroughName = feature?.properties?.name;
+    if (!boroughName) return;
+    hasUserInteractedRef.current = true;
+    setSelectedBoroughName(boroughName);
+    setSelectedAreaName(null);
     setSelectedPub(null);
-    animateToRegion({ latitude: center.latitude, longitude: center.longitude, latitudeDelta: Math.min(latSpan, maxDelta), longitudeDelta: Math.min(lonSpan, maxDelta) });
-    return true;
-  }, [boroughSummaries, allPubs, animateToRegion]);
+    if (updateSearch) setSearchQuery(boroughName);
+    fitFeature(feature);
+  }, [fitFeature]);
 
-  const searchArea = useCallback(async (areaName, applyAreaFilter = false) => {
-    setFocusedBorough(null);
-    const pubsInArea = allPubs.filter((p) => p.area?.trim().toLowerCase() === areaName.toLowerCase());
-    const validPubs = pubsInArea.filter((p) => p.lat && p.lon);
-    if (validPubs.length > 0) {
-      const centerLat = validPubs.reduce((s, p) => s + parseFloat(p.lat), 0) / validPubs.length;
-      const centerLon = validPubs.reduce((s, p) => s + parseFloat(p.lon), 0) / validPubs.length;
-      const lats = validPubs.map((p) => parseFloat(p.lat));
-      const lons = validPubs.map((p) => parseFloat(p.lon));
-      const latDelta = Math.max((Math.max(...lats) - Math.min(...lats)) * 2.5, 0.01);
-      const lonDelta = Math.max((Math.max(...lons) - Math.min(...lons)) * 2.5, 0.01);
-      setSelectedPub(null);
-      if (applyAreaFilter) setSelectedArea(areaName);
-      animateToRegion({ latitude: centerLat, longitude: centerLon, latitudeDelta: Math.min(latDelta, 0.05), longitudeDelta: Math.min(lonDelta, 0.05) });
-      return true;
-    }
-    try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${areaName}, UK`)}&format=json&limit=1`, { headers: { 'User-Agent': 'PubTrackerApp/1.0' } });
-      const data = await resp.json();
-      if (data?.length > 0) {
-        setSelectedPub(null);
-        animateToRegion({ latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon), latitudeDelta: 0.02, longitudeDelta: 0.02 });
-        return true;
-      }
-    } catch (error) { console.error('Area search error:', error); }
-    return false;
-  }, [allPubs, animateToRegion]);
+  const selectArea = useCallback((feature, updateSearch = true) => {
+    const areaName = feature?.properties?.name;
+    if (!areaName) return;
+    hasUserInteractedRef.current = true;
+    setSelectedAreaName(areaName);
+    setSelectedBoroughName(feature?.properties?.borough || null);
+    setSelectedPub(null);
+    if (updateSearch) setSearchQuery(areaName);
+    fitFeature(feature);
+  }, [fitFeature]);
 
-  const searchPub = useCallback((pub) => {
-    if (!pub.lat || !pub.lon) return false;
+  const selectPub = useCallback((pub, updateSearch = true) => {
+    if (!pub) return;
+    hasUserInteractedRef.current = true;
+    setSelectedAreaName(null);
+    setSelectedBoroughName(null);
     setSelectedPub(pub);
-    animateToRegion({ latitude: parseFloat(pub.lat), longitude: parseFloat(pub.lon), latitudeDelta: 0.01, longitudeDelta: 0.01 });
-    return true;
-  }, [animateToRegion]);
+    if (updateSearch) setSearchQuery(pub.name || '');
+    centerOnPub(pub);
+  }, [centerOnPub]);
 
-  const handleSearch = useCallback(async (queryOverride = null) => {
-    const queryToUse = queryOverride !== null ? queryOverride : searchQuery;
-    if (!queryToUse.trim()) return;
+  const handleSearch = useCallback((queryOverride = null) => {
+    const rawQuery = queryOverride !== null ? queryOverride : searchQuery;
+    const query = rawQuery.trim().toLowerCase();
+    if (!query) return;
+
     setShowSuggestions(false);
     Keyboard.dismiss();
-    const query = queryToUse.trim().toLowerCase();
-    const matchingBorough = allBoroughNames.find((b) => b.toLowerCase() === query || b.toLowerCase().includes(query));
-    if (matchingBorough) { await searchBorough(matchingBorough); return; }
-    const matchingArea = allAreas.find((a) => a.toLowerCase().includes(query));
-    if (matchingArea) { await searchArea(matchingArea); return; }
-    try {
-      const pubResults = await searchPubsByName(query, 1);
-      if (pubResults.length > 0) { searchPub(pubResults[0]); return; }
-    } catch { /* fall through to geocoding */ }
-    try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${queryToUse}, UK`)}&format=json&limit=1`, { headers: { 'User-Agent': 'PubTrackerApp/1.0' } });
-      const data = await resp.json();
-      if (data?.length > 0) {
-        setSelectedPub(null);
-        const newRegion = { latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon), latitudeDelta: 0.02, longitudeDelta: 0.02 };
-        commitMapRegion(newRegion);
-        mapRef.current?.animateToRegion(newRegion, 1000);
-        setTimeout(() => loadPubsForViewportRegion?.(newRegion), 1100);
-      }
-    } catch (error) { console.error('Search error:', error); }
-  }, [searchQuery, allAreas, allBoroughNames, searchArea, searchPub, searchBorough, commitMapRegion, loadPubsForViewportRegion]);
+
+    const boroughMatch = findFeatureByName(boroughFeatures, query)
+      || boroughFeatures.features.find((feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query));
+    if (boroughMatch) {
+      selectBorough(boroughMatch, true);
+      return;
+    }
+
+    const wardMatch = findFeatureByName(wardGeojson, query)
+      || wardGeojson.features.find((feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query));
+    if (wardMatch) {
+      selectArea(wardMatch, true);
+      return;
+    }
+
+    const pubMatch = allPubs.find((pub) => pub?.name?.toLowerCase?.() === query)
+      || allPubs.find((pub) => pub?.name?.toLowerCase?.().includes?.(query));
+    if (pubMatch) {
+      selectPub(pubMatch, true);
+    }
+  }, [allPubs, boroughFeatures, searchQuery, selectArea, selectBorough, selectPub]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
-    setSelectedArea(null);
-    setFocusedBorough(null);
+    hasUserInteractedRef.current = true;
+    setSelectedAreaName(null);
+    setSelectedBoroughName(null);
     setShowSuggestions(false);
+
     const currentArea = route.params?.areaToSearch || processedAreaRef.current;
     if (currentArea) clearedAreaRef.current = currentArea;
+
     const currentBorough = route.params?.boroughToSearch || processedBoroughRef.current;
     if (currentBorough) clearedBoroughRef.current = currentBorough;
-    const { areaToSearch, boroughToSearch, ...remainingParams } = route.params || {};
+
+    const { areaToSearch, boroughToSearch, areaCenterLat, areaCenterLon, areaBorough, ...remainingParams } = route.params || {};
     navigation.setParams(remainingParams);
     processedAreaRef.current = null;
     processedBoroughRef.current = null;
-  }, [route.params, navigation]);
+  }, [navigation, route.params]);
 
-  const handleAreaPress = useCallback(async (area) => {
-    setSearchQuery(area);
+  const handleAreaPress = useCallback((areaName) => {
+    const feature = findFeatureByName(wardGeojson, areaName);
+    if (feature) selectArea(feature, true);
     setShowSuggestions(false);
     Keyboard.dismiss();
-    await searchArea(area);
-  }, [searchArea]);
+  }, [selectArea]);
 
   const handlePubSuggestionPress = useCallback((pub) => {
-    setSearchQuery(pub.name);
     setShowSuggestions(false);
     Keyboard.dismiss();
-    searchPub(pub);
-  }, [searchPub]);
+    selectPub(pub, true);
+  }, [selectPub]);
 
-  // --- Route param handling ---
   useFocusEffect(
     useCallback(() => {
       const areaToSearch = route.params?.areaToSearch;
       const boroughToSearch = route.params?.boroughToSearch;
-      if (areaToSearch && typeof areaToSearch === 'string' && areaToSearch.trim().length > 0 &&
-          areaToSearch !== processedAreaRef.current && allPubs.length > 0 && areaToSearch !== clearedAreaRef.current) {
-        processedAreaRef.current = areaToSearch;
-        clearedAreaRef.current = null;
-        searchArea(areaToSearch, true);
-        setSearchQuery(areaToSearch);
-      } else if (!areaToSearch) { processedAreaRef.current = null; }
-      if (boroughToSearch && typeof boroughToSearch === 'string' && boroughToSearch.trim().length > 0 &&
-          boroughToSearch !== processedBoroughRef.current && allPubs.length > 0 && boroughToSearch !== clearedBoroughRef.current) {
-        processedBoroughRef.current = boroughToSearch;
-        clearedBoroughRef.current = null;
-        searchBorough(boroughToSearch);
-        setSearchQuery(boroughToSearch);
-      } else if (!boroughToSearch) { processedBoroughRef.current = null; }
-    }, [route.params?.areaToSearch, route.params?.boroughToSearch, allPubs.length, searchArea, searchBorough]),
+      const areaCenterLat = Number(route.params?.areaCenterLat);
+      const areaCenterLon = Number(route.params?.areaCenterLon);
+
+      if (
+        areaToSearch &&
+        areaToSearch !== processedAreaRef.current &&
+        areaToSearch !== clearedAreaRef.current
+      ) {
+        let feature = findFeatureByName(wardGeojson, areaToSearch);
+        if (!feature && Number.isFinite(areaCenterLat) && Number.isFinite(areaCenterLon)) {
+          feature = findFeatureContainingCoordinate(wardGeojson, areaCenterLat, areaCenterLon);
+        }
+        if (feature) {
+          processedAreaRef.current = areaToSearch;
+          clearedAreaRef.current = null;
+          selectArea(feature, false);
+          setSearchQuery(feature?.properties?.name || areaToSearch);
+        } else if (Number.isFinite(areaCenterLat) && Number.isFinite(areaCenterLon) && cameraRef.current) {
+          processedAreaRef.current = areaToSearch;
+          clearedAreaRef.current = null;
+          hasUserInteractedRef.current = true;
+          setSelectedPub(null);
+          setSelectedAreaName(areaToSearch);
+          setSelectedBoroughName(route.params?.areaBorough || null);
+          setSearchQuery(areaToSearch);
+          cameraRef.current.easeTo({
+            center: [areaCenterLon, areaCenterLat],
+            zoom: Math.max(mapZoomRef.current, 13.2),
+            duration: 700,
+          });
+        }
+      } else if (!areaToSearch) {
+        processedAreaRef.current = null;
+      }
+
+      if (
+        boroughToSearch &&
+        boroughToSearch !== processedBoroughRef.current &&
+        boroughToSearch !== clearedBoroughRef.current
+      ) {
+        const feature = findFeatureByName(boroughFeatures, boroughToSearch);
+        if (feature) {
+          processedBoroughRef.current = boroughToSearch;
+          clearedBoroughRef.current = null;
+          selectBorough(feature, false);
+          setSearchQuery(boroughToSearch);
+        }
+      } else if (!boroughToSearch) {
+        processedBoroughRef.current = null;
+      }
+    }, [boroughFeatures, route.params, selectArea, selectBorough]),
   );
 
-  // --- Suggestions ---
-  const areaSuggestions = useMemo(() => {
-    if (!searchQuery.trim()) return allAreas.slice(0, 3);
-    const q = searchQuery.trim().toLowerCase();
-    return allAreas.filter((a) => a.toLowerCase().includes(q)).slice(0, 3);
-  }, [searchQuery, allAreas]);
+  const handlePubPress = useCallback(async (event) => {
+    hasUserInteractedRef.current = true;
 
-  const [pubSuggestions, setPubSuggestions] = useState([]);
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (!q || !showSuggestions) { setPubSuggestions([]); return; }
-    const timer = setTimeout(async () => {
+    const features = Array.isArray(event?.nativeEvent?.features) ? event.nativeEvent.features : [];
+    const pubFeature = features.find((feature) => !feature?.properties?.cluster && feature?.properties?.pubId);
+    if (pubFeature) {
+      const pubId = pubFeature.properties?.pubId;
+      const pub = allPubs.find((item) => item.id === pubId);
+      if (pub) {
+        setSelectedPub(pub);
+      }
+      return;
+    }
+
+    const clusterFeature = features.find((feature) => feature?.properties?.cluster);
+    if (clusterFeature && pubSourceRef.current) {
       try {
-        const results = await searchPubsByName(q, 5);
-        setPubSuggestions(results);
-      } catch { setPubSuggestions([]); }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, showSuggestions]);
+        const zoom = await pubSourceRef.current.getClusterExpansionZoom(clusterFeature.properties?.cluster_id);
+        cameraRef.current?.easeTo({
+          center: clusterFeature.geometry.coordinates,
+          zoom,
+          duration: 500,
+        });
+      } catch (error) {
+        console.error('Failed to expand cluster:', error);
+      }
+    }
+  }, [allPubs]);
 
-  // --- Area marker press ---
-  const handleAreaMarkerPress = useCallback(async (areaName) => {
-    const areaStats = calculateAreaStats(areaName, filteredPubs);
-    if (areaStats.pubs.length === 0) return;
-    const center = getAreaCenter(areaStats.pubs);
-    if (!center) return;
-    const lats = areaStats.pubs.map((p) => parseFloat(p.lat));
-    const lons = areaStats.pubs.map((p) => parseFloat(p.lon));
-    const latDelta = Math.max((Math.max(...lats) - Math.min(...lats)) * 2.5, 0.01);
-    const lonDelta = Math.max((Math.max(...lons) - Math.min(...lons)) * 2.5, 0.01);
-    setSelectedPub(null);
-    animateToRegion({
-      latitude: center.latitude,
-      longitude: center.longitude,
-      latitudeDelta: Math.max(Math.min(latDelta, AREA_EXIT_DELTA - 0.005), 0.01),
-      longitudeDelta: Math.max(Math.min(lonDelta, AREA_EXIT_DELTA - 0.005), 0.01),
-    });
-  }, [filteredPubs, calculateAreaStats, animateToRegion]);
+  const handleCurrentLocation = useCallback(async () => {
+    try {
+      hasUserInteractedRef.current = true;
 
-  // --- Borough marker press ---
-  const handleBoroughMarkerPress = useCallback((summary) => {
-    if (!summary?.center) return;
-    const bounds = summary.bounds;
-    const latSpan = bounds ? Math.max((bounds.north - bounds.south) * 1.6, BOROUGH_EXIT_DELTA) : BOROUGH_EXIT_DELTA;
-    const lonSpan = bounds ? Math.max((bounds.east - bounds.west) * 1.6, BOROUGH_EXIT_DELTA) : BOROUGH_EXIT_DELTA;
-    setSelectedPub(null);
-    animateToRegion({ latitude: summary.center.latitude, longitude: summary.center.longitude, latitudeDelta: latSpan, longitudeDelta: lonSpan });
-  }, [animateToRegion]);
+      let nextLocation = currentLocation;
 
-  // --- Marker elements ---
-  const areaMarkerCacheRef = useRef({ key: null, elements: [] });
-  const areaMarkerElements = useMemo(() => {
-    if (markerMode === MARKER_MODES.BOROUGHS) return [];
-    const entries = Object.entries(areaStatsMap || {})
-      .map(([key, s]) => ({ areaKey: key, stats: s, completion: typeof s?.completionPercentage === 'number' ? s.completionPercentage : s?.totalPubs ? (s.visitedPubs / s.totalPubs) * 100 : 0 }))
-      .filter(({ stats: s }) => {
-        if (!s?.center || !s.totalPubs) return false;
-        if (markerMode === MARKER_MODES.AREAS) {
-          if (!s.borough) return false;
-          if (focusedBorough) return s.borough === focusedBorough;
-          return activeBoroughs.length === 0 || activeBoroughs.includes(s.borough);
-        }
-        return true;
-      })
-      .sort((a, b) => (a.stats.name || '').localeCompare(b.stats.name || ''));
-    const cacheKey = JSON.stringify(entries.map(({ areaKey, stats: s, completion: c }) => [areaKey, Number(s.center.latitude.toFixed(5)), Number(s.center.longitude.toFixed(5)), Number(c.toFixed(4))]));
-    if (areaMarkerCacheRef.current.key === cacheKey) return areaMarkerCacheRef.current.elements;
-    const els = entries.map(({ areaKey, stats: s, completion: c }) => (
-      <Marker key={`area-${areaKey}`} coordinate={s.center} onPress={() => handleAreaMarkerPress(s.name)}>
-        <View style={{ backgroundColor: 'transparent' }}><AreaIcon size={36} color={interpolateColor(c)} /></View>
-      </Marker>
-    ));
-    areaMarkerCacheRef.current = { key: cacheKey, elements: els };
-    return els;
-  }, [markerMode, areaStatsMap, handleAreaMarkerPress, activeBoroughs, focusedBorough]);
+      if (!nextLocation) {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
 
-  const pubMarkerElements = useMemo(() =>
-    filteredPubs.filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number')
-      .map((p) => <PubMarker key={p.id} pub={p} onPress={handlePubPress} />),
-  [filteredPubs, handlePubPress]);
+        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        nextLocation = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        };
+        setCurrentLocation(nextLocation);
+      }
 
-  // --- Missing pub ---
-  const openMissingPubModal = useCallback(() => { setMissingPubError(null); setIsMissingPubModalVisible(true); }, []);
-  const closeMissingPubModal = useCallback(() => { if (!isSubmittingMissingPub) { setIsMissingPubModalVisible(false); setMissingPubError(null); } }, [isSubmittingMissingPub]);
+      if (!nextLocation) return;
+
+      cameraRef.current?.easeTo({
+        center: [nextLocation.longitude, nextLocation.latitude],
+        zoom: Math.max(mapZoomRef.current, 14.5),
+        duration: 700,
+      });
+    } catch (error) {
+      console.error('Error getting current location:', error);
+    }
+  }, [currentLocation]);
+
+  const openMissingPubModal = useCallback(() => {
+    setMissingPubError(null);
+    setIsMissingPubModalVisible(true);
+  }, []);
+
+  const closeMissingPubModal = useCallback(() => {
+    if (!isSubmittingMissingPub) {
+      setIsMissingPubModalVisible(false);
+      setMissingPubError(null);
+    }
+  }, [isSubmittingMissingPub]);
+
   const handleSubmitMissingPub = useCallback(async ({ pubName, pubLocation }) => {
     setIsSubmittingMissingPub(true);
     setMissingPubError(null);
-    try { await submitMissingPubReport(pubName, pubLocation); setIsMissingPubModalVisible(false); setIsMissingPubSuccessVisible(true); }
-    catch (error) { setMissingPubError(error?.message || 'Unable to submit report right now. Please try again in a moment.'); }
-    finally { setIsSubmittingMissingPub(false); }
+    try {
+      await submitMissingPubReport(pubName, pubLocation);
+      setIsMissingPubModalVisible(false);
+      setIsMissingPubSuccessVisible(true);
+    } catch (error) {
+      setMissingPubError(error?.message || 'Unable to submit report right now. Please try again in a moment.');
+    } finally {
+      setIsSubmittingMissingPub(false);
+    }
   }, []);
 
-  // --- Render ---
+  const currentLocationShape = useMemo(() => {
+    if (!currentLocation) return null;
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Point',
+            coordinates: [currentLocation.longitude, currentLocation.latitude],
+          },
+        },
+      ],
+    };
+  }, [currentLocation]);
+
   return (
-    <View style={styles.container} onLayout={(e) => setMapAreaHeight(e.nativeEvent.layout.height)}>
+    <View style={baseStyles.container} onLayout={(event) => setMapAreaHeight(event.nativeEvent.layout.height)}>
+      <Map
+        style={StyleSheet.absoluteFillObject}
+        mapStyle={MAP_STYLE}
+        logo={false}
+        compass={false}
+        attributionPosition={{ bottom: 8, left: 8 }}
+        androidView="surface"
+        touchPitch={false}
+        touchRotate={false}
+        onRegionDidChange={(event) => {
+          const feature = event?.nativeEvent;
+          const zoomLevel = Number.isFinite(feature?.zoomLevel) ? feature.zoomLevel : feature?.zoom;
+          if (Number.isFinite(zoomLevel)) {
+            mapZoomRef.current = zoomLevel;
+          }
+          const nextBounds = parseVisibleBounds(feature?.visibleBounds);
+          if (nextBounds) {
+            setViewportBounds((prev) => {
+              if (
+                prev &&
+                Math.abs(prev.north - nextBounds.north) < 0.0005 &&
+                Math.abs(prev.south - nextBounds.south) < 0.0005 &&
+                Math.abs(prev.east - nextBounds.east) < 0.0005 &&
+                Math.abs(prev.west - nextBounds.west) < 0.0005
+              ) {
+                return prev;
+              }
+              return nextBounds;
+            });
+            scheduleViewportPubFetch(nextBounds, zoomLevel);
+          }
+        }}
+        onDidFinishLoadingMap={() => console.log('MapLibre map loaded')}
+        onDidFailLoadingMap={() => console.log('MapLibre map failed to load')}
+        onDidFinishLoadingStyle={() => console.log('MapLibre style loaded')}
+      >
+        <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
+        <Images images={{ pubVisited: PUB_ICON_VISITED, pubUnvisited: PUB_ICON_UNVISITED }} />
+
+        <GeoJSONSource id="boroughs" data={boroughFeatures}>
+          <Layer
+            type="fill"
+            id="borough-fill"
+            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            paint={{
+              'fill-color': ['get', 'fillColor'],
+              'fill-opacity': 0.24,
+            }}
+          />
+          <Layer
+            type="line"
+            id="borough-line"
+            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            paint={{
+              'line-color': COLORS.charcoal,
+              'line-width': 1.2,
+              'line-opacity': 0.55,
+            }}
+          />
+        </GeoJSONSource>
+
+        <GeoJSONSource id="wards" data={wardFeatures}>
+          <Layer
+            type="fill"
+            id="ward-fill"
+            minzoom={ZOOM_LEVELS.WARDS_MIN}
+            maxzoom={ZOOM_LEVELS.WARDS_MAX}
+            paint={{
+              'fill-color': ['get', 'fillColor'],
+              'fill-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.18, 0.08],
+            }}
+          />
+          <Layer
+            type="line"
+            id="ward-line"
+            minzoom={ZOOM_LEVELS.WARDS_MIN}
+            maxzoom={ZOOM_LEVELS.WARDS_MAX}
+            paint={{
+              'line-color': ['case', ['boolean', ['get', 'isSelected'], false], COLORS.amber, COLORS.mediumGrey],
+              'line-width': ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.8],
+              'line-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.55],
+            }}
+          />
+        </GeoJSONSource>
+
+        <GeoJSONSource
+          id="pubs"
+          ref={pubSourceRef}
+          data={pubFeatureCollection}
+          cluster={ENABLE_PUB_CLUSTERS}
+          clusterRadius={42}
+          clusterMaxZoom={13}
+          onPress={handlePubPress}
+          hitbox={{ top: 13, right: 13, bottom: 13, left: 13 }}
+        >
+          <Layer
+            type="circle"
+            id="pub-clusters"
+            minzoom={ZOOM_LEVELS.PUBS_MIN}
+            filter={['has', 'point_count']}
+            paint={{
+              'circle-color': COLORS.charcoal,
+              'circle-stroke-color': COLORS.amber,
+              'circle-stroke-width': 2,
+              'circle-radius': [
+                'step',
+                ['get', 'point_count'],
+                18,
+                10, 22,
+                25, 28,
+                50, 34,
+              ],
+              'circle-opacity': 0.9,
+            }}
+          />
+          <Layer
+            type="symbol"
+            id="pub-cluster-count"
+            minzoom={ZOOM_LEVELS.PUBS_MIN}
+            filter={['has', 'point_count']}
+            layout={{
+              'text-field': ['get', 'point_count_abbreviated'],
+              'text-size': 12,
+              'text-ignore-placement': true,
+              'text-allow-overlap': true,
+            }}
+            paint={{
+              'text-color': '#FFFFFF',
+            }}
+          />
+          <Layer
+            type="symbol"
+            id="pub-points"
+            minzoom={ZOOM_LEVELS.PUBS_MIN}
+            filter={['!', ['has', 'point_count']]}
+            layout={{
+              'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubUnvisited', 'pubVisited'],
+              'icon-size': 0.12,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true,
+              'icon-anchor': 'bottom',
+            }}
+          />
+        </GeoJSONSource>
+
+        {currentLocationShape && (
+          <GeoJSONSource id="current-location" data={currentLocationShape}>
+            <Layer
+              type="circle"
+              id="current-location-dot"
+              paint={{
+                'circle-color': '#4285F4',
+                'circle-radius': 7,
+                'circle-stroke-color': '#FFFFFF',
+                'circle-stroke-width': 3,
+              }}
+            />
+          </GeoJSONSource>
+        )}
+      </Map>
+
       <SearchBar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -542,6 +965,7 @@ export default function MapScreen() {
         onFocus={() => setShowSuggestions(true)}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
       />
+
       <SearchSuggestions
         visible={showSuggestions}
         searchQuery={searchQuery}
@@ -552,6 +976,7 @@ export default function MapScreen() {
         keyboardHeight={keyboardHeight}
         keyboardTop={keyboardTop}
       />
+
       <FilterScreen
         visible={showFilterScreen}
         onClose={handleFilterClose}
@@ -566,45 +991,6 @@ export default function MapScreen() {
         showOnlyAchievements={showOnlyAchievements}
         onApply={handleFilterApply}
       />
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
-        initialRegion={mapRegion || LONDON_REGION}
-        onRegionChangeComplete={(region) => {
-          if (isNavigatingRef.current) return;
-          if (regionChangeTimeoutRef.current) clearTimeout(regionChangeTimeoutRef.current);
-          regionChangeTimeoutRef.current = setTimeout(() => {
-            if (!regionsAreApproximatelyEqual(lastCommittedRegionRef.current, region)) commitMapRegion(region);
-            regionChangeTimeoutRef.current = null;
-          }, 150);
-        }}
-        customMapStyle={customMapStyle}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsBuildings={false}
-        showsIndoors={false}
-        showsPointsOfInterest={false}
-        zoomControlEnabled={false}
-        rotateEnabled={false}
-        pitchEnabled={false}
-        toolbarEnabled={false}
-        mapPadding={{ bottom: 0 }}
-      >
-        {currentLocation && (
-          <Marker coordinate={currentLocation} anchor={{ x: 0.5, y: 0.5 }} flat>
-            <View style={styles.userLocationContainer}>
-              <View style={[styles.userLocationArrow, { transform: [{ rotate: `${heading}deg` }] }]}>
-                <MaterialCommunityIcons name="arrow-up" size={14} color="#FFFFFF" />
-              </View>
-              <View style={styles.userLocationDot} />
-            </View>
-          </Marker>
-        )}
-        {markerMode !== MARKER_MODES.BOROUGHS && (
-          markerMode === MARKER_MODES.AREAS ? areaMarkerElements : pubMarkerElements
-        )}
-      </MapView>
 
       <DraggablePubCard
         pub={selectedPub}
@@ -619,38 +1005,53 @@ export default function MapScreen() {
       <Animated.View
         pointerEvents="box-none"
         style={[
-          { position: 'absolute', left: 16, bottom: mapControlsBaseBottom, zIndex: 1001, elevation: 6 },
-          mapFloatingControlsStyle,
+          screenStyles.floatingLeft,
+          { bottom: mapControlsBaseBottom + 8 },
+          floatingControlsStyle,
         ]}
       >
-        <TouchableOpacity style={styles.mapFloatingButton} onPress={openMissingPubModal}>
+        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={openMissingPubModal}>
           <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
+
       <Animated.View
         pointerEvents="box-none"
         style={[
-          { position: 'absolute', right: 16, bottom: mapControlsBaseBottom, zIndex: 1001, elevation: 6 },
-          mapFloatingControlsStyle,
+          screenStyles.floatingRight,
+          { bottom: mapControlsBaseBottom + 8 },
+          floatingControlsStyle,
         ]}
       >
-        <TouchableOpacity style={styles.mapFloatingButton} onPress={() => handleCurrentLocation(loadPubsForViewportRegion)}>
+        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={handleCurrentLocation}>
           <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
 
-      <ReportMissingPubModal visible={isMissingPubModalVisible} onClose={closeMissingPubModal} onSubmit={handleSubmitMissingPub} isSubmitting={isSubmittingMissingPub} errorMessage={missingPubError} />
+      <ReportMissingPubModal
+        visible={isMissingPubModalVisible}
+        onClose={closeMissingPubModal}
+        onSubmit={handleSubmitMissingPub}
+        isSubmitting={isSubmittingMissingPub}
+        errorMessage={missingPubError}
+      />
+
       {isMissingPubSuccessVisible && (
         <Animated.View
           style={[
-            styles.feedbackToast,
-            { position: 'absolute', bottom: mapControlsBaseBottom + 68, zIndex: 1002, elevation: 7 },
-            mapFloatingControlsStyle,
+            baseStyles.feedbackToast,
+            screenStyles.feedbackToast,
+            { bottom: mapControlsBaseBottom + 124 },
+            floatingControlsStyle,
           ]}
         >
           <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
-          <Text style={styles.feedbackToastText}>Missing pub successfully reported</Text>
-          <TouchableOpacity onPress={() => setIsMissingPubSuccessVisible(false)} style={styles.feedbackToastCloseButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={baseStyles.feedbackToastText}>Missing pub successfully reported</Text>
+          <TouchableOpacity
+            onPress={() => setIsMissingPubSuccessVisible(false)}
+            style={baseStyles.feedbackToastCloseButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <MaterialCommunityIcons name="close" size={20} color={COLORS.charcoal} />
           </TouchableOpacity>
         </Animated.View>
@@ -658,3 +1059,25 @@ export default function MapScreen() {
     </View>
   );
 }
+
+const screenStyles = StyleSheet.create({
+  floatingLeft: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 1001,
+    elevation: 6,
+  },
+  floatingRight: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 1001,
+    elevation: 6,
+  },
+  feedbackToast: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 1002,
+    elevation: 7,
+  },
+});

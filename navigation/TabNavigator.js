@@ -77,6 +77,7 @@ export default function TabNavigator() {
         <Tab.Navigator
           screenOptions={{
             headerShown: false,
+            freezeOnBlur: true,
             tabBarActiveTintColor: COLORS.amber,
             tabBarInactiveTintColor: COLORS.amber,
             tabBarStyle: {

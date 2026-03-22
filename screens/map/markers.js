@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Marker, Callout } from 'react-native-maps';
-import PintGlassIcon from '../../components/PintGlassIcon';
 import { COLORS } from './constants';
+
+const PUB_MARKER_VISITED = require('../../assets/pub_marker_visited.png');
+const PUB_MARKER_UNVISITED = require('../../assets/pub_marker_unvisited.png');
 
 export const BoroughMarker = React.memo(
   ({ summary, completion, onPress, tracksViewChanges }) => {
@@ -41,15 +43,11 @@ export const PubMarker = React.memo(
     return (
       <Marker
         coordinate={{ latitude: pub.lat, longitude: pub.lon }}
+        image={pub.isVisited ? PUB_MARKER_VISITED : PUB_MARKER_UNVISITED}
+        tracksViewChanges={false}
+        anchor={{ x: 0.5, y: 0.5 }}
         onPress={() => onPress(pub)}
-      >
-        <View style={markerStyles.container}>
-          <PintGlassIcon
-            size={28}
-            color={pub.isVisited ? COLORS.amber : COLORS.grey}
-          />
-        </View>
-      </Marker>
+      />
     );
   },
   (prev, next) =>
@@ -61,9 +59,6 @@ export const PubMarker = React.memo(
 );
 
 const markerStyles = StyleSheet.create({
-  container: {
-    backgroundColor: 'transparent',
-  },
   boroughCallout: {
     backgroundColor: 'rgba(28, 28, 28, 0.9)',
     paddingHorizontal: 8,

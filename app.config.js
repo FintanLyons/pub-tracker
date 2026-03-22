@@ -1,50 +1,51 @@
 export default {
   expo: {
-    name: "Pub Tracker",
-    slug: "pub-tracker",
-    version: "1.0.0",
-    orientation: "portrait",
-    icon: "./assets/pub_icon.png",
-    userInterfaceStyle: "light",
+    name: 'Pub Tracker',
+    slug: 'pub-tracker',
+    version: '1.0.0',
+    orientation: 'portrait',
+    icon: './assets/pub_icon.png',
+    userInterfaceStyle: 'light',
     newArchEnabled: true,
     splash: {
-      image: "./assets/pub_icon.png",
-      resizeMode: "contain",
-      backgroundColor: "#ffffff",
+      image: './assets/pub_icon.png',
+      resizeMode: 'contain',
+      backgroundColor: '#ffffff',
     },
     plugins: [
+      '@maplibre/maplibre-react-native',
       [
-        "expo-location",
+        'expo-location',
         {
           locationAlwaysAndWhenInUsePermission:
-            "Allow Pub Tracker to access your location to show nearby pubs",
+            'Allow Pub Tracker to access your location to show nearby pubs',
           locationWhenInUsePermission:
-            "Allow Pub Tracker to access your location to show nearby pubs",
+            'Allow Pub Tracker to access your location to show nearby pubs',
         },
       ],
-      "expo-mail-composer",
+      'expo-mail-composer',
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.yourcompany.pubtracker",
+      bundleIdentifier: 'com.yourcompany.pubtracker',
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
-          "This app needs access to location to show pubs near you.",
+          'This app needs access to location to show pubs near you.',
         NSLocationAlwaysUsageDescription:
-          "This app needs access to location to show pubs near you.",
+          'This app needs access to location to show pubs near you.',
       },
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/logo.png",
-        backgroundColor: "#ffffff",
+        foregroundImage: './assets/logo.png',
+        backgroundColor: '#ffffff',
       },
-      package: "com.yourcompany.pubtracker",
+      package: 'com.yourcompany.pubtracker',
       permissions: [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
+        'ACCESS_COARSE_LOCATION',
+        'ACCESS_FINE_LOCATION',
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
       ],
       config: {
         googleMaps: {
@@ -53,11 +54,11 @@ export default {
       },
     },
     web: {
-      favicon: "./assets/logo.png",
+      favicon: './assets/logo.png',
     },
     extra: {
       eas: {
-        projectId: "cd970f03-6d5e-4e0d-bd04-ffc7afa5a1ed",
+        projectId: 'cd970f03-6d5e-4e0d-bd04-ffc7afa5a1ed',
       },
     },
   },

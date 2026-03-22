@@ -42,8 +42,13 @@ export default function ProfileScreen() {
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
-  const handleAreaPress = useCallback((areaName) => {
-    navigation.navigate('Map', { areaToSearch: areaName });
+  const handleAreaPress = useCallback((areaName, centerLat = null, centerLon = null, boroughName = null) => {
+    navigation.navigate('Map', {
+      areaToSearch: areaName,
+      areaCenterLat: centerLat,
+      areaCenterLon: centerLon,
+      areaBorough: boroughName,
+    });
   }, [navigation]);
 
   const handleBoroughPress = useCallback((boroughName) => {
@@ -311,7 +316,7 @@ export default function ProfileScreen() {
               <TouchableOpacity 
                 key={`area-${index}`} 
                 style={styles.areaCard}
-                onPress={() => handleAreaPress(stat.area)}
+                onPress={() => handleAreaPress(stat.area, stat.centerLat, stat.centerLon, stat.borough)}
                 activeOpacity={0.7}
               >
                 <View style={styles.areaHeader}>
