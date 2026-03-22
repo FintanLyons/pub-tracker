@@ -17,90 +17,112 @@ const SORT_MODES = {
 };
 
 const VIEW_MODES = {
-  AREA: 'area',
-  BOROUGH: 'borough',
+  DISTRICT: 'district',
+  POSTCODE_AREA: 'postcode_area',
 };
 
 export default function ProfileScreen() {
   const navigation = useNavigation();
   const { logout, user } = useAuth();
   const {
-    areaStats: baseAreaStats,
-    boroughStats: baseBoroughStats,
+    districtStats: baseDistrictStats,
+    postcodeAreaStats: basePostcodeAreaStats,
     totalVisited,
     totalPubs,
     loading: statsLoading,
     lastUpdated,
+    error: statsError,
     refreshUserStats,
   } = useUserStats();
   const location = useUserLocation();
-  const [areaStatsRaw, setAreaStatsRaw] = useState([]);
-  const [boroughStatsRaw, setBoroughStatsRaw] = useState([]);
+  const [districtStatsRaw, setDistrictStatsRaw] = useState([]);
+  const [postcodeAreaStatsRaw, setPostcodeAreaStatsRaw] = useState([]);
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
-  const [viewMode, setViewMode] = useState(VIEW_MODES.AREA);
+  const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
-  const handleAreaPress = useCallback((areaName, centerLat = null, centerLon = null, boroughName = null) => {
-    navigation.navigate('Map', {
-      areaToSearch: areaName,
-      areaCenterLat: centerLat,
-      areaCenterLon: centerLon,
-      areaBorough: boroughName,
-    });
-  }, [navigation]);
+  const handleDistrictPress = useCallback(
+    (districtName, centerLat = null, centerLon = null, postcodeArea = null) => {
+      navigation.navigate('Map', {
+        districtToSearch: districtName,
+        districtCenterLat: centerLat,
+        districtCenterLon: centerLon,
+        districtPostcodeArea: postcodeArea,
+      });
+    },
+    [navigation]
+  );
 
-  const handleBoroughPress = useCallback((boroughName) => {
-    if (!boroughName || boroughName === 'Unknown') {
+  const handlePostcodeAreaPress = useCallback((postcodeAreaName) => {
+    if (!postcodeAreaName || postcodeAreaName === 'Unknown') {
       return;
     }
-    navigation.navigate('Map', { boroughToSearch: boroughName });
+    navigation.navigate('Map', { postcodeAreaToSearch: postcodeAreaName });
   }, [navigation]);
 
   useEffect(() => {
-    if (!baseAreaStats || baseAreaStats.length === 0) return;
-
-    const areas = baseAreaStats.map((row) => ({
-      area: row.area,
-      borough: row.borough || null,
+    if (!baseDistrictStats?.length) {
+      setDistrictStatsRaw([]);
+      return;
+    }
+    const districts = baseDistrictStats.map((row) => ({
+      district: row.district,
+      districtDisplayName: row.districtDisplayName || row.district,
+      postcodeArea: row.postcodeArea || null,
       total: Number(row.total),
       visited: Number(row.visited),
       percentage: row.percentage,
       centerLat: row.centerLat,
       centerLon: row.centerLon,
-      distance: location && row.centerLat != null && row.centerLon != null
-        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
-        : null,
+      distance:
+        location && row.centerLat != null && row.centerLon != null
+          ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+          : null,
     }));
-    const boroughs = (baseBoroughStats || []).map((row) => ({
-      borough: row.borough,
+    setDistrictStatsRaw(districts);
+  }, [baseDistrictStats, location]);
+
+  useEffect(() => {
+    if (!basePostcodeAreaStats?.length) {
+      setPostcodeAreaStatsRaw([]);
+      return;
+    }
+    const postcodeAreas = basePostcodeAreaStats.map((row) => ({
+      postcodeArea: row.postcodeArea,
       total: Number(row.totalPubs),
       visited: Number(row.visitedPubs),
       percentage: row.percentage,
-      totalAreas: Number(row.totalAreas),
-      completedAreas: Number(row.completedAreas),
+      totalDistricts: Number(row.totalDistricts),
+      completedDistricts: Number(row.completedDistricts),
       centerLat: row.centerLat,
       centerLon: row.centerLon,
-      distance: location && row.centerLat != null && row.centerLon != null
-        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
-        : null,
+      distance:
+        location && row.centerLat != null && row.centerLon != null
+          ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+          : null,
     }));
-
-    setAreaStatsRaw(areas);
-    setBoroughStatsRaw(boroughs);
-  }, [baseAreaStats, baseBoroughStats, location]);
+    setPostcodeAreaStatsRaw(postcodeAreas);
+  }, [basePostcodeAreaStats, location]);
 
   useFocusEffect(
     useCallback(() => {
       const isStale = !lastUpdated || (Date.now() - lastUpdated > 30000);
-      if (!isStale && baseAreaStats.length > 0) return;
+      const hasAnyStats =
+        baseDistrictStats.length > 0 || basePostcodeAreaStats.length > 0;
+      if (!isStale && hasAnyStats) return;
       InteractionManager.runAfterInteractions(() => {
         refreshUserStats().catch((error) => {
           console.error('Error refreshing profile stats:', error);
         });
       });
-    }, [lastUpdated, baseAreaStats.length, refreshUserStats])
+    }, [
+      lastUpdated,
+      baseDistrictStats.length,
+      basePostcodeAreaStats.length,
+      refreshUserStats,
+    ])
   );
 
   const sortStats = useCallback(
@@ -116,15 +138,15 @@ export default function ProfileScreen() {
             }
             if (aHasDistance && !bHasDistance) return -1;
             if (!aHasDistance && bHasDistance) return 1;
-            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
-            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            const aName = type === VIEW_MODES.DISTRICT ? (a.districtDisplayName || a.district) : a.postcodeArea;
+            const bName = type === VIEW_MODES.DISTRICT ? (b.districtDisplayName || b.district) : b.postcodeArea;
             return aName.localeCompare(bName);
           });
           break;
         case SORT_MODES.ALPHABETICAL:
           sorted.sort((a, b) => {
-            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
-            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            const aName = type === VIEW_MODES.DISTRICT ? (a.districtDisplayName || a.district) : a.postcodeArea;
+            const bName = type === VIEW_MODES.DISTRICT ? (b.districtDisplayName || b.district) : b.postcodeArea;
             return aName.localeCompare(bName);
           });
           break;
@@ -150,26 +172,26 @@ export default function ProfileScreen() {
     [sortMode]
   );
 
-  const areaStats = useMemo(() => {
-    return sortStats(areaStatsRaw, VIEW_MODES.AREA);
-  }, [areaStatsRaw, sortStats]);
+  const sortedDistrictStats = useMemo(() => {
+    return sortStats(districtStatsRaw, VIEW_MODES.DISTRICT);
+  }, [districtStatsRaw, sortStats]);
 
-  const boroughStats = useMemo(() => {
-    return sortStats(boroughStatsRaw, VIEW_MODES.BOROUGH);
-  }, [boroughStatsRaw, sortStats]);
+  const sortedPostcodeAreaStats = useMemo(() => {
+    return sortStats(postcodeAreaStatsRaw, VIEW_MODES.POSTCODE_AREA);
+  }, [postcodeAreaStatsRaw, sortStats]);
 
-  const hasPrevView = viewMode !== VIEW_MODES.AREA;
-  const hasNextView = viewMode !== VIEW_MODES.BOROUGH;
+  const hasPrevView = viewMode !== VIEW_MODES.DISTRICT;
+  const hasNextView = viewMode !== VIEW_MODES.POSTCODE_AREA;
 
   const handlePrevView = useCallback(() => {
-    if (viewMode === VIEW_MODES.BOROUGH) {
-      setViewMode(VIEW_MODES.AREA);
+    if (viewMode === VIEW_MODES.POSTCODE_AREA) {
+      setViewMode(VIEW_MODES.DISTRICT);
     }
   }, [viewMode]);
 
   const handleNextView = useCallback(() => {
-    if (viewMode === VIEW_MODES.AREA) {
-      setViewMode(VIEW_MODES.BOROUGH);
+    if (viewMode === VIEW_MODES.DISTRICT) {
+      setViewMode(VIEW_MODES.POSTCODE_AREA);
     }
   }, [viewMode]);
 
@@ -261,6 +283,18 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {statsError != null && (
+        <View style={styles.statsErrorBanner}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={20} color="#C62828" />
+          <Text style={styles.statsErrorText}>
+            Could not load area stats. Pull to refresh or check your connection.
+            {typeof statsError?.message === 'string' && statsError.message
+              ? `\n${statsError.message}`
+              : ''}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.section}>
         <View style={styles.sectionTitleContainer}>
           <TouchableOpacity
@@ -280,7 +314,7 @@ export default function ProfileScreen() {
             />
           </TouchableOpacity>
           <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
-            {viewMode === VIEW_MODES.AREA ? 'Sort by Area' : 'Sort by Borough'}
+            {viewMode === VIEW_MODES.DISTRICT ? 'By district' : 'By postcode area'}
           </Text>
           <View style={styles.sectionRightControls}>
             <TouchableOpacity 
@@ -308,29 +342,40 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        {viewMode === VIEW_MODES.AREA ? (
-          areaStats.length === 0 ? (
-            <Text style={styles.emptyText}>No areas found</Text>
+        {viewMode === VIEW_MODES.DISTRICT ? (
+          sortedDistrictStats.length === 0 ? (
+            <Text style={styles.emptyText}>No districts found</Text>
           ) : (
-            areaStats.map((stat, index) => (
-              <TouchableOpacity 
-                key={`area-${index}`} 
+            sortedDistrictStats.map((stat, index) => (
+              <TouchableOpacity
+                key={`district-${index}`}
                 style={styles.areaCard}
-                onPress={() => handleAreaPress(stat.area, stat.centerLat, stat.centerLon, stat.borough)}
+                onPress={() =>
+                  handleDistrictPress(stat.district, stat.centerLat, stat.centerLon, stat.postcodeArea)
+                }
                 activeOpacity={0.7}
               >
                 <View style={styles.areaHeader}>
                   <View style={styles.areaTitleRow}>
                     <Text style={styles.areaName} numberOfLines={1} ellipsizeMode="tail">
-                      {stat.area}
+                      {stat.districtDisplayName || stat.district}
                     </Text>
-                    {stat.borough && (
+                    {stat.district && String(stat.district).toUpperCase() !== 'UNKNOWN' && (
                       <Text
-                        style={styles.areaBoroughInline}
+                        style={styles.districtCodeInline}
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {stat.borough}
+                        {stat.district}
+                      </Text>
+                    )}
+                    {stat.postcodeArea && (
+                      <Text
+                        style={styles.postcodeAreaInline}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {stat.postcodeArea}
                       </Text>
                     )}
                   </View>
@@ -340,11 +385,8 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
-                    <View 
-                      style={[
-                        styles.areaProgressBarFill, 
-                        { width: `${stat.percentage}%` }
-                      ]} 
+                    <View
+                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
                     />
                   </View>
                   <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
@@ -352,40 +394,37 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ))
           )
-        ) : boroughStats.length === 0 ? (
-          <Text style={styles.emptyText}>No boroughs found</Text>
+        ) : sortedPostcodeAreaStats.length === 0 ? (
+          <Text style={styles.emptyText}>No postcode areas found</Text>
         ) : (
-          boroughStats.map((stat, index) => {
-            const isInteractive = stat.borough && stat.borough !== 'Unknown';
+          sortedPostcodeAreaStats.map((stat, index) => {
+            const isInteractive = stat.postcodeArea && stat.postcodeArea !== 'Unknown';
             return (
-              <TouchableOpacity 
-                key={`borough-${index}`} 
+              <TouchableOpacity
+                key={`postcode-area-${index}`}
                 style={styles.areaCard}
-                onPress={() => handleBoroughPress(stat.borough)}
+                onPress={() => handlePostcodeAreaPress(stat.postcodeArea)}
                 activeOpacity={isInteractive ? 0.7 : 1}
                 disabled={!isInteractive}
               >
                 <View style={styles.areaHeader}>
-                  <Text style={styles.areaName}>{stat.borough}</Text>
+                  <Text style={styles.areaName}>{stat.postcodeArea}</Text>
                   <Text style={styles.areaCount}>
                     {stat.visited} / {stat.total}
                   </Text>
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
-                    <View 
-                      style={[
-                        styles.areaProgressBarFill, 
-                        { width: `${stat.percentage}%` }
-                      ]} 
+                    <View
+                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
                     />
                   </View>
                   <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
                 </View>
-                <View style={styles.boroughAreaSummary}>
+                <View style={styles.districtCompletionSummary}>
                   <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
-                  <Text style={styles.boroughAreaSummaryText}>
-                    Areas complete: {stat.completedAreas} / {stat.totalAreas}
+                  <Text style={styles.districtCompletionSummaryText}>
+                    Districts complete: {stat.completedDistricts} / {stat.totalDistricts}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -565,6 +604,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  statsErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#FFEBEE',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  statsErrorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#B71C1C',
+    lineHeight: 20,
+  },
   mainStat: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -691,6 +747,7 @@ const styles = StyleSheet.create({
     paddingRight: 12,
     flexDirection: 'row',
     alignItems: 'baseline',
+    flexWrap: 'wrap',
   },
   areaName: {
     fontSize: 17,
@@ -698,7 +755,14 @@ const styles = StyleSheet.create({
     color: COLORS.darkGrey,
     flexShrink: 1,
   },
-  areaBoroughInline: {
+  districtCodeInline: {
+    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.3,
+  },
+  postcodeAreaInline: {
     marginLeft: 6,
     fontSize: 12,
     fontWeight: '600',
@@ -735,12 +799,12 @@ const styles = StyleSheet.create({
     minWidth: 45,
     textAlign: 'right',
   },
-  boroughAreaSummary: {
+  districtCompletionSummary: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
   },
-  boroughAreaSummaryText: {
+  districtCompletionSummaryText: {
     marginLeft: 6,
     fontSize: 14,
     color: COLORS.darkGrey,

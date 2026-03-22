@@ -1,11 +1,12 @@
 import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../config/supabase';
+import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 
 const UserStatsContext = createContext(null);
 
 export const UserStatsProvider = ({ userId, children }) => {
-	const [areaStats, setAreaStats] = useState([]);
-	const [boroughStats, setBoroughStats] = useState([]);
+	const [districtStats, setDistrictStats] = useState([]);
+	const [postcodeAreaStats, setPostcodeAreaStats] = useState([]);
 	const [totalVisited, setTotalVisited] = useState(0);
 	const [totalPubs, setTotalPubs] = useState(0);
 	const [achievements, setAchievements] = useState(null);
@@ -20,22 +21,23 @@ export const UserStatsProvider = ({ userId, children }) => {
 		setLoading(true);
 		setError(null);
 		try {
-			const [areaResult, boroughResult, achievementsResult] = await Promise.all([
+			const [districtResult, areaResult, achievementsResult] = await Promise.all([
 				supabase.rpc('get_area_stats', { p_user_id: userId }),
 				supabase.rpc('get_borough_stats', { p_user_id: userId }),
 				supabase.rpc('get_achievements', { p_user_id: userId }),
 			]);
 
+			if (districtResult.error) throw districtResult.error;
 			if (areaResult.error) throw areaResult.error;
-			if (boroughResult.error) throw boroughResult.error;
 			if (achievementsResult.error) throw achievementsResult.error;
 
+			const rawDistricts = districtResult.data || [];
 			const rawAreas = areaResult.data || [];
-			const rawBoroughs = boroughResult.data || [];
 
-			const mappedAreas = rawAreas.map((row) => ({
-				area: row.area,
-				borough: row.borough || null,
+			const mappedDistricts = rawDistricts.map((row) => ({
+				district: row.district,
+				districtDisplayName: getPostcodeDistrictDisplayName(row.district),
+				postcodeArea: row.postcode_area || null,
 				total: Number(row.total),
 				visited: Number(row.visited),
 				percentage: row.percentage,
@@ -43,22 +45,22 @@ export const UserStatsProvider = ({ userId, children }) => {
 				centerLon: row.center_lon ?? null,
 			}));
 
-			const mappedBoroughs = rawBoroughs.map((row) => ({
-				borough: row.borough,
+			const mappedPostcodeAreas = rawAreas.map((row) => ({
+				postcodeArea: row.postcode_area,
 				totalPubs: Number(row.total_pubs),
 				visitedPubs: Number(row.visited_pubs),
 				percentage: row.percentage,
-				totalAreas: Number(row.total_areas),
-				completedAreas: Number(row.completed_areas),
+				totalDistricts: Number(row.total_districts),
+				completedDistricts: Number(row.completed_districts),
 				centerLat: row.center_lat ?? null,
 				centerLon: row.center_lon ?? null,
 			}));
 
-			const totalVisitedCount = mappedAreas.reduce((sum, s) => sum + (s.visited || 0), 0);
-			const totalPubsCount = mappedAreas.reduce((sum, s) => sum + (s.total || 0), 0);
+			const totalVisitedCount = mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
+			const totalPubsCount = mappedDistricts.reduce((sum, s) => sum + (s.total || 0), 0);
 
-			setAreaStats(mappedAreas);
-			setBoroughStats(mappedBoroughs);
+			setDistrictStats(mappedDistricts);
+			setPostcodeAreaStats(mappedPostcodeAreas);
 			setTotalVisited(totalVisitedCount);
 			setTotalPubs(totalPubsCount);
 			setAchievements(achievementsResult.data || null);
@@ -79,8 +81,8 @@ export const UserStatsProvider = ({ userId, children }) => {
 	return (
 		<UserStatsContext.Provider
 			value={{
-				areaStats,
-				boroughStats,
+				districtStats,
+				postcodeAreaStats,
 				totalVisited,
 				totalPubs,
 				achievements,

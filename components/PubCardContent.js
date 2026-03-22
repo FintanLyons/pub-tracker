@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 
 // All possible features with their icons (in display order)
 const ALL_FEATURES = [
@@ -50,7 +51,9 @@ export default function PubCardContent({
       
       <View style={styles.areaRow}>
         {pub.area && (
-          <Text style={styles.area}>{pub.area}</Text>
+          <Text style={styles.area}>
+            {formatDistrictWithCode(pub.area)}
+          </Text>
         )}
         {pub.ownership && (
           <Text style={styles.ownershipInline}>{pub.ownership}</Text>

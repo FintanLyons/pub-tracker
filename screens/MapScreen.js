@@ -1,4 +1,11 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   View,
   Text,
@@ -8,7 +15,6 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
@@ -18,7 +24,7 @@ import {
   GeoJSONSource,
   Images,
   Layer,
-  Map,
+  Map as MLRNMap,
 } from '@maplibre/maplibre-react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { fetchLondonPubs, searchPubsByName, togglePubFavorite, togglePubVisited } from '../services/PubService';
@@ -34,27 +40,40 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
 import { COLORS } from '../constants/theme';
-import boroughGeojson from '../data/geo/london_boroughs.min.json';
-import wardGeojson from '../data/geo/london_wards.min.json';
+import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
+import postcodeDistrictGeojson from '../data/geo/london_postcode_districts.min.json';
+import postcodeAreaOutlinesGeojson from '../data/geo/london_postcode_areas.min.json';
+import postcodeAreaLabelPointsGeojson from '../data/geo/london_postcode_area_label_points.min.json';
 import { styles as baseStyles } from './map/mapStyles';
 import {
-  buildBoroughFeatureCollection,
+  buildPostcodeAreaLayerCollection,
+  buildPostcodeDistrictLayerCollection,
   buildPubFeatureCollection,
-  buildWardFeatureCollection,
   DEFAULT_CAMERA,
   getFeatureBounds,
+  MAP_COMPLETION_STYLE,
   MAP_STYLE,
   ZOOM_LEVELS,
 } from './map/layerUtils';
 
 const PUB_ICON_VISITED = require('../assets/pub_marker_visited.png');
 const PUB_ICON_UNVISITED = require('../assets/pub_marker_unvisited.png');
+
+const DEFAULT_SAFE_AREA = { top: 0, right: 0, bottom: 0, left: 0 };
 const SHEET_FLOATING_LIFT_PX = 24;
 const MAP_CONTROLS_HIDE_PX = 20;
-const ENABLE_PUB_CLUSTERS = true;
 const PUB_FETCH_BUFFER_RATIO = 0.35;
 const MIN_PUB_FETCH_ZOOM = ZOOM_LEVELS.PUBS_MIN - 0.15;
 
+const findFeatureByPostcodeArea = (featureCollection, areaCode) => {
+  if (!areaCode || typeof areaCode !== 'string') return null;
+  const normalized = areaCode.trim().toLowerCase();
+  return (featureCollection?.features || []).find(
+    (feature) => feature?.properties?.postcode_area?.trim?.().toLowerCase?.() === normalized,
+  ) || null;
+};
+
+/** MapLibre `onRegionDidChange` uses `bounds` [west, south, east, north]; legacy maps used `visibleBounds`. */
 const parseVisibleBounds = (visibleBounds) => {
   if (!visibleBounds) return null;
 
@@ -136,6 +155,42 @@ const findFeatureByName = (featureCollection, name) => {
   ) || null;
 };
 
+/** Match district polygon by outward code, or by locality label / "Name (CODE)" from search bar. */
+const findDistrictFeatureBySearchQuery = (featureCollection, rawQuery) => {
+  if (!rawQuery || typeof rawQuery !== 'string') return null;
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return null;
+  const q = trimmed.toLowerCase();
+  const byCode = findFeatureByName(featureCollection, trimmed);
+  if (byCode) return byCode;
+  const paren = trimmed.match(/\(([A-Z0-9]{2,5})\)\s*$/i);
+  if (paren) {
+    const inner = findFeatureByName(featureCollection, paren[1]);
+    if (inner) return inner;
+  }
+  const features = featureCollection?.features || [];
+  return (
+    features.find((f) => {
+      const code = f?.properties?.name;
+      if (!code || typeof code !== 'string') return false;
+      return getPostcodeDistrictDisplayName(code).toLowerCase() === q;
+    })
+    || features.find((f) => {
+      const code = f?.properties?.name;
+      if (!code || typeof code !== 'string') return false;
+      return formatDistrictWithCode(code).toLowerCase() === q;
+    })
+    || features.find((f) => {
+      const code = f?.properties?.name;
+      if (!code || typeof code !== 'string') return false;
+      const label = getPostcodeDistrictDisplayName(code).toLowerCase();
+      const full = formatDistrictWithCode(code).toLowerCase();
+      return label.includes(q) || full.includes(q);
+    })
+    || null
+  );
+};
+
 const findFeatureContainingCoordinate = (featureCollection, latitude, longitude) => {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   const candidatePoint = point([longitude, latitude]);
@@ -148,15 +203,15 @@ const findFeatureContainingCoordinate = (featureCollection, latitude, longitude)
   }) || null;
 };
 
-export default function MapScreen() {
-  const insets = useSafeAreaInsets();
+export default function MapScreen({ safeAreaInsets }) {
+  const insets = safeAreaInsets ?? DEFAULT_SAFE_AREA;
   const navigation = useNavigation();
   const route = useRoute();
   const isFocused = useIsFocused();
   const {
     setIsLocationLoaded,
     setIsInitialPubsLoaded,
-    boroughSummaries,
+    postcodeAreaSummaries,
   } = useContext(LoadingContext);
   const { refreshUserStats } = useUserStats();
   const getImageSource = useImageSource();
@@ -166,8 +221,8 @@ export default function MapScreen() {
   const [viewportBounds, setViewportBounds] = useState(null);
   const [selectedPub, setSelectedPub] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedBoroughName, setSelectedBoroughName] = useState(null);
-  const [selectedAreaName, setSelectedAreaName] = useState(null);
+  const [selectedPostcodeArea, setSelectedPostcodeArea] = useState(null);
+  const [selectedDistrictName, setSelectedDistrictName] = useState(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pubSuggestions, setPubSuggestions] = useState([]);
   const [localLocation, setLocalLocation] = useState(null);
@@ -180,15 +235,14 @@ export default function MapScreen() {
   const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
 
   const cameraRef = useRef(null);
-  const pubSourceRef = useRef(null);
   const mapZoomRef = useRef(DEFAULT_CAMERA.zoom);
   const initialCameraSetRef = useRef(false);
   const hasUserInteractedRef = useRef(false);
   const sheetTranslateYRef = useRef(null);
-  const clearedAreaRef = useRef(null);
-  const clearedBoroughRef = useRef(null);
-  const processedAreaRef = useRef(null);
-  const processedBoroughRef = useRef(null);
+  const clearedDistrictRef = useRef(null);
+  const clearedPostcodeAreaRef = useRef(null);
+  const processedDistrictRef = useRef(null);
+  const processedPostcodeAreaRef = useRef(null);
   const loadedPubBoundsRef = useRef(null);
   const inFlightPubFetchRef = useRef(false);
   const latestPubFetchTokenRef = useRef(0);
@@ -214,31 +268,31 @@ export default function MapScreen() {
     handleFilterClose,
   } = useFilterState(allPubs);
 
-  const boroughFeatures = useMemo(
-    () => buildBoroughFeatureCollection(boroughGeojson, boroughSummaries),
-    [boroughSummaries],
+  const postcodeAreaLayerFeatures = useMemo(
+    () => buildPostcodeAreaLayerCollection(postcodeAreaOutlinesGeojson, postcodeAreaSummaries),
+    [postcodeAreaSummaries],
   );
 
-  const selectedBoroughFeature = useMemo(
-    () => findFeatureByName(boroughFeatures, selectedBoroughName),
-    [boroughFeatures, selectedBoroughName],
+  const postcodeAreaLabelFeatures = useMemo(
+    () => buildPostcodeAreaLayerCollection(postcodeAreaLabelPointsGeojson, postcodeAreaSummaries),
+    [postcodeAreaSummaries],
   );
 
-  const selectedWardFeature = useMemo(
-    () => findFeatureByName(wardGeojson, selectedAreaName),
-    [selectedAreaName],
+  const selectedDistrictFeature = useMemo(
+    () => findFeatureByName(postcodeDistrictGeojson, selectedDistrictName),
+    [selectedDistrictName],
   );
 
-  const wardStatsMap = useMemo(() => {
+  const districtStatsMap = useMemo(() => {
     if (!allPubs.length) return null;
     const statsMap = new Map();
     allPubs.forEach((pub) => {
-      const area = typeof pub.area === 'string' ? pub.area.trim().toLowerCase() : '';
-      if (!area) return;
-      let entry = statsMap.get(area);
+      const district = typeof pub.area === 'string' ? pub.area.trim().toLowerCase() : '';
+      if (!district) return;
+      let entry = statsMap.get(district);
       if (!entry) {
         entry = { total: 0, visited: 0 };
-        statsMap.set(area, entry);
+        statsMap.set(district, entry);
       }
       entry.total += 1;
       if (pub.isVisited) entry.visited += 1;
@@ -246,26 +300,51 @@ export default function MapScreen() {
     return statsMap;
   }, [allPubs]);
 
-  const wardFeatures = useMemo(
-    () => buildWardFeatureCollection(wardGeojson, selectedBoroughName, selectedAreaName, wardStatsMap),
-    [selectedBoroughName, selectedAreaName, wardStatsMap],
+  const postcodeDistrictLayerFeatures = useMemo(
+    () => buildPostcodeDistrictLayerCollection(
+      postcodeDistrictGeojson,
+      selectedPostcodeArea,
+      selectedDistrictName,
+      districtStatsMap,
+    ),
+    [selectedPostcodeArea, selectedDistrictName, districtStatsMap],
   );
 
-  const allAreaNames = useMemo(
-    () => (wardGeojson.features || [])
+  const allDistrictNames = useMemo(
+    () => (postcodeDistrictGeojson.features || [])
       .map((feature) => feature?.properties?.name)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b)),
     [],
   );
 
-  const allBoroughNames = useMemo(
-    () => boroughFeatures.features
-      .map((feature) => feature?.properties?.name)
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b)),
-    [boroughFeatures],
-  );
+  const allPostcodeAreaNames = useMemo(() => {
+    const set = new Set();
+    (postcodeDistrictGeojson.features || []).forEach((f) => {
+      const a = f?.properties?.postcode_area;
+      if (a) set.add(String(a).trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, []);
+
+  const getSummaryBoundsForPostcodeArea = useCallback((areaCode) => {
+    if (!areaCode || !Array.isArray(postcodeAreaSummaries)) return null;
+    const row = postcodeAreaSummaries.find(
+      (s) => s.postcodeArea && s.postcodeArea.trim().toLowerCase() === areaCode.trim().toLowerCase(),
+    );
+    return row?.bounds || null;
+  }, [postcodeAreaSummaries]);
+
+  const fitBoundsObject = useCallback((b, animationDuration = 800) => {
+    if (!b || !cameraRef.current) return;
+    const { north, south, east, west } = b;
+    if (![north, south, east, west].every(Number.isFinite)) return;
+    cameraRef.current.fitBounds([west, south, east, north], {
+      padding: { top: 140, right: 48, bottom: 180, left: 48 },
+      duration: animationDuration,
+      easing: 'ease',
+    });
+  }, []);
 
   const filteredPubs = useMemo(() => {
     const hasFeatures = selectedFeatures?.length > 0;
@@ -275,8 +354,15 @@ export default function MapScreen() {
     const hasAchievements = showOnlyAchievements === true;
 
     return allPubs.filter((pub) => {
-      if (selectedWardFeature && !pubInsideFeature(pub, selectedWardFeature)) return false;
-      if (!selectedWardFeature && selectedBoroughFeature && !pubInsideFeature(pub, selectedBoroughFeature)) return false;
+      if (selectedDistrictFeature && !pubInsideFeature(pub, selectedDistrictFeature)) return false;
+      if (
+        !selectedDistrictFeature &&
+        selectedPostcodeArea &&
+        typeof pub.postcodeArea === 'string' &&
+        pub.postcodeArea.trim().toLowerCase() !== selectedPostcodeArea.trim().toLowerCase()
+      ) {
+        return false;
+      }
       if (hasFeatures && (!pub.features || !selectedFeatures.every((feature) => pub.features.includes(feature)))) return false;
       if (hasOwnerships && (!pub.ownership || !selectedOwnerships.includes(pub.ownership))) return false;
       if (hasYearRange) {
@@ -289,8 +375,8 @@ export default function MapScreen() {
     });
   }, [
     allPubs,
-    selectedWardFeature,
-    selectedBoroughFeature,
+    selectedDistrictFeature,
+    selectedPostcodeArea,
     selectedFeatures,
     selectedOwnerships,
     yearRange,
@@ -445,7 +531,7 @@ export default function MapScreen() {
       initialCameraSetRef.current = true;
       cameraRef.current.jumpTo({
         center: [contextLocation.longitude, contextLocation.latitude],
-        zoom: 11.6,
+        zoom: ZOOM_LEVELS.PUBS_MIN,
       });
     }
     setIsLocationLoaded?.(true);
@@ -516,11 +602,21 @@ export default function MapScreen() {
     }
   }, [filteredPubs, selectedPub]);
 
-  const areaSuggestions = useMemo(() => {
-    if (!searchQuery.trim()) return allAreaNames.slice(0, 4);
+  const districtSuggestions = useMemo(() => {
+    const toItems = (codes) =>
+      codes.map((code) => ({
+        code,
+        label: formatDistrictWithCode(code),
+      }));
+    if (!searchQuery.trim()) return toItems(allDistrictNames.slice(0, 4));
     const query = searchQuery.trim().toLowerCase();
-    return allAreaNames.filter((name) => name.toLowerCase().includes(query)).slice(0, 4);
-  }, [allAreaNames, searchQuery]);
+    const matched = allDistrictNames.filter((name) => {
+      const codeHit = name.toLowerCase().includes(query);
+      const labelHit = getPostcodeDistrictDisplayName(name).toLowerCase().includes(query);
+      return codeHit || labelHit;
+    });
+    return toItems(matched.slice(0, 4));
+  }, [allDistrictNames, searchQuery]);
 
   const closeCard = useCallback(() => setSelectedPub(null), []);
 
@@ -567,33 +663,41 @@ export default function MapScreen() {
     }
   }, [allPubs, selectedPub]);
 
-  const selectBorough = useCallback((feature, updateSearch = true) => {
-    const boroughName = feature?.properties?.name;
-    if (!boroughName) return;
+  const selectPostcodeArea = useCallback((areaCode, updateSearch = true) => {
+    if (!areaCode || typeof areaCode !== 'string') return;
+    const trimmed = areaCode.trim();
+    if (!trimmed) return;
     hasUserInteractedRef.current = true;
-    setSelectedBoroughName(boroughName);
-    setSelectedAreaName(null);
+    setSelectedPostcodeArea(trimmed);
+    setSelectedDistrictName(null);
     setSelectedPub(null);
-    if (updateSearch) setSearchQuery(boroughName);
-    fitFeature(feature);
-  }, [fitFeature]);
+    if (updateSearch) setSearchQuery(trimmed);
+    const b = getSummaryBoundsForPostcodeArea(trimmed);
+    if (b) {
+      fitBoundsObject(b);
+    } else {
+      const sample = findFeatureByPostcodeArea(postcodeAreaOutlinesGeojson, trimmed);
+      if (sample) fitFeature(sample);
+    }
+  }, [fitBoundsObject, fitFeature, getSummaryBoundsForPostcodeArea]);
 
-  const selectArea = useCallback((feature, updateSearch = true) => {
-    const areaName = feature?.properties?.name;
-    if (!areaName) return;
+  const selectDistrict = useCallback((feature, updateSearch = true) => {
+    const districtName = feature?.properties?.name;
+    if (!districtName) return;
     hasUserInteractedRef.current = true;
-    setSelectedAreaName(areaName);
-    setSelectedBoroughName(feature?.properties?.borough || null);
+    setSelectedDistrictName(districtName);
+    const parent = feature?.properties?.postcode_area;
+    setSelectedPostcodeArea(typeof parent === 'string' && parent.trim() ? parent.trim() : null);
     setSelectedPub(null);
-    if (updateSearch) setSearchQuery(areaName);
+    if (updateSearch) setSearchQuery(formatDistrictWithCode(districtName));
     fitFeature(feature);
-  }, [fitFeature]);
+  }, [fitFeature, formatDistrictWithCode]);
 
   const selectPub = useCallback((pub, updateSearch = true) => {
     if (!pub) return;
     hasUserInteractedRef.current = true;
-    setSelectedAreaName(null);
-    setSelectedBoroughName(null);
+    setSelectedDistrictName(null);
+    setSelectedPostcodeArea(null);
     setSelectedPub(pub);
     if (updateSearch) setSearchQuery(pub.name || '');
     centerOnPub(pub);
@@ -607,17 +711,23 @@ export default function MapScreen() {
     setShowSuggestions(false);
     Keyboard.dismiss();
 
-    const boroughMatch = findFeatureByName(boroughFeatures, query)
-      || boroughFeatures.features.find((feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query));
-    if (boroughMatch) {
-      selectBorough(boroughMatch, true);
+    const exactArea = allPostcodeAreaNames.find((n) => n.toLowerCase() === query);
+    if (exactArea) {
+      selectPostcodeArea(exactArea, true);
+      return;
+    }
+    const partialArea = allPostcodeAreaNames.find((n) => n.toLowerCase().includes(query));
+    if (partialArea) {
+      selectPostcodeArea(partialArea, true);
       return;
     }
 
-    const wardMatch = findFeatureByName(wardGeojson, query)
-      || wardGeojson.features.find((feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query));
-    if (wardMatch) {
-      selectArea(wardMatch, true);
+    const districtMatch = findDistrictFeatureBySearchQuery(postcodeDistrictGeojson, rawQuery.trim())
+      || postcodeDistrictGeojson.features.find(
+        (feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query),
+      );
+    if (districtMatch) {
+      selectDistrict(districtMatch, true);
       return;
     }
 
@@ -637,33 +747,48 @@ export default function MapScreen() {
     } catch {
       // server search unavailable
     }
-  }, [allPubs, boroughFeatures, searchQuery, selectArea, selectBorough, selectPub]);
+  }, [
+    allPubs,
+    allPostcodeAreaNames,
+    postcodeDistrictGeojson,
+    searchQuery,
+    selectDistrict,
+    selectPostcodeArea,
+    selectPub,
+  ]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
     hasUserInteractedRef.current = true;
-    setSelectedAreaName(null);
-    setSelectedBoroughName(null);
+    setSelectedDistrictName(null);
+    setSelectedPostcodeArea(null);
     setShowSuggestions(false);
 
-    const currentArea = route.params?.areaToSearch || processedAreaRef.current;
-    if (currentArea) clearedAreaRef.current = currentArea;
+    const currentDistrict = route.params?.districtToSearch || processedDistrictRef.current;
+    if (currentDistrict) clearedDistrictRef.current = currentDistrict;
 
-    const currentBorough = route.params?.boroughToSearch || processedBoroughRef.current;
-    if (currentBorough) clearedBoroughRef.current = currentBorough;
+    const currentPa = route.params?.postcodeAreaToSearch || processedPostcodeAreaRef.current;
+    if (currentPa) clearedPostcodeAreaRef.current = currentPa;
 
-    const { areaToSearch, boroughToSearch, areaCenterLat, areaCenterLon, areaBorough, ...remainingParams } = route.params || {};
+    const {
+      districtToSearch,
+      postcodeAreaToSearch,
+      districtCenterLat,
+      districtCenterLon,
+      districtPostcodeArea,
+      ...remainingParams
+    } = route.params || {};
     navigation.setParams(remainingParams);
-    processedAreaRef.current = null;
-    processedBoroughRef.current = null;
+    processedDistrictRef.current = null;
+    processedPostcodeAreaRef.current = null;
   }, [navigation, route.params]);
 
-  const handleAreaPress = useCallback((areaName) => {
-    const feature = findFeatureByName(wardGeojson, areaName);
-    if (feature) selectArea(feature, true);
+  const handleDistrictSuggestionPress = useCallback((districtCode) => {
+    const feature = findFeatureByName(postcodeDistrictGeojson, districtCode);
+    if (feature) selectDistrict(feature, true);
     setShowSuggestions(false);
     Keyboard.dismiss();
-  }, [selectArea]);
+  }, [selectDistrict]);
 
   const handlePubSuggestionPress = useCallback((pub) => {
     setShowSuggestions(false);
@@ -673,105 +798,89 @@ export default function MapScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const areaToSearch = route.params?.areaToSearch;
-      const boroughToSearch = route.params?.boroughToSearch;
-      const areaCenterLat = Number(route.params?.areaCenterLat);
-      const areaCenterLon = Number(route.params?.areaCenterLon);
+      const districtToSearch = route.params?.districtToSearch;
+      const postcodeAreaToSearch = route.params?.postcodeAreaToSearch;
+      const districtCenterLat = Number(route.params?.districtCenterLat);
+      const districtCenterLon = Number(route.params?.districtCenterLon);
 
       if (
-        areaToSearch &&
-        areaToSearch !== processedAreaRef.current &&
-        areaToSearch !== clearedAreaRef.current
+        districtToSearch &&
+        districtToSearch !== processedDistrictRef.current &&
+        districtToSearch !== clearedDistrictRef.current
       ) {
-        let feature = findFeatureByName(wardGeojson, areaToSearch);
-        if (!feature && Number.isFinite(areaCenterLat) && Number.isFinite(areaCenterLon)) {
-          feature = findFeatureContainingCoordinate(wardGeojson, areaCenterLat, areaCenterLon);
+        let feature = findFeatureByName(postcodeDistrictGeojson, districtToSearch);
+        if (!feature && Number.isFinite(districtCenterLat) && Number.isFinite(districtCenterLon)) {
+          feature = findFeatureContainingCoordinate(
+            postcodeDistrictGeojson,
+            districtCenterLat,
+            districtCenterLon,
+          );
         }
         if (feature) {
-          processedAreaRef.current = areaToSearch;
-          clearedAreaRef.current = null;
-          selectArea(feature, false);
-          setSearchQuery(feature?.properties?.name || areaToSearch);
-        } else if (Number.isFinite(areaCenterLat) && Number.isFinite(areaCenterLon) && cameraRef.current) {
-          processedAreaRef.current = areaToSearch;
-          clearedAreaRef.current = null;
+          processedDistrictRef.current = districtToSearch;
+          clearedDistrictRef.current = null;
+          selectDistrict(feature, false);
+          setSearchQuery(formatDistrictWithCode(feature?.properties?.name || districtToSearch));
+        } else if (Number.isFinite(districtCenterLat) && Number.isFinite(districtCenterLon) && cameraRef.current) {
+          processedDistrictRef.current = districtToSearch;
+          clearedDistrictRef.current = null;
           hasUserInteractedRef.current = true;
           setSelectedPub(null);
-          setSelectedAreaName(areaToSearch);
-          setSelectedBoroughName(route.params?.areaBorough || null);
-          setSearchQuery(areaToSearch);
+          setSelectedDistrictName(districtToSearch);
+          setSelectedPostcodeArea(route.params?.districtPostcodeArea || null);
+          setSearchQuery(formatDistrictWithCode(districtToSearch));
           cameraRef.current.easeTo({
-            center: [areaCenterLon, areaCenterLat],
+            center: [districtCenterLon, districtCenterLat],
             zoom: Math.max(mapZoomRef.current, 13.2),
             duration: 700,
           });
         }
-      } else if (!areaToSearch) {
-        processedAreaRef.current = null;
+      } else if (!districtToSearch) {
+        processedDistrictRef.current = null;
       }
 
       if (
-        boroughToSearch &&
-        boroughToSearch !== processedBoroughRef.current &&
-        boroughToSearch !== clearedBoroughRef.current
+        postcodeAreaToSearch &&
+        postcodeAreaToSearch !== processedPostcodeAreaRef.current &&
+        postcodeAreaToSearch !== clearedPostcodeAreaRef.current
       ) {
-        const feature = findFeatureByName(boroughFeatures, boroughToSearch);
-        if (feature) {
-          processedBoroughRef.current = boroughToSearch;
-          clearedBoroughRef.current = null;
-          selectBorough(feature, false);
-          setSearchQuery(boroughToSearch);
-        }
-      } else if (!boroughToSearch) {
-        processedBoroughRef.current = null;
+        processedPostcodeAreaRef.current = postcodeAreaToSearch;
+        clearedPostcodeAreaRef.current = null;
+        selectPostcodeArea(postcodeAreaToSearch, false);
+        setSearchQuery(postcodeAreaToSearch);
+      } else if (!postcodeAreaToSearch) {
+        processedPostcodeAreaRef.current = null;
       }
-    }, [boroughFeatures, route.params, selectArea, selectBorough]),
+    }, [route.params, selectDistrict, selectPostcodeArea]),
   );
 
-  const handleBoroughPress = useCallback((event) => {
+  const handlePostcodeAreaLayerPress = useCallback((event) => {
     const features = event?.features || event?.nativeEvent?.features || [];
     const feature = features[0];
-    const boroughName = feature?.properties?.name;
-    if (!boroughName) return;
-    const fullFeature = findFeatureByName(boroughFeatures, boroughName);
-    if (fullFeature) selectBorough(fullFeature, true);
-  }, [boroughFeatures, selectBorough]);
+    const areaCode = feature?.properties?.postcode_area;
+    if (!areaCode) return;
+    selectPostcodeArea(areaCode, true);
+  }, [selectPostcodeArea]);
 
-  const handleWardPress = useCallback((event) => {
+  const handlePostcodeDistrictLayerPress = useCallback((event) => {
     const features = event?.features || event?.nativeEvent?.features || [];
     const feature = features[0];
-    const wardName = feature?.properties?.name;
-    if (!wardName) return;
-    const fullFeature = findFeatureByName(wardGeojson, wardName);
-    if (fullFeature) selectArea(fullFeature, true);
-  }, [selectArea]);
+    const districtName = feature?.properties?.name;
+    if (!districtName) return;
+    const fullFeature = findFeatureByName(postcodeDistrictGeojson, districtName);
+    if (fullFeature) selectDistrict(fullFeature, true);
+  }, [selectDistrict]);
 
-  const handlePubPress = useCallback(async (event) => {
+  const handlePubPress = useCallback((event) => {
     hasUserInteractedRef.current = true;
 
     const features = Array.isArray(event?.nativeEvent?.features) ? event.nativeEvent.features : [];
-    const pubFeature = features.find((feature) => !feature?.properties?.cluster && feature?.properties?.pubId);
-    if (pubFeature) {
-      const pubId = pubFeature.properties?.pubId;
-      const pub = allPubs.find((item) => item.id === pubId);
-      if (pub) {
-        setSelectedPub(pub);
-      }
-      return;
-    }
-
-    const clusterFeature = features.find((feature) => feature?.properties?.cluster);
-    if (clusterFeature && pubSourceRef.current) {
-      try {
-        const zoom = await pubSourceRef.current.getClusterExpansionZoom(clusterFeature.properties?.cluster_id);
-        cameraRef.current?.easeTo({
-          center: clusterFeature.geometry.coordinates,
-          zoom,
-          duration: 500,
-        });
-      } catch (error) {
-        console.error('Failed to expand cluster:', error);
-      }
+    const pubFeature = features.find((feature) => feature?.properties?.pubId);
+    if (!pubFeature) return;
+    const pubId = pubFeature.properties?.pubId;
+    const pub = allPubs.find((item) => item.id === pubId);
+    if (pub) {
+      setSelectedPub(pub);
     }
   }, [allPubs]);
 
@@ -850,7 +959,7 @@ export default function MapScreen() {
 
   return (
     <View style={baseStyles.container} onLayout={(event) => setMapAreaHeight(event.nativeEvent.layout.height)}>
-      <Map
+      <MLRNMap
         style={StyleSheet.absoluteFillObject}
         mapStyle={MAP_STYLE}
         logo={false}
@@ -865,7 +974,7 @@ export default function MapScreen() {
           if (Number.isFinite(zoomLevel)) {
             mapZoomRef.current = zoomLevel;
           }
-          const nextBounds = parseVisibleBounds(feature?.visibleBounds);
+          const nextBounds = parseVisibleBounds(feature?.visibleBounds ?? feature?.bounds);
           if (nextBounds) {
             setViewportBounds((prev) => {
               if (
@@ -887,43 +996,123 @@ export default function MapScreen() {
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
         <Images images={{ pubVisited: PUB_ICON_VISITED, pubUnvisited: PUB_ICON_UNVISITED }} />
 
-        <GeoJSONSource id="boroughs" data={boroughFeatures} onPress={handleBoroughPress}>
+        <GeoJSONSource id="postcode-areas" data={postcodeAreaLayerFeatures} onPress={handlePostcodeAreaLayerPress}>
           <Layer
             type="fill"
-            id="borough-fill"
-            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            id="postcode-area-fill"
+            maxzoom={ZOOM_LEVELS.AREA_FILL_MAX_ZOOM}
             paint={{
               'fill-color': ['get', 'fillColor'],
-              'fill-opacity': 0.24,
+              'fill-opacity': MAP_COMPLETION_STYLE.AREA_FILL_OPACITY,
             }}
           />
           <Layer
             type="line"
-            id="borough-line"
-            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            id="postcode-area-line"
             paint={{
               'line-color': COLORS.charcoal,
-              'line-width': 1.2,
-              'line-opacity': 0.55,
+              'line-width': 2.6,
+              'line-opacity': 0.92,
+            }}
+          />
+        </GeoJSONSource>
+
+        <GeoJSONSource id="postcode-districts" data={postcodeDistrictLayerFeatures} onPress={handlePostcodeDistrictLayerPress}>
+          <Layer
+            type="fill"
+            id="postcode-district-fill"
+            minzoom={ZOOM_LEVELS.DISTRICTS_MIN}
+            paint={{
+              /* Colour from completion per district only (layerUtils) — never blanket amber at pub zoom. */
+              'fill-color': ['get', 'fillColor'],
+              /* Slightly stronger opacity when zoomed in (pub zoom) — still scaled by completion per feature. */
+              'fill-opacity': [
+                'step',
+                ['zoom'],
+                ['get', 'districtFillOpacity'],
+                ZOOM_LEVELS.PUBS_MIN,
+                ['get', 'districtFillOpacityPub'],
+              ],
+            }}
+          />
+          <Layer
+            type="line"
+            id="postcode-district-line"
+            paint={{
+              'line-color': [
+                'case',
+                ['boolean', ['get', 'isSelected'], false],
+                COLORS.amber,
+                ['boolean', ['get', 'isInFocusedArea'], false],
+                COLORS.mediumGrey,
+                COLORS.mediumGrey,
+              ],
+              /* Native MapLibre: ['zoom'] must be top-level interpolate/step input, not inside case. */
+              'line-width': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                ZOOM_LEVELS.DISTRICTS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.35],
+                ZOOM_LEVELS.POSTCODE_AREAS_MAX,
+                ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.55],
+                ZOOM_LEVELS.PUBS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.85],
+              ],
+              'line-opacity': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                ZOOM_LEVELS.DISTRICTS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.1],
+                ZOOM_LEVELS.POSTCODE_AREAS_MAX,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.2],
+                ZOOM_LEVELS.PUBS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.48],
+              ],
             }}
           />
           <Layer
             type="symbol"
-            id="borough-labels"
-            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            id="postcode-district-labels"
+            minzoom={ZOOM_LEVELS.DISTRICT_LABELS_MIN}
+            layout={{
+              'text-field': ['get', 'districtLabel'],
+              'text-size': 10,
+              'text-font': ['Open Sans Regular'],
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+              'text-anchor': 'center',
+              'text-max-width': 14,
+            }}
+            paint={{
+              'text-color': COLORS.charcoal,
+              'text-halo-color': '#FFFFFF',
+              'text-halo-width': 1.2,
+              'text-opacity': 0.85,
+            }}
+          />
+        </GeoJSONSource>
+
+        {/* One Point per letter area (from Shapely) — guarantees a single x/total label. */}
+        <GeoJSONSource id="postcode-area-label-points" data={postcodeAreaLabelFeatures}>
+          <Layer
+            type="symbol"
+            id="postcode-area-labels"
+            maxzoom={ZOOM_LEVELS.POSTCODE_AREAS_MAX}
             layout={{
               'text-field': [
                 'concat',
-                ['get', 'name'],
+                ['get', 'postcode_area'],
                 '\n',
                 ['to-string', ['get', 'visitedPubs']],
                 '/',
                 ['to-string', ['get', 'totalPubs']],
               ],
-              'text-size': 12,
+              'text-size': 13,
               'text-font': ['Open Sans Bold'],
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
+              'text-allow-overlap': true,
+              'text-ignore-placement': true,
               'text-anchor': 'center',
               'text-max-width': 8,
             }}
@@ -936,101 +1125,17 @@ export default function MapScreen() {
           />
         </GeoJSONSource>
 
-        <GeoJSONSource id="wards" data={wardFeatures} onPress={handleWardPress}>
-          <Layer
-            type="fill"
-            id="ward-fill"
-            minzoom={ZOOM_LEVELS.WARDS_MIN}
-            maxzoom={ZOOM_LEVELS.WARDS_MAX}
-            paint={{
-              'fill-color': ['get', 'fillColor'],
-              'fill-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.18, 0.08],
-            }}
-          />
-          <Layer
-            type="line"
-            id="ward-line"
-            minzoom={ZOOM_LEVELS.WARDS_MIN}
-            maxzoom={ZOOM_LEVELS.WARDS_MAX}
-            paint={{
-              'line-color': ['case', ['boolean', ['get', 'isSelected'], false], COLORS.amber, COLORS.mediumGrey],
-              'line-width': ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.8],
-              'line-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.55],
-            }}
-          />
-          <Layer
-            type="symbol"
-            id="ward-labels"
-            minzoom={ZOOM_LEVELS.WARDS_MIN}
-            maxzoom={ZOOM_LEVELS.WARDS_MAX}
-            layout={{
-              'text-field': ['get', 'name'],
-              'text-size': 11,
-              'text-font': ['Open Sans Regular'],
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
-              'text-anchor': 'center',
-              'text-max-width': 7,
-            }}
-            paint={{
-              'text-color': COLORS.charcoal,
-              'text-halo-color': '#FFFFFF',
-              'text-halo-width': 1.2,
-              'text-opacity': 0.85,
-            }}
-          />
-        </GeoJSONSource>
-
         <GeoJSONSource
           id="pubs"
-          ref={pubSourceRef}
           data={pubFeatureCollection}
-          cluster={ENABLE_PUB_CLUSTERS}
-          clusterRadius={42}
-          clusterMaxZoom={13}
+          cluster={false}
           onPress={handlePubPress}
           hitbox={{ top: 13, right: 13, bottom: 13, left: 13 }}
         >
           <Layer
-            type="circle"
-            id="pub-clusters"
-            minzoom={ZOOM_LEVELS.PUBS_MIN}
-            filter={['has', 'point_count']}
-            paint={{
-              'circle-color': COLORS.charcoal,
-              'circle-stroke-color': COLORS.amber,
-              'circle-stroke-width': 2,
-              'circle-radius': [
-                'step',
-                ['get', 'point_count'],
-                18,
-                10, 22,
-                25, 28,
-                50, 34,
-              ],
-              'circle-opacity': 0.9,
-            }}
-          />
-          <Layer
-            type="symbol"
-            id="pub-cluster-count"
-            minzoom={ZOOM_LEVELS.PUBS_MIN}
-            filter={['has', 'point_count']}
-            layout={{
-              'text-field': ['get', 'point_count_abbreviated'],
-              'text-size': 12,
-              'text-ignore-placement': true,
-              'text-allow-overlap': true,
-            }}
-            paint={{
-              'text-color': '#FFFFFF',
-            }}
-          />
-          <Layer
             type="symbol"
             id="pub-points"
             minzoom={ZOOM_LEVELS.PUBS_MIN}
-            filter={['!', ['has', 'point_count']]}
             layout={{
               'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubVisited', 'pubUnvisited'],
               'icon-size': 0.12,
@@ -1055,7 +1160,7 @@ export default function MapScreen() {
             />
           </GeoJSONSource>
         )}
-      </Map>
+      </MLRNMap>
 
       <SearchBar
         searchQuery={searchQuery}
@@ -1070,9 +1175,9 @@ export default function MapScreen() {
       <SearchSuggestions
         visible={showSuggestions}
         searchQuery={searchQuery}
-        areaSuggestions={areaSuggestions}
+        districtSuggestions={districtSuggestions}
         pubSuggestions={pubSuggestions}
-        onAreaPress={handleAreaPress}
+        onDistrictPress={handleDistrictSuggestionPress}
         onPubPress={handlePubSuggestionPress}
         keyboardHeight={keyboardHeight}
         keyboardTop={keyboardTop}

@@ -6,15 +6,15 @@ import { COLORS } from '../constants/theme';
 
 const WHITE = '#FFFFFF';
 
-function SearchSuggestions({ 
-  visible, 
-  searchQuery, 
-  areaSuggestions, 
-  pubSuggestions, 
-  onAreaPress,
+function SearchSuggestions({
+  visible,
+  searchQuery,
+  districtSuggestions = [],
+  pubSuggestions,
+  onDistrictPress,
   onPubPress,
   keyboardHeight,
-  keyboardTop 
+  keyboardTop,
 }) {
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
@@ -30,20 +30,28 @@ function SearchSuggestions({
   return (
     <View style={[styles.container, { height: availableHeight }]}>
       <View style={[styles.content, { paddingTop: searchBarHeight }]}>
-        {areaSuggestions.length > 0 && (
+        {districtSuggestions.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Areas</Text>
+            <Text style={styles.sectionTitle}>Postcode districts</Text>
             <View style={styles.suggestionsList}>
-              {areaSuggestions.map((area, index) => (
-                <TouchableOpacity
-                  key={`area-${index}`}
-                  style={styles.suggestionItem}
-                  onPress={() => onAreaPress(area)}
-                >
-                  <MaterialCommunityIcons name="map-marker-outline" size={18} color={COLORS.amber} />
-                  <Text style={styles.suggestionText}>{area}</Text>
-                </TouchableOpacity>
-              ))}
+              {districtSuggestions.map((district, index) => {
+                const code = typeof district === 'object' && district?.code != null
+                  ? String(district.code)
+                  : String(district);
+                const label = typeof district === 'object' && district?.label != null
+                  ? String(district.label)
+                  : code;
+                return (
+                  <TouchableOpacity
+                    key={`district-${code}-${index}`}
+                    style={styles.suggestionItem}
+                    onPress={() => onDistrictPress(code)}
+                  >
+                    <MaterialCommunityIcons name="map-marker-outline" size={18} color={COLORS.amber} />
+                    <Text style={styles.suggestionText}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         )}
@@ -66,7 +74,7 @@ function SearchSuggestions({
           </View>
         )}
 
-        {areaSuggestions.length === 0 && pubSuggestions.length === 0 && searchQuery.length > 0 && (
+        {districtSuggestions.length === 0 && pubSuggestions.length === 0 && searchQuery.length > 0 && (
           <View style={styles.noResults}>
             <Text style={styles.noResultsText}>No suggestions found</Text>
           </View>

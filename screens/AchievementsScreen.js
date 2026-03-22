@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
+import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
 
@@ -19,8 +20,8 @@ export default function AchievementsScreen() {
   const trophies = useMemo(() => {
     if (!achievements) return [];
     const all = [
-      ...(achievements.areaTrophies || []),
-      ...(achievements.boroughTrophies || []),
+      ...(achievements.districtTrophies || achievements.areaTrophies || []),
+      ...(achievements.postcodeAreaTrophies || achievements.boroughTrophies || []),
       ...(achievements.pubAchievements || []),
     ];
     all.sort((a, b) => {
@@ -52,14 +53,30 @@ export default function AchievementsScreen() {
 
   const getTrophyIcon = (trophy) => {
     switch (trophy.type) {
+      case 'postcode_area':
       case 'borough':
         return trophy.isAchieved ? 'crown' : 'crown-outline';
       case 'achievement':
         return trophy.isAchieved ? 'medal' : 'medal-outline';
+      case 'district':
       case 'area':
       default:
         return trophy.isAchieved ? 'trophy' : 'trophy-outline';
     }
+  };
+
+  const formatTrophyTitle = (trophy) => {
+    if (!trophy?.title) return '';
+    if (trophy.type === 'district' || trophy.type === 'area') {
+      const rawId = typeof trophy.id === 'string' ? trophy.id : '';
+      const m = rawId.match(/^district-(.+)$/i);
+      if (m) {
+        const code = m[1];
+        const place = getPostcodeDistrictDisplayName(code);
+        return `${place} Complete`;
+      }
+    }
+    return trophy.title;
   };
 
   const getTrophyColor = (trophy) => {
@@ -67,10 +84,12 @@ export default function AchievementsScreen() {
       return COLORS.mediumGrey;
     }
     switch (trophy.type) {
+      case 'postcode_area':
       case 'borough':
         return COLORS.burgundy;
       case 'achievement':
         return COLORS.sapphire;
+      case 'district':
       case 'area':
       default:
         return COLORS.amber;
@@ -124,7 +143,7 @@ export default function AchievementsScreen() {
                     ]}
                     numberOfLines={2}
                   >
-                    {trophy.title}
+                    {formatTrophyTitle(trophy)}
                   </Text>
                   <Text 
                     style={[

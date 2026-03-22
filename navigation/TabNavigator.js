@@ -9,8 +9,8 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { fetchBoroughSummaries } from '../services/PubService';
-import { serializeBoroughSummaries } from '../screens/map/utils';
+import { fetchPostcodeAreaSummaries } from '../services/PubService';
+import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { COLORS } from '../constants/theme';
 
@@ -20,7 +20,15 @@ const withErrorBoundary = (Screen, message) => (props) => (
   </ErrorBoundary>
 );
 
-const SafeMapScreen = withErrorBoundary(MapScreen, 'The map failed to load. Please try again.');
+function MapScreenWithSafeInsets(props) {
+  const insets = useSafeAreaInsets();
+  return (
+    <ErrorBoundary fallbackMessage="The map failed to load. Please try again.">
+      <MapScreen {...props} safeAreaInsets={insets} />
+    </ErrorBoundary>
+  );
+}
+
 const SafeProfileScreen = withErrorBoundary(ProfileScreen, 'Your profile failed to load. Please try again.');
 const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderboard failed to load. Please try again.');
 const SafeAchievementsScreen = withErrorBoundary(AchievementsScreen, 'Achievements failed to load. Please try again.');
@@ -32,35 +40,35 @@ export default function TabNavigator() {
   const { user } = useAuth();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
-  const [boroughSummaries, setBoroughSummaries] = useState([]);
-  const [isLoadingBoroughs, setIsLoadingBoroughs] = useState(true);
+  const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
+  const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
 
   useEffect(() => {
     let isCancelled = false;
 
-    const loadBoroughSummaries = async () => {
+    const loadPostcodeAreaSummaries = async () => {
       try {
-        setIsLoadingBoroughs(true);
-        const summaries = await fetchBoroughSummaries(user?.id);
+        setIsLoadingPostcodeAreas(true);
+        const summaries = await fetchPostcodeAreaSummaries(user?.id);
         if (!isCancelled) {
-          setBoroughSummaries((prev) => {
+          setPostcodeAreaSummaries((prev) => {
             const nextArray = Array.isArray(summaries) ? summaries : [];
-            if (serializeBoroughSummaries(prev) === serializeBoroughSummaries(nextArray)) return prev;
+            if (serializePostcodeAreaSummaries(prev) === serializePostcodeAreaSummaries(nextArray)) return prev;
             return nextArray;
           });
         }
       } catch (error) {
-        console.error('Error loading borough summaries:', error);
-        if (!isCancelled) setBoroughSummaries([]);
+        console.error('Error loading postcode area summaries:', error);
+        if (!isCancelled) setPostcodeAreaSummaries([]);
       } finally {
-        if (!isCancelled) setIsLoadingBoroughs(false);
+        if (!isCancelled) setIsLoadingPostcodeAreas(false);
       }
     };
 
-    loadBoroughSummaries();
+    loadPostcodeAreaSummaries();
 
     return () => { isCancelled = true; };
-  }, []);
+  }, [user?.id]);
 
   const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
   
@@ -70,8 +78,8 @@ export default function TabNavigator() {
       setIsLocationLoaded,
       isInitialPubsLoaded,
       setIsInitialPubsLoaded,
-      boroughSummaries,
-      isLoadingBoroughs,
+      postcodeAreaSummaries,
+      isLoadingPostcodeAreas,
     }}>
       <View style={styles.container}>
         <Tab.Navigator
@@ -97,7 +105,7 @@ export default function TabNavigator() {
         >
           <Tab.Screen 
             name="Map" 
-            component={SafeMapScreen}
+            component={MapScreenWithSafeInsets}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="map-outline" size={size} color={color} />
