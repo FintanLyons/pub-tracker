@@ -74,7 +74,7 @@ export const buildBoroughFeatureCollection = (geojson, boroughSummaries = []) =>
   };
 };
 
-export const buildWardFeatureCollection = (geojson, focusedBorough, selectedWardName) => {
+export const buildWardFeatureCollection = (geojson, focusedBorough, selectedWardName, wardStatsMap = null) => {
   const focused = typeof focusedBorough === 'string' ? focusedBorough.trim().toLowerCase() : null;
   const selected = typeof selectedWardName === 'string' ? selectedWardName.trim().toLowerCase() : null;
 
@@ -83,16 +83,28 @@ export const buildWardFeatureCollection = (geojson, focusedBorough, selectedWard
     features: (geojson?.features || [])
       .map((feature) => {
         const wardName = feature?.properties?.name || '';
+        const wardKey = wardName.toLowerCase();
         const featureBorough = feature?.properties?.borough?.trim?.().toLowerCase?.() || null;
-        const isSelected = Boolean(selected && wardName.toLowerCase() === selected);
+        const isSelected = Boolean(selected && wardKey === selected);
         const isInFocusedBorough = Boolean(focused && featureBorough === focused);
+        const stats = wardStatsMap?.get(wardKey) || null;
+        const completion = stats ? (stats.total > 0 ? (stats.visited / stats.total) * 100 : 0) : 0;
+        const hasStats = stats !== null && stats.total > 0;
+        let fillColor;
+        if (isSelected) {
+          fillColor = COLORS.amber;
+        } else if (hasStats) {
+          fillColor = interpolateColor(completion);
+        } else {
+          fillColor = '#D8D8D8';
+        }
         return {
           ...feature,
           properties: {
             ...feature.properties,
             isSelected,
             isInFocusedBorough,
-            fillColor: isSelected ? COLORS.amber : '#D8D8D8',
+            fillColor,
           },
         };
       }),

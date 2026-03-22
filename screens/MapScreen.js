@@ -21,8 +21,9 @@ import {
   Map,
 } from '@maplibre/maplibre-react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { fetchLondonPubs, togglePubFavorite, togglePubVisited } from '../services/PubService';
+import { fetchLondonPubs, searchPubsByName, togglePubFavorite, togglePubVisited } from '../services/PubService';
 import { submitMissingPubReport } from '../services/ReportService';
+import { useUserLocation } from '../contexts/LocationContext';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
@@ -159,6 +160,7 @@ export default function MapScreen() {
   } = useContext(LoadingContext);
   const { refreshUserStats } = useUserStats();
   const getImageSource = useImageSource();
+  const contextLocation = useUserLocation();
 
   const [allPubs, setAllPubs] = useState([]);
   const [viewportBounds, setViewportBounds] = useState(null);
@@ -168,7 +170,7 @@ export default function MapScreen() {
   const [selectedAreaName, setSelectedAreaName] = useState(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pubSuggestions, setPubSuggestions] = useState([]);
-  const [currentLocation, setCurrentLocation] = useState(null);
+  const [localLocation, setLocalLocation] = useState(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardTop, setKeyboardTop] = useState(0);
   const [mapAreaHeight, setMapAreaHeight] = useState(Dimensions.get('window').height);
@@ -227,9 +229,26 @@ export default function MapScreen() {
     [selectedAreaName],
   );
 
+  const wardStatsMap = useMemo(() => {
+    if (!allPubs.length) return null;
+    const statsMap = new Map();
+    allPubs.forEach((pub) => {
+      const area = typeof pub.area === 'string' ? pub.area.trim().toLowerCase() : '';
+      if (!area) return;
+      let entry = statsMap.get(area);
+      if (!entry) {
+        entry = { total: 0, visited: 0 };
+        statsMap.set(area, entry);
+      }
+      entry.total += 1;
+      if (pub.isVisited) entry.visited += 1;
+    });
+    return statsMap;
+  }, [allPubs]);
+
   const wardFeatures = useMemo(
-    () => buildWardFeatureCollection(wardGeojson, selectedBoroughName, selectedAreaName),
-    [selectedBoroughName, selectedAreaName],
+    () => buildWardFeatureCollection(wardGeojson, selectedBoroughName, selectedAreaName, wardStatsMap),
+    [selectedBoroughName, selectedAreaName, wardStatsMap],
   );
 
   const allAreaNames = useMemo(
@@ -419,37 +438,20 @@ export default function MapScreen() {
     };
   }, [viewportBounds, scheduleViewportPubFetch]);
 
+  const currentLocation = localLocation || contextLocation;
+
   useEffect(() => {
-    let cancelled = false;
+    if (contextLocation && !initialCameraSetRef.current && !hasUserInteractedRef.current && cameraRef.current) {
+      initialCameraSetRef.current = true;
+      cameraRef.current.jumpTo({
+        center: [contextLocation.longitude, contextLocation.latitude],
+        zoom: 11.6,
+      });
+    }
+    setIsLocationLoaded?.(true);
+  }, [contextLocation, setIsLocationLoaded]);
 
-    const setupLocation = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          if (cancelled) return;
-          const nextLocation = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-          };
-          setCurrentLocation(nextLocation);
-          if (!initialCameraSetRef.current && !hasUserInteractedRef.current && cameraRef.current) {
-            initialCameraSetRef.current = true;
-            cameraRef.current.jumpTo({
-              center: [nextLocation.longitude, nextLocation.latitude],
-              zoom: 11.6,
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Location setup error:', error);
-      } finally {
-        if (!cancelled) setIsLocationLoaded?.(true);
-      }
-    };
-
-    setupLocation();
-
+  useEffect(() => {
     const keyboardShow = Keyboard.addListener('keyboardDidShow', (event) => {
       setKeyboardHeight(event.endCoordinates.height);
       const top = event.endCoordinates.screenY !== undefined
@@ -463,23 +465,47 @@ export default function MapScreen() {
     });
 
     return () => {
-      cancelled = true;
       keyboardShow.remove();
       keyboardHide.remove();
     };
-  }, [setIsLocationLoaded]);
+  }, []);
+
+  const pubSearchTimeoutRef = useRef(null);
 
   useEffect(() => {
     const trimmed = searchQuery.trim().toLowerCase();
     if (!trimmed || !showSuggestions) {
       setPubSuggestions([]);
+      if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current);
       return;
     }
 
-    const results = allPubs
+    const localResults = allPubs
       .filter((pub) => typeof pub?.name === 'string' && pub.name.toLowerCase().includes(trimmed))
       .slice(0, 5);
-    setPubSuggestions(results);
+    setPubSuggestions(localResults);
+
+    if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current);
+    pubSearchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const serverResults = await searchPubsByName(searchQuery.trim(), 5);
+        if (!Array.isArray(serverResults) || serverResults.length === 0) return;
+        setPubSuggestions((current) => {
+          const existingIds = new Set(current.map((p) => p.id));
+          const merged = [...current];
+          serverResults.forEach((pub) => {
+            if (!existingIds.has(pub.id)) merged.push(pub);
+          });
+          return merged.slice(0, 8);
+        });
+      } catch {
+        // keep local results on server failure
+      }
+    }, 300);
+
+    return () => {
+      if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current);
+    };
   }, [allPubs, searchQuery, showSuggestions]);
 
   useEffect(() => {
@@ -573,7 +599,7 @@ export default function MapScreen() {
     centerOnPub(pub);
   }, [centerOnPub]);
 
-  const handleSearch = useCallback((queryOverride = null) => {
+  const handleSearch = useCallback(async (queryOverride = null) => {
     const rawQuery = queryOverride !== null ? queryOverride : searchQuery;
     const query = rawQuery.trim().toLowerCase();
     if (!query) return;
@@ -595,10 +621,21 @@ export default function MapScreen() {
       return;
     }
 
-    const pubMatch = allPubs.find((pub) => pub?.name?.toLowerCase?.() === query)
+    const localPubMatch = allPubs.find((pub) => pub?.name?.toLowerCase?.() === query)
       || allPubs.find((pub) => pub?.name?.toLowerCase?.().includes?.(query));
-    if (pubMatch) {
-      selectPub(pubMatch, true);
+    if (localPubMatch) {
+      selectPub(localPubMatch, true);
+      return;
+    }
+
+    try {
+      const serverResults = await searchPubsByName(rawQuery.trim(), 1);
+      if (serverResults?.length > 0) {
+        const pub = serverResults[0];
+        selectPub(pub, true);
+      }
+    } catch {
+      // server search unavailable
     }
   }, [allPubs, boroughFeatures, searchQuery, selectArea, selectBorough, selectPub]);
 
@@ -691,6 +728,24 @@ export default function MapScreen() {
     }, [boroughFeatures, route.params, selectArea, selectBorough]),
   );
 
+  const handleBoroughPress = useCallback((event) => {
+    const features = event?.features || event?.nativeEvent?.features || [];
+    const feature = features[0];
+    const boroughName = feature?.properties?.name;
+    if (!boroughName) return;
+    const fullFeature = findFeatureByName(boroughFeatures, boroughName);
+    if (fullFeature) selectBorough(fullFeature, true);
+  }, [boroughFeatures, selectBorough]);
+
+  const handleWardPress = useCallback((event) => {
+    const features = event?.features || event?.nativeEvent?.features || [];
+    const feature = features[0];
+    const wardName = feature?.properties?.name;
+    if (!wardName) return;
+    const fullFeature = findFeatureByName(wardGeojson, wardName);
+    if (fullFeature) selectArea(fullFeature, true);
+  }, [selectArea]);
+
   const handlePubPress = useCallback(async (event) => {
     hasUserInteractedRef.current = true;
 
@@ -735,7 +790,7 @@ export default function MapScreen() {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
         };
-        setCurrentLocation(nextLocation);
+        setLocalLocation(nextLocation);
       }
 
       if (!nextLocation) return;
@@ -827,14 +882,12 @@ export default function MapScreen() {
             scheduleViewportPubFetch(nextBounds, zoomLevel);
           }
         }}
-        onDidFinishLoadingMap={() => console.log('MapLibre map loaded')}
-        onDidFailLoadingMap={() => console.log('MapLibre map failed to load')}
-        onDidFinishLoadingStyle={() => console.log('MapLibre style loaded')}
+        onDidFailLoadingMap={() => console.warn('MapLibre: map failed to load')}
       >
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
         <Images images={{ pubVisited: PUB_ICON_VISITED, pubUnvisited: PUB_ICON_UNVISITED }} />
 
-        <GeoJSONSource id="boroughs" data={boroughFeatures}>
+        <GeoJSONSource id="boroughs" data={boroughFeatures} onPress={handleBoroughPress}>
           <Layer
             type="fill"
             id="borough-fill"
@@ -854,9 +907,36 @@ export default function MapScreen() {
               'line-opacity': 0.55,
             }}
           />
+          <Layer
+            type="symbol"
+            id="borough-labels"
+            maxzoom={ZOOM_LEVELS.BOROUGHS_MAX}
+            layout={{
+              'text-field': [
+                'concat',
+                ['get', 'name'],
+                '\n',
+                ['to-string', ['get', 'visitedPubs']],
+                '/',
+                ['to-string', ['get', 'totalPubs']],
+              ],
+              'text-size': 12,
+              'text-font': ['Open Sans Bold'],
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+              'text-anchor': 'center',
+              'text-max-width': 8,
+            }}
+            paint={{
+              'text-color': COLORS.charcoal,
+              'text-halo-color': '#FFFFFF',
+              'text-halo-width': 1.5,
+              'text-opacity': 0.9,
+            }}
+          />
         </GeoJSONSource>
 
-        <GeoJSONSource id="wards" data={wardFeatures}>
+        <GeoJSONSource id="wards" data={wardFeatures} onPress={handleWardPress}>
           <Layer
             type="fill"
             id="ward-fill"
@@ -876,6 +956,27 @@ export default function MapScreen() {
               'line-color': ['case', ['boolean', ['get', 'isSelected'], false], COLORS.amber, COLORS.mediumGrey],
               'line-width': ['case', ['boolean', ['get', 'isSelected'], false], 3, 0.8],
               'line-opacity': ['case', ['boolean', ['get', 'isSelected'], false], 0.98, 0.55],
+            }}
+          />
+          <Layer
+            type="symbol"
+            id="ward-labels"
+            minzoom={ZOOM_LEVELS.WARDS_MIN}
+            maxzoom={ZOOM_LEVELS.WARDS_MAX}
+            layout={{
+              'text-field': ['get', 'name'],
+              'text-size': 11,
+              'text-font': ['Open Sans Regular'],
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+              'text-anchor': 'center',
+              'text-max-width': 7,
+            }}
+            paint={{
+              'text-color': COLORS.charcoal,
+              'text-halo-color': '#FFFFFF',
+              'text-halo-width': 1.2,
+              'text-opacity': 0.85,
             }}
           />
         </GeoJSONSource>
@@ -931,7 +1032,7 @@ export default function MapScreen() {
             minzoom={ZOOM_LEVELS.PUBS_MIN}
             filter={['!', ['has', 'point_count']]}
             layout={{
-              'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubUnvisited', 'pubVisited'],
+              'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubVisited', 'pubUnvisited'],
               'icon-size': 0.12,
               'icon-allow-overlap': true,
               'icon-ignore-placement': true,

@@ -47,11 +47,6 @@ export default {
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
       ],
-      config: {
-        googleMaps: {
-          apiKey: process.env.GOOGLE_MAPS_API_KEY,
-        },
-      },
     },
     web: {
       favicon: './assets/logo.png',
