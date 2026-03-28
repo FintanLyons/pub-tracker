@@ -40,7 +40,7 @@ export const MAP_STYLE = {
   sources: {
     osm: {
       type: 'raster',
-      tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+      tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png'],
       tileSize: 256,
       attribution:
         '&copy; OpenStreetMap contributors, &copy; CARTO',
@@ -137,13 +137,22 @@ export const buildPostcodeDistrictLayerCollection = (
 
   const lerpOpacity = (t, a, b) => a + (b - a) * Math.min(1, Math.max(0, t));
 
+  // Track which district keys have already been assigned a text label.
+  // Some postcode districts are stored as multiple separate polygon features
+  // (discontinuous geometry split across parts). Only the first feature per
+  // district key gets a label so the name never appears more than once.
+  const labeledDistricts = new Set();
+
   return {
     type: 'FeatureCollection',
     features: (geojson?.features || [])
       .map((feature) => {
         const districtName = feature?.properties?.name || '';
         const districtKey = districtName.toLowerCase();
-        const districtLabel = districtName ? formatDistrictWithCode(districtName) : '';
+        const rawLabel = districtName ? formatDistrictWithCode(districtName) : '';
+        const shouldLabel = Boolean(rawLabel) && !labeledDistricts.has(districtKey);
+        if (shouldLabel) labeledDistricts.add(districtKey);
+        const districtLabel = shouldLabel ? rawLabel : '';
         const featureArea = feature?.properties?.postcode_area?.trim?.().toLowerCase?.() || null;
         const isSelected = Boolean(selected && districtKey === selected);
         const isInFocusedArea = !focused || (featureArea && focused && featureArea === focused);

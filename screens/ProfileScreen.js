@@ -1,13 +1,17 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert, InteractionManager } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import PintGlassIcon from '../components/PintGlassIcon';
 import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
 import { COLORS } from '../constants/theme';
+import { getDrinkStats } from '../services/ReviewService';
+
+// The 8 traditional inner-London postcode areas. Outer-London areas (BR, CR, DA…)
+// are excluded from the postcode-area view since they fall outside the core map.
+const CORE_LONDON_AREAS = new Set(['E', 'EC', 'N', 'NW', 'SE', 'SW', 'W', 'WC']);
 
 const SORT_MODES = {
   LOCATION: 'location',
@@ -21,9 +25,9 @@ const VIEW_MODES = {
   POSTCODE_AREA: 'postcode_area',
 };
 
-export default function ProfileScreen() {
-  const navigation = useNavigation();
+export default function ProfileScreen({ navigation }) {
   const { logout, user } = useAuth();
+  const userId = user?.id ?? null;
   const {
     districtStats: baseDistrictStats,
     postcodeAreaStats: basePostcodeAreaStats,
@@ -37,6 +41,7 @@ export default function ProfileScreen() {
   const location = useUserLocation();
   const [districtStatsRaw, setDistrictStatsRaw] = useState([]);
   const [postcodeAreaStatsRaw, setPostcodeAreaStatsRaw] = useState([]);
+  const [drinkStats, setDrinkStats] = useState({ total: 0, byDistrict: {}, byPostcodeArea: {} });
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -125,6 +130,16 @@ export default function ProfileScreen() {
     ])
   );
 
+  // Refresh drink stats whenever the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      getDrinkStats(userId)
+        .then(setDrinkStats)
+        .catch((err) => console.error('Error fetching drink stats:', err));
+    }, [userId])
+  );
+
   const sortStats = useCallback(
     (stats, type) => {
       const sorted = [...stats];
@@ -177,7 +192,10 @@ export default function ProfileScreen() {
   }, [districtStatsRaw, sortStats]);
 
   const sortedPostcodeAreaStats = useMemo(() => {
-    return sortStats(postcodeAreaStatsRaw, VIEW_MODES.POSTCODE_AREA);
+    const filtered = postcodeAreaStatsRaw.filter(
+      (row) => CORE_LONDON_AREAS.has(row.postcodeArea)
+    );
+    return sortStats(filtered, VIEW_MODES.POSTCODE_AREA);
   }, [postcodeAreaStatsRaw, sortStats]);
 
   const hasPrevView = viewMode !== VIEW_MODES.DISTRICT;
@@ -249,12 +267,8 @@ export default function ProfileScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
-      <View style={styles.header}>
-        <PintGlassIcon size={48} color={COLORS.darkGrey} />
-        <Text style={styles.title}>Pub Tracker</Text>
-          {user && (
-            <Text style={styles.username}>@{user.username}</Text>
-          )}
+        <View style={styles.header}>
+          <Text style={styles.title}>Statistics</Text>
         </View>
         {user && (
           <TouchableOpacity 
@@ -272,7 +286,6 @@ export default function ProfileScreen() {
           <Text style={styles.totalNumber}>/ {totalPubs}</Text>
         </View>
         <Text style={styles.statLabel}>Pubs Visited</Text>
-        
         <View style={styles.progressBarContainer}>
           <View style={styles.progressBarBackground}>
             <View 
@@ -281,6 +294,12 @@ export default function ProfileScreen() {
           </View>
           <Text style={styles.progressText}>{progressPercentage}%</Text>
         </View>
+        {drinkStats.total > 0 && (
+          <View style={styles.statsPintsRow}>
+            <MaterialCommunityIcons name="beer" size={22} color={COLORS.amber} />
+            <Text style={styles.statsPintsText}>{drinkStats.total}</Text>
+          </View>
+        )}
       </View>
 
       {statsError != null && (
@@ -379,9 +398,17 @@ export default function ProfileScreen() {
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.areaCount}>
-                    {stat.visited} / {stat.total}
-                  </Text>
+                  <View style={styles.areaCountRow}>
+                    {drinkStats.byDistrict[stat.district] > 0 && (
+                      <View style={styles.inlinePints}>
+                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+                        <Text style={styles.inlinePintsText}>{drinkStats.byDistrict[stat.district]}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.areaCount}>
+                      {stat.visited} / {stat.total}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
@@ -409,9 +436,17 @@ export default function ProfileScreen() {
               >
                 <View style={styles.areaHeader}>
                   <Text style={styles.areaName}>{stat.postcodeArea}</Text>
-                  <Text style={styles.areaCount}>
-                    {stat.visited} / {stat.total}
-                  </Text>
+                  <View style={styles.areaCountRow}>
+                    {drinkStats.byPostcodeArea[stat.postcodeArea] > 0 && (
+                      <View style={styles.inlinePints}>
+                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+                        <Text style={styles.inlinePintsText}>{drinkStats.byPostcodeArea[stat.postcodeArea]}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.areaCount}>
+                      {stat.visited} / {stat.total}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
@@ -585,24 +620,45 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: COLORS.darkGrey,
-    marginTop: 12,
-  },
-  username: {
-    fontSize: 16,
-    color: COLORS.mediumGrey,
-    marginTop: 4,
   },
   statsCard: {
     backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  statsPintsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+  },
+  statsPintsText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.amber,
+  },
+  areaCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlinePints: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  inlinePintsText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.amber,
   },
   statsErrorBanner: {
     flexDirection: 'row',

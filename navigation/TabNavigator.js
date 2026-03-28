@@ -113,11 +113,11 @@ export default function TabNavigator() {
             }}
           />
           <Tab.Screen 
-            name="Profile" 
+            name="Statistics" 
             component={SafeProfileScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="account-outline" size={size} color={color} />
+                <MaterialCommunityIcons name="poll" size={size} color={color} />
               ),
             }}
           />
@@ -126,7 +126,7 @@ export default function TabNavigator() {
             component={SafeLeaderboardScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="podium" size={size} color={color} />
+                <MaterialCommunityIcons name="crown-outline" size={size} color={color} />
               ),
             }}
           />
@@ -135,7 +135,7 @@ export default function TabNavigator() {
             component={SafeAchievementsScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="trophy-outline" size={size} color={color} />
+                <MaterialCommunityIcons name="trophy" size={size} color={color} />
               ),
             }}
           />

@@ -124,6 +124,7 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		postcodeArea,
 		districtDisplayName,
 		ownership: pub.ownership,
+		website: pub.website || null,
 		photoUrl: pub.photo_url,
 		points: pub.points || 10,
 		features: convertFeaturesToArray(pub),

@@ -524,6 +524,28 @@ export default function MapScreen({ safeAreaInsets }) {
     };
   }, [viewportBounds, scheduleViewportPubFetch]);
 
+  // When the user selects a district or postcode area, eagerly fetch all pubs
+  // within its bounding box regardless of the current zoom level. This ensures
+  // pub icons are visible as soon as the area is filtered, even before the
+  // camera finishes animating to the right zoom.
+  useEffect(() => {
+    let rawBounds = null;
+
+    if (selectedDistrictFeature) {
+      rawBounds = getFeatureBounds(selectedDistrictFeature);
+    } else if (selectedPostcodeArea) {
+      const areaFeature = findFeatureByPostcodeArea(postcodeAreaOutlinesGeojson, selectedPostcodeArea);
+      if (areaFeature) rawBounds = getFeatureBounds(areaFeature);
+    }
+
+    if (!rawBounds) return;
+    const [west, south, east, north] = rawBounds;
+    const buffered = expandBounds({ north, south, east, west });
+    if (buffered && !boundsContain(loadedPubBoundsRef.current, buffered)) {
+      requestViewportPubs(buffered);
+    }
+  }, [selectedDistrictFeature, selectedPostcodeArea, requestViewportPubs]);
+
   const currentLocation = localLocation || contextLocation;
 
   useEffect(() => {
@@ -1135,10 +1157,22 @@ export default function MapScreen({ safeAreaInsets }) {
           <Layer
             type="symbol"
             id="pub-points"
-            minzoom={ZOOM_LEVELS.PUBS_MIN}
+            minzoom={
+              // Lower the zoom gate when an area/district filter is active so
+              // pub icons are visible as soon as the area is selected.
+              (selectedPostcodeArea || selectedDistrictName)
+                ? ZOOM_LEVELS.DISTRICTS_MIN
+                : ZOOM_LEVELS.PUBS_MIN
+            }
             layout={{
               'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubVisited', 'pubUnvisited'],
-              'icon-size': 0.12,
+              // Scale icons with zoom so they remain legible when shown at lower zoom levels.
+              'icon-size': [
+                'interpolate', ['linear'], ['zoom'],
+                ZOOM_LEVELS.DISTRICTS_MIN, 0.06,
+                ZOOM_LEVELS.PUBS_MIN,      0.12,
+                17.5,                      0.16,
+              ],
               'icon-allow-overlap': true,
               'icon-ignore-placement': true,
               'icon-anchor': 'bottom',

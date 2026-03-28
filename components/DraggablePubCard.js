@@ -535,6 +535,7 @@ export default function DraggablePubCard({
         onScroll={handleScroll}
         scrollEnabled={scrollEnabled}
         scrollRef={scrollViewRef}
+        onToggleVisited={onToggleVisited}
       />
 
       {/* Report Modal */}
