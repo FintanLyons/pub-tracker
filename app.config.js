@@ -1,3 +1,10 @@
+// App Store / Play Store identifiers — set EXPO_PUBLIC_IOS_BUNDLE_ID and
+// EXPO_PUBLIC_ANDROID_PACKAGE in .env (same value is fine for both stores).
+const iosBundleId =
+  process.env.EXPO_PUBLIC_IOS_BUNDLE_ID || 'com.fintanlyons.pubtracker';
+const androidPackage =
+  process.env.EXPO_PUBLIC_ANDROID_PACKAGE || 'com.fintanlyons.pubtracker';
+
 export default {
   expo: {
     name: 'Pub Tracker',
@@ -10,7 +17,7 @@ export default {
     splash: {
       image: './assets/pub_icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#F7F7F7',
     },
     plugins: [
       '@maplibre/maplibre-react-native',
@@ -24,10 +31,11 @@ export default {
         },
       ],
       'expo-mail-composer',
+      '@react-native-google-signin/google-signin',
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.yourcompany.pubtracker',
+      bundleIdentifier: iosBundleId,
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           'This app needs access to location to show pubs near you.',
@@ -40,7 +48,7 @@ export default {
         foregroundImage: './assets/logo.png',
         backgroundColor: '#ffffff',
       },
-      package: 'com.yourcompany.pubtracker',
+      package: androidPackage,
       permissions: [
         'ACCESS_COARSE_LOCATION',
         'ACCESS_FINE_LOCATION',

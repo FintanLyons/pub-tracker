@@ -1,13 +1,25 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNetworkStatus } from '../contexts/NetworkContext';
 import { COLORS } from '../constants/theme';
 
 export default function OfflineOverlay() {
-	const { isConnected } = useNetworkStatus();
+	const { isConnected, refreshNetworkState } = useNetworkStatus();
+	const [rechecking, setRechecking] = useState(false);
 
 	if (isConnected) return null;
+
+	const handleRetry = async () => {
+		setRechecking(true);
+		try {
+			await refreshNetworkState();
+		} catch {
+			// State may still be offline; overlay stays until listener or next retry succeeds.
+		} finally {
+			setRechecking(false);
+		}
+	};
 
 	return (
 		<View style={styles.overlay}>
@@ -18,14 +30,16 @@ export default function OfflineOverlay() {
 					Reconnect to keep tracking your pub adventures, favourites, and leaderboards.
 				</Text>
 				<TouchableOpacity
-					onPress={() => {
-						// NetworkProvider will update automatically when connectivity changes,
-						// so this button is mainly a visual affordance.
-					}}
+					onPress={handleRetry}
 					style={styles.button}
 					activeOpacity={0.8}
+					disabled={rechecking}
 				>
-					<Text style={styles.buttonText}>Retry connection</Text>
+					{rechecking ? (
+						<ActivityIndicator color={COLORS.charcoal} />
+					) : (
+						<Text style={styles.buttonText}>Retry connection</Text>
+					)}
 				</TouchableOpacity>
 			</View>
 		</View>

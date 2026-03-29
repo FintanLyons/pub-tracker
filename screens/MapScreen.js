@@ -487,22 +487,6 @@ export default function MapScreen({ safeAreaInsets }) {
     });
   }, []);
 
-  const scheduleViewportPubFetch = useCallback((nextBounds, zoomLevel) => {
-    if (!isFocused) return;
-    if (!nextBounds) return;
-    const effectiveZoom = Number.isFinite(zoomLevel) ? zoomLevel : mapZoomRef.current;
-    if (!Number.isFinite(effectiveZoom) || effectiveZoom < MIN_PUB_FETCH_ZOOM) return;
-
-    const bufferedBounds = expandBounds(nextBounds);
-    if (!bufferedBounds) return;
-    if (boundsContain(loadedPubBoundsRef.current, bufferedBounds)) return;
-
-    if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
-    pubFetchTimeoutRef.current = setTimeout(() => {
-      requestViewportPubs(bufferedBounds);
-    }, 120);
-  }, [isFocused, requestViewportPubs]);
-
   const requestViewportPubs = useCallback((boundsToFetch) => {
     if (!boundsToFetch || inFlightPubFetchRef.current) return;
     inFlightPubFetchRef.current = true;
@@ -524,6 +508,22 @@ export default function MapScreen({ safeAreaInsets }) {
         }
       });
   }, [mergeFetchedPubs]);
+
+  const scheduleViewportPubFetch = useCallback((nextBounds, zoomLevel) => {
+    if (!isFocused) return;
+    if (!nextBounds) return;
+    const effectiveZoom = Number.isFinite(zoomLevel) ? zoomLevel : mapZoomRef.current;
+    if (!Number.isFinite(effectiveZoom) || effectiveZoom < MIN_PUB_FETCH_ZOOM) return;
+
+    const bufferedBounds = expandBounds(nextBounds);
+    if (!bufferedBounds) return;
+    if (boundsContain(loadedPubBoundsRef.current, bufferedBounds)) return;
+
+    if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+    pubFetchTimeoutRef.current = setTimeout(() => {
+      requestViewportPubs(bufferedBounds);
+    }, 120);
+  }, [isFocused, requestViewportPubs]);
 
   useEffect(() => {
     if (!viewportBounds) return;

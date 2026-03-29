@@ -32,20 +32,38 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
     }
   }, [visible, initialTab]);
 
+  const handleSearch = useCallback(async (query) => {
+    const searchText = query || searchQuery;
+
+    if (!searchText.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const results = await searchUsers(searchText.trim());
+      const filtered = results.filter((user) => user.id !== currentUserId);
+      setSearchResults(filtered);
+    } catch (error) {
+      console.error('Error searching users:', error);
+      Alert.alert('Error', 'Failed to search users');
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, currentUserId]);
+
   // Auto-search as user types (debounced)
   useEffect(() => {
     if (activeTab === 'search' && searchQuery.trim()) {
-      // Clear any existing timeout
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
 
-      // Set new timeout to search after 500ms of no typing
       searchTimeoutRef.current = setTimeout(() => {
         handleSearch(searchQuery);
       }, 500);
 
-      // Cleanup
       return () => {
         if (searchTimeoutRef.current) {
           clearTimeout(searchTimeoutRef.current);
@@ -71,28 +89,6 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
       console.error('Error loading friends:', error);
     }
   };
-
-  const handleSearch = useCallback(async (query) => {
-    const searchText = query || searchQuery;
-    
-    if (!searchText.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const results = await searchUsers(searchText.trim());
-      // Filter out current user
-      const filtered = results.filter(user => user.id !== currentUserId);
-      setSearchResults(filtered);
-    } catch (error) {
-      console.error('Error searching users:', error);
-      Alert.alert('Error', 'Failed to search users');
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, currentUserId]);
 
   const handleSendRequest = async (friendId) => {
     try {

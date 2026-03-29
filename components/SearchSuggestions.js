@@ -4,8 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 
-const WHITE = '#FFFFFF';
-
 function SearchSuggestions({
   visible,
   searchQuery,
@@ -90,7 +88,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: WHITE,
+    backgroundColor: COLORS.white,
     zIndex: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

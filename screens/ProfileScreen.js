@@ -1,5 +1,16 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert, InteractionManager } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Animated,
+  Alert,
+  InteractionManager,
+  RefreshControl,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,7 +35,7 @@ const VIEW_MODES = {
 };
 
 export default function ProfileScreen({ navigation }) {
-  const { logout, user } = useAuth();
+  const { logout, user, deleteAccount } = useAuth();
   const userId = user?.id ?? null;
   const {
     districtStats: baseDistrictStats,
@@ -44,6 +55,7 @@ export default function ProfileScreen({ navigation }) {
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
@@ -239,32 +251,96 @@ export default function ProfileScreen({ navigation }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showFilterModal]);
 
-  const handleLogout = () => {
+  const handleDeleteAccount = useCallback(() => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Delete account?',
+      'Your profile, visits, favourites, friends, and league memberships will be removed permanently.',
       [
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Logout',
+          text: 'Continue',
           style: 'destructive',
-          onPress: async () => {
-            await logout();
-            // AuthContext will automatically update and show AuthScreen
+          onPress: () => {
+            Alert.alert(
+              'Last step',
+              'Are you sure? You will not be able to recover this account.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await deleteAccount();
+                    } catch (e) {
+                      Alert.alert(
+                        'Something went wrong',
+                        e?.message ||
+                          'Could not delete your account. If the problem persists, contact support.'
+                      );
+                    }
+                  },
+                },
+              ]
+            );
           },
         },
       ]
     );
-  };
+  }, [deleteAccount]);
+
+  const handleAccountMenu = useCallback(() => {
+    Alert.alert(
+      'Account',
+      'Sign out of this device, or permanently delete your account and all data.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign out',
+          onPress: async () => {
+            await logout();
+          },
+        },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: handleDeleteAccount,
+        },
+      ]
+    );
+  }, [logout, handleDeleteAccount]);
 
   const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
   const currentLevel = getLevelProgress(achievements?.totalScore || 0).level;
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshUserStats();
+      if (userId) {
+        const nextDrinks = await getDrinkStats(userId);
+        setDrinkStats(nextDrinks);
+      }
+    } catch (error) {
+      console.error('Error refreshing profile stats:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [userId, refreshUserStats]);
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={COLORS.amber}
+          colors={[COLORS.amber]}
+        />
+      }
+    >
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
         <View style={styles.header}>
@@ -272,9 +348,10 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.title}>Statistics</Text>
         </View>
         {user && (
-          <TouchableOpacity 
-            onPress={handleLogout}
+          <TouchableOpacity
+            onPress={handleAccountMenu}
             style={styles.logoutButtonHeader}
+            accessibilityLabel="Account: sign out or delete account"
           >
             <MaterialCommunityIcons name="logout" size={24} color="#F44336" />
           </TouchableOpacity>
