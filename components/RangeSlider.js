@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, PanResponder, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, PanResponder } from 'react-native';
 import { COLORS } from '../constants/theme';
 
 const HANDLE_SIZE = 32;
 const TRACK_HEIGHT = 4;
-const HIT_AREA = 44; // Larger touch area for easier dragging
+const HIT_AREA = 44;
+const SLIDER_HEIGHT = 50;
 
 export default function RangeSlider({ min, max, minValue, maxValue, onValueChange, step = 1 }) {
   const [localMinValue, setLocalMinValue] = useState(minValue);
@@ -17,11 +18,13 @@ export default function RangeSlider({ min, max, minValue, maxValue, onValueChang
     setLocalMaxValue(maxValue);
   }, [minValue, maxValue]);
 
+  const trackY = (SLIDER_HEIGHT - TRACK_HEIGHT) / 2;
+  const trackCenterY = trackY + TRACK_HEIGHT / 2;
+
   const getValueFromPageX = (pageX) => {
     const trackWidth = sliderLayout.width - HANDLE_SIZE;
     if (trackWidth <= 0) return min;
-    
-    // Calculate position relative to slider container
+
     const relativeX = pageX - sliderLayout.x - HANDLE_SIZE / 2;
     const adjustedX = Math.max(0, Math.min(trackWidth, relativeX));
     const ratio = adjustedX / trackWidth;
@@ -36,55 +39,41 @@ export default function RangeSlider({ min, max, minValue, maxValue, onValueChang
     return HANDLE_SIZE / 2 + ratio * trackWidth;
   };
 
-  // PanResponder for min handle
   const minHandlePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      // Min handle is active
-    },
-    onPanResponderMove: (evt, gestureState) => {
+    onPanResponderMove: (evt) => {
       if (sliderLayout.width === 0) return;
       const newValue = getValueFromPageX(evt.nativeEvent.pageX);
       const clampedValue = Math.max(min, Math.min(max, newValue));
       const newMin = Math.min(clampedValue, localMaxValue - step);
-      
+
       if (newMin !== localMinValue) {
         setLocalMinValue(newMin);
         onValueChange({ min: newMin, max: localMaxValue });
       }
     },
-    onPanResponderRelease: () => {
-      // Handle release
-    },
   });
 
-  // PanResponder for max handle
   const maxHandlePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: () => {
-      // Max handle is active
-    },
-    onPanResponderMove: (evt, gestureState) => {
+    onPanResponderMove: (evt) => {
       if (sliderLayout.width === 0) return;
       const newValue = getValueFromPageX(evt.nativeEvent.pageX);
       const clampedValue = Math.max(min, Math.min(max, newValue));
       const newMax = Math.max(clampedValue, localMinValue + step);
-      
+
       if (newMax !== localMaxValue) {
         setLocalMaxValue(newMax);
         onValueChange({ min: localMinValue, max: newMax });
       }
     },
-    onPanResponderRelease: () => {
-      // Handle release
-    },
   });
 
   const minPosition = getPositionFromValue(localMinValue);
   const maxPosition = getPositionFromValue(localMaxValue);
-  const trackWidth = maxPosition - minPosition;
+  const activeTrackWidth = maxPosition - minPosition;
 
   return (
     <View style={styles.container}>
@@ -92,56 +81,62 @@ export default function RangeSlider({ min, max, minValue, maxValue, onValueChang
         <Text style={styles.label}>{localMinValue}</Text>
         <Text style={styles.label}>{localMaxValue}</Text>
       </View>
-      
+
       <View
         style={styles.sliderContainer}
         ref={sliderRef}
-        onLayout={(event) => {
+        onLayout={() => {
           sliderRef.current?.measure((fx, fy, fwidth, fheight, px, py) => {
             setSliderLayout({ width: fwidth, x: px });
           });
         }}
       >
-        {/* Track background */}
-        <View style={styles.trackBackground} />
-        
-        {/* Active track */}
+        <View
+          style={[
+            styles.trackBackground,
+            { top: trackY },
+          ]}
+        />
+
         <View
           style={[
             styles.trackActive,
             {
               left: minPosition,
-              width: trackWidth,
+              width: activeTrackWidth,
+              top: trackY,
             },
           ]}
         />
-        
-        {/* Min handle with its own PanResponder */}
+
         <View
           style={[
-            styles.handle,
-            styles.handleHitArea,
+            styles.handleTouchTarget,
             {
-              left: minPosition - HANDLE_SIZE / 2,
+              left: minPosition - HIT_AREA / 2,
+              top: trackCenterY - HIT_AREA / 2,
             },
           ]}
           {...minHandlePanResponder.panHandlers}
         >
-          <View style={styles.handleInner} />
+          <View style={styles.handleVisual}>
+            <View style={styles.handleInner} />
+          </View>
         </View>
-        
-        {/* Max handle with its own PanResponder */}
+
         <View
           style={[
-            styles.handle,
-            styles.handleHitArea,
+            styles.handleTouchTarget,
             {
-              left: maxPosition - HANDLE_SIZE / 2,
+              left: maxPosition - HIT_AREA / 2,
+              top: trackCenterY - HIT_AREA / 2,
             },
           ]}
           {...maxHandlePanResponder.panHandlers}
         >
-          <View style={styles.handleInner} />
+          <View style={styles.handleVisual}>
+            <View style={styles.handleInner} />
+          </View>
         </View>
       </View>
     </View>
@@ -164,7 +159,7 @@ const styles = StyleSheet.create({
     color: COLORS.charcoal,
   },
   sliderContainer: {
-    height: 50,
+    height: SLIDER_HEIGHT,
     justifyContent: 'center',
     position: 'relative',
   },
@@ -172,20 +167,24 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: HANDLE_SIZE / 2,
     right: HANDLE_SIZE / 2,
-    top: (50 - TRACK_HEIGHT) / 2,
     height: TRACK_HEIGHT,
     backgroundColor: COLORS.lightGrey,
     borderRadius: TRACK_HEIGHT / 2,
   },
   trackActive: {
     position: 'absolute',
-    top: (50 - TRACK_HEIGHT) / 2,
     height: TRACK_HEIGHT,
     backgroundColor: COLORS.amber,
     borderRadius: TRACK_HEIGHT / 2,
   },
-  handle: {
+  handleTouchTarget: {
     position: 'absolute',
+    width: HIT_AREA,
+    height: HIT_AREA,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  handleVisual: {
     width: HANDLE_SIZE,
     height: HANDLE_SIZE,
     borderRadius: HANDLE_SIZE / 2,
@@ -199,14 +198,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
-    top: (50 - HANDLE_SIZE) / 2,
-  },
-  handleHitArea: {
-    // Expand touch area without visual change
-    paddingHorizontal: (HIT_AREA - HANDLE_SIZE) / 2,
-    paddingVertical: (HIT_AREA - HANDLE_SIZE) / 2,
-    marginHorizontal: -(HIT_AREA - HANDLE_SIZE) / 2,
-    marginVertical: -(HIT_AREA - HANDLE_SIZE) / 2,
   },
   handleInner: {
     width: 14,
@@ -215,4 +206,3 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.amber,
   },
 });
-

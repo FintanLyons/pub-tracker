@@ -1,13 +1,15 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Animated, Alert, InteractionManager } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import PintGlassIcon from '../components/PintGlassIcon';
 import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
 import { COLORS } from '../constants/theme';
+import { getDrinkStats } from '../services/ReviewService';
+import { getLevelProgress } from '../utils/levelSystem';
+import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 
 const SORT_MODES = {
   LOCATION: 'location',
@@ -17,85 +19,124 @@ const SORT_MODES = {
 };
 
 const VIEW_MODES = {
-  AREA: 'area',
-  BOROUGH: 'borough',
+  DISTRICT: 'area',
+  POSTCODE_AREA: 'region',
 };
 
-export default function ProfileScreen() {
-  const navigation = useNavigation();
+export default function ProfileScreen({ navigation }) {
   const { logout, user } = useAuth();
+  const userId = user?.id ?? null;
   const {
-    areaStats: baseAreaStats,
-    boroughStats: baseBoroughStats,
+    districtStats: baseDistrictStats,
+    postcodeAreaStats: basePostcodeAreaStats,
     totalVisited,
     totalPubs,
+    achievements,
     loading: statsLoading,
     lastUpdated,
+    error: statsError,
     refreshUserStats,
   } = useUserStats();
   const location = useUserLocation();
-  const [areaStatsRaw, setAreaStatsRaw] = useState([]);
-  const [boroughStatsRaw, setBoroughStatsRaw] = useState([]);
+  const [districtStatsRaw, setDistrictStatsRaw] = useState([]);
+  const [postcodeAreaStatsRaw, setPostcodeAreaStatsRaw] = useState([]);
+  const [drinkStats, setDrinkStats] = useState({ total: 0, byDistrict: {}, byPostcodeArea: {} });
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
-  const [viewMode, setViewMode] = useState(VIEW_MODES.AREA);
+  const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
-  const handleAreaPress = useCallback((areaName) => {
-    navigation.navigate('Map', { areaToSearch: areaName });
-  }, [navigation]);
+  const handleDistrictPress = useCallback(
+    (districtName, centerLat = null, centerLon = null, postcodeArea = null) => {
+      navigation.navigate('Map', {
+        districtToSearch: districtName,
+        districtCenterLat: centerLat,
+        districtCenterLon: centerLon,
+        districtPostcodeArea: postcodeArea,
+      });
+    },
+    [navigation]
+  );
 
-  const handleBoroughPress = useCallback((boroughName) => {
-    if (!boroughName || boroughName === 'Unknown') {
+  const handlePostcodeAreaPress = useCallback((postcodeAreaName) => {
+    if (!postcodeAreaName || postcodeAreaName === 'Unknown') {
       return;
     }
-    navigation.navigate('Map', { boroughToSearch: boroughName });
+    navigation.navigate('Map', { postcodeAreaToSearch: postcodeAreaName });
   }, [navigation]);
 
   useEffect(() => {
-    if (!baseAreaStats || baseAreaStats.length === 0) return;
-
-    const areas = baseAreaStats.map((row) => ({
-      area: row.area,
-      borough: row.borough || null,
+    if (!baseDistrictStats?.length) {
+      setDistrictStatsRaw([]);
+      return;
+    }
+    const districts = baseDistrictStats.map((row) => ({
+      district: row.district,
+      districtDisplayName: row.districtDisplayName || row.district,
+      postcodeArea: row.postcodeArea || null,
       total: Number(row.total),
       visited: Number(row.visited),
       percentage: row.percentage,
       centerLat: row.centerLat,
       centerLon: row.centerLon,
-      distance: location && row.centerLat != null && row.centerLon != null
-        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
-        : null,
+      distance:
+        location && row.centerLat != null && row.centerLon != null
+          ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+          : null,
     }));
-    const boroughs = (baseBoroughStats || []).map((row) => ({
-      borough: row.borough,
+    setDistrictStatsRaw(districts);
+  }, [baseDistrictStats, location]);
+
+  useEffect(() => {
+    if (!basePostcodeAreaStats?.length) {
+      setPostcodeAreaStatsRaw([]);
+      return;
+    }
+    const postcodeAreas = basePostcodeAreaStats.map((row) => ({
+      postcodeArea: row.postcodeArea,
       total: Number(row.totalPubs),
       visited: Number(row.visitedPubs),
       percentage: row.percentage,
-      totalAreas: Number(row.totalAreas),
-      completedAreas: Number(row.completedAreas),
+      totalDistricts: Number(row.totalDistricts),
+      completedDistricts: Number(row.completedDistricts),
       centerLat: row.centerLat,
       centerLon: row.centerLon,
-      distance: location && row.centerLat != null && row.centerLon != null
-        ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
-        : null,
+      distance:
+        location && row.centerLat != null && row.centerLon != null
+          ? distanceKm(location.latitude, location.longitude, row.centerLat, row.centerLon)
+          : null,
     }));
-
-    setAreaStatsRaw(areas);
-    setBoroughStatsRaw(boroughs);
-  }, [baseAreaStats, baseBoroughStats, location]);
+    setPostcodeAreaStatsRaw(postcodeAreas);
+  }, [basePostcodeAreaStats, location]);
 
   useFocusEffect(
     useCallback(() => {
       const isStale = !lastUpdated || (Date.now() - lastUpdated > 30000);
-      if (!isStale && baseAreaStats.length > 0) return;
+      const hasAnyStats =
+        baseDistrictStats.length > 0 || basePostcodeAreaStats.length > 0;
+      if (!isStale && hasAnyStats) return;
       InteractionManager.runAfterInteractions(() => {
         refreshUserStats().catch((error) => {
           console.error('Error refreshing profile stats:', error);
         });
       });
-    }, [lastUpdated, baseAreaStats.length, refreshUserStats])
+    }, [
+      lastUpdated,
+      baseDistrictStats.length,
+      basePostcodeAreaStats.length,
+      refreshUserStats,
+    ])
+  );
+
+  // Refresh drink stats whenever the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      getDrinkStats(userId)
+        .then(setDrinkStats)
+        .catch((err) => console.error('Error fetching drink stats:', err));
+    }, [userId])
   );
 
   const sortStats = useCallback(
@@ -111,15 +152,15 @@ export default function ProfileScreen() {
             }
             if (aHasDistance && !bHasDistance) return -1;
             if (!aHasDistance && bHasDistance) return 1;
-            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
-            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            const aName = type === VIEW_MODES.DISTRICT ? (a.districtDisplayName || a.district) : a.postcodeArea;
+            const bName = type === VIEW_MODES.DISTRICT ? (b.districtDisplayName || b.district) : b.postcodeArea;
             return aName.localeCompare(bName);
           });
           break;
         case SORT_MODES.ALPHABETICAL:
           sorted.sort((a, b) => {
-            const aName = type === VIEW_MODES.AREA ? a.area : a.borough;
-            const bName = type === VIEW_MODES.AREA ? b.area : b.borough;
+            const aName = type === VIEW_MODES.DISTRICT ? (a.districtDisplayName || a.district) : a.postcodeArea;
+            const bName = type === VIEW_MODES.DISTRICT ? (b.districtDisplayName || b.district) : b.postcodeArea;
             return aName.localeCompare(bName);
           });
           break;
@@ -145,26 +186,29 @@ export default function ProfileScreen() {
     [sortMode]
   );
 
-  const areaStats = useMemo(() => {
-    return sortStats(areaStatsRaw, VIEW_MODES.AREA);
-  }, [areaStatsRaw, sortStats]);
+  const sortedDistrictStats = useMemo(() => {
+    return sortStats(districtStatsRaw, VIEW_MODES.DISTRICT);
+  }, [districtStatsRaw, sortStats]);
 
-  const boroughStats = useMemo(() => {
-    return sortStats(boroughStatsRaw, VIEW_MODES.BOROUGH);
-  }, [boroughStatsRaw, sortStats]);
+  const sortedPostcodeAreaStats = useMemo(() => {
+    const filtered = postcodeAreaStatsRaw.filter(
+      (row) => CORE_LONDON_AREAS.has(row.postcodeArea)
+    );
+    return sortStats(filtered, VIEW_MODES.POSTCODE_AREA);
+  }, [postcodeAreaStatsRaw, sortStats]);
 
-  const hasPrevView = viewMode !== VIEW_MODES.AREA;
-  const hasNextView = viewMode !== VIEW_MODES.BOROUGH;
+  const hasPrevView = viewMode !== VIEW_MODES.DISTRICT;
+  const hasNextView = viewMode !== VIEW_MODES.POSTCODE_AREA;
 
   const handlePrevView = useCallback(() => {
-    if (viewMode === VIEW_MODES.BOROUGH) {
-      setViewMode(VIEW_MODES.AREA);
+    if (viewMode === VIEW_MODES.POSTCODE_AREA) {
+      setViewMode(VIEW_MODES.DISTRICT);
     }
   }, [viewMode]);
 
   const handleNextView = useCallback(() => {
-    if (viewMode === VIEW_MODES.AREA) {
-      setViewMode(VIEW_MODES.BOROUGH);
+    if (viewMode === VIEW_MODES.DISTRICT) {
+      setViewMode(VIEW_MODES.POSTCODE_AREA);
     }
   }, [viewMode]);
 
@@ -216,18 +260,16 @@ export default function ProfileScreen() {
     );
   };
 
-  const progressPercentage = totalPubs > 0 ? Math.round((totalVisited / totalPubs) * 100) : 0;
+  const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
+  const currentLevel = getLevelProgress(achievements?.totalScore || 0).level;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
-      <View style={styles.header}>
-        <PintGlassIcon size={48} color={COLORS.darkGrey} />
-        <Text style={styles.title}>Pub Tracker</Text>
-          {user && (
-            <Text style={styles.username}>@{user.username}</Text>
-          )}
+        <View style={styles.header}>
+          <MaterialCommunityIcons name="poll" size={40} color={COLORS.darkGrey} />
+          <Text style={styles.title}>Statistics</Text>
         </View>
         {user && (
           <TouchableOpacity 
@@ -239,22 +281,47 @@ export default function ProfileScreen() {
         )}
       </View>
 
+      {/* ── Primary stats card: Drinks | Pubs Visited ─────────────────────── */}
       <View style={styles.statsCard}>
-        <View style={styles.mainStat}>
-          <Text style={styles.visitedNumber}>{totalVisited}</Text>
-          <Text style={styles.totalNumber}>/ {totalPubs}</Text>
-        </View>
-        <Text style={styles.statLabel}>Pubs Visited</Text>
-        
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressBarBackground}>
-            <View 
-              style={[styles.progressBarFill, { width: `${progressPercentage}%` }]} 
-            />
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{drinkStats.total}</Text>
+            <Text style={styles.statItemLabel}>Total Drinks</Text>
           </View>
-          <Text style={styles.progressText}>{progressPercentage}%</Text>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{totalVisited}</Text>
+            <Text style={styles.statItemLabel}>Pubs Visited</Text>
+          </View>
         </View>
       </View>
+
+      {/* ── Secondary stats card: Areas Completed | Level ──────────────────── */}
+      <View style={[styles.statsCard, styles.statsCardSecondary]}>
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumberSmall}>{completedAreas}</Text>
+            <Text style={styles.statItemLabelSmall}>Areas Completed</Text>
+          </View>
+          <View style={styles.statDividerSmall} />
+          <View style={styles.statItem}>
+            <Text style={styles.statNumberSmall}>{currentLevel}</Text>
+            <Text style={styles.statItemLabelSmall}>Current Level</Text>
+          </View>
+        </View>
+      </View>
+
+      {statsError != null && (
+        <View style={styles.statsErrorBanner}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={20} color="#C62828" />
+          <Text style={styles.statsErrorText}>
+            Could not load area stats. Pull to refresh or check your connection.
+            {typeof statsError?.message === 'string' && statsError.message
+              ? `\n${statsError.message}`
+              : ''}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.section}>
         <View style={styles.sectionTitleContainer}>
@@ -275,7 +342,7 @@ export default function ProfileScreen() {
             />
           </TouchableOpacity>
           <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
-            {viewMode === VIEW_MODES.AREA ? 'Sort by Area' : 'Sort by Borough'}
+            {viewMode === VIEW_MODES.DISTRICT ? 'By area' : 'By region'}
           </Text>
           <View style={styles.sectionRightControls}>
             <TouchableOpacity 
@@ -303,43 +370,50 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        {viewMode === VIEW_MODES.AREA ? (
-          areaStats.length === 0 ? (
+        {viewMode === VIEW_MODES.DISTRICT ? (
+          sortedDistrictStats.length === 0 ? (
             <Text style={styles.emptyText}>No areas found</Text>
           ) : (
-            areaStats.map((stat, index) => (
-              <TouchableOpacity 
-                key={`area-${index}`} 
+            sortedDistrictStats.map((stat, index) => (
+              <TouchableOpacity
+                key={`district-${index}`}
                 style={styles.areaCard}
-                onPress={() => handleAreaPress(stat.area)}
+                onPress={() =>
+                  handleDistrictPress(stat.district, stat.centerLat, stat.centerLon, stat.postcodeArea)
+                }
                 activeOpacity={0.7}
               >
                 <View style={styles.areaHeader}>
                   <View style={styles.areaTitleRow}>
                     <Text style={styles.areaName} numberOfLines={1} ellipsizeMode="tail">
-                      {stat.area}
+                      {stat.districtDisplayName || stat.district}
                     </Text>
-                    {stat.borough && (
+                    {stat.district && String(stat.district).toUpperCase() !== 'UNKNOWN' && (
                       <Text
-                        style={styles.areaBoroughInline}
+                        style={styles.districtCodeInline}
                         numberOfLines={1}
                         ellipsizeMode="tail"
                       >
-                        {stat.borough}
+                        {stat.district}
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.areaCount}>
-                    {stat.visited} / {stat.total}
-                  </Text>
+                  <View style={styles.areaCountRow}>
+                    {drinkStats.byDistrict[stat.district] > 0 && (
+                      <View style={styles.inlinePints}>
+                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+                        <Text style={styles.inlinePintsText}>{drinkStats.byDistrict[stat.district]}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.areaCount}>
+                      {stat.visited} / {stat.total}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
-                    <View 
-                      style={[
-                        styles.areaProgressBarFill, 
-                        { width: `${stat.percentage}%` }
-                      ]} 
+                    <View
+                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
                     />
                   </View>
                   <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
@@ -347,40 +421,45 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ))
           )
-        ) : boroughStats.length === 0 ? (
-          <Text style={styles.emptyText}>No boroughs found</Text>
+        ) : sortedPostcodeAreaStats.length === 0 ? (
+          <Text style={styles.emptyText}>No regions found</Text>
         ) : (
-          boroughStats.map((stat, index) => {
-            const isInteractive = stat.borough && stat.borough !== 'Unknown';
+          sortedPostcodeAreaStats.map((stat, index) => {
+            const isInteractive = stat.postcodeArea && stat.postcodeArea !== 'Unknown';
             return (
-              <TouchableOpacity 
-                key={`borough-${index}`} 
+              <TouchableOpacity
+                key={`postcode-area-${index}`}
                 style={styles.areaCard}
-                onPress={() => handleBoroughPress(stat.borough)}
+                onPress={() => handlePostcodeAreaPress(stat.postcodeArea)}
                 activeOpacity={isInteractive ? 0.7 : 1}
                 disabled={!isInteractive}
               >
                 <View style={styles.areaHeader}>
-                  <Text style={styles.areaName}>{stat.borough}</Text>
-                  <Text style={styles.areaCount}>
-                    {stat.visited} / {stat.total}
-                  </Text>
+                  <Text style={styles.areaName}>{stat.postcodeArea}</Text>
+                  <View style={styles.areaCountRow}>
+                    {drinkStats.byPostcodeArea[stat.postcodeArea] > 0 && (
+                      <View style={styles.inlinePints}>
+                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+                        <Text style={styles.inlinePintsText}>{drinkStats.byPostcodeArea[stat.postcodeArea]}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.areaCount}>
+                      {stat.visited} / {stat.total}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.areaProgressBarContainer}>
                   <View style={styles.areaProgressBarBackground}>
-                    <View 
-                      style={[
-                        styles.areaProgressBarFill, 
-                        { width: `${stat.percentage}%` }
-                      ]} 
+                    <View
+                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
                     />
                   </View>
                   <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
                 </View>
-                <View style={styles.boroughAreaSummary}>
+                <View style={styles.districtCompletionSummary}>
                   <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
-                  <Text style={styles.boroughAreaSummaryText}>
-                    Areas complete: {stat.completedAreas} / {stat.totalAreas}
+                  <Text style={styles.districtCompletionSummaryText}>
+                    Areas complete: {stat.completedDistricts} / {stat.totalDistricts}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -530,6 +609,7 @@ const styles = StyleSheet.create({
   header: {
     flex: 1,
     alignItems: 'center',
+    gap: 6,
   },
   logoutButtonHeader: {
     padding: 8,
@@ -541,72 +621,102 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: COLORS.darkGrey,
-    marginTop: 12,
-  },
-  username: {
-    fontSize: 16,
-    color: COLORS.mediumGrey,
-    marginTop: 4,
   },
   statsCard: {
     backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 24,
-    alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  mainStat: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 8,
+  statsCardSecondary: {
+    padding: 14,
+    marginBottom: 24,
   },
-  visitedNumber: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: COLORS.darkGrey,
-  },
-  totalNumber: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: COLORS.mediumGrey,
-    marginLeft: 4,
-  },
-  statLabel: {
-    fontSize: 16,
-    color: COLORS.mediumGrey,
-    marginBottom: 20,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  progressBarContainer: {
-    width: '100%',
+  statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  progressBarBackground: {
+  statItem: {
     flex: 1,
-    height: 12,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 6,
-    overflow: 'hidden',
-    marginRight: 12,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
   },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: COLORS.darkGrey,
-    borderRadius: 6,
-  },
-  progressText: {
-    fontSize: 16,
-    fontWeight: '600',
+  statNumber: {
+    fontSize: 42,
+    fontWeight: 'bold',
     color: COLORS.darkGrey,
-    minWidth: 50,
-    textAlign: 'right',
+  },
+  statItemLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    textAlign: 'center',
+  },
+  statNumberSmall: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.darkGrey,
+  },
+  statItemLabelSmall: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  statDivider: {
+    width: 1,
+    height: 64,
+    backgroundColor: '#E0E0E0',
+    marginHorizontal: 8,
+  },
+  statDividerSmall: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#E0E0E0',
+    marginHorizontal: 8,
+  },
+  areaCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inlinePints: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 32,
+  },
+  inlinePintsText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.amber,
+  },
+  statsErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#FFEBEE',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  statsErrorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#B71C1C',
+    lineHeight: 20,
   },
   section: {
     marginBottom: 20,
@@ -686,6 +796,7 @@ const styles = StyleSheet.create({
     paddingRight: 12,
     flexDirection: 'row',
     alignItems: 'baseline',
+    flexWrap: 'wrap',
   },
   areaName: {
     fontSize: 17,
@@ -693,18 +804,19 @@ const styles = StyleSheet.create({
     color: COLORS.darkGrey,
     flexShrink: 1,
   },
-  areaBoroughInline: {
+  districtCodeInline: {
     marginLeft: 6,
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.accentGrey,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.3,
   },
   areaCount: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.accentGrey,
+    minWidth: 56,
+    textAlign: 'right',
   },
   areaProgressBarContainer: {
     flexDirection: 'row',
@@ -730,12 +842,12 @@ const styles = StyleSheet.create({
     minWidth: 45,
     textAlign: 'right',
   },
-  boroughAreaSummary: {
+  districtCompletionSummary: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
   },
-  boroughAreaSummaryText: {
+  districtCompletionSummaryText: {
     marginLeft: 6,
     fontSize: 14,
     color: COLORS.darkGrey,

@@ -265,7 +265,7 @@ export default function LeaderboardScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <MaterialCommunityIcons name="trophy" size={48} color={COLORS.darkGrey} />
+          <MaterialCommunityIcons name="crown" size={48} color={COLORS.darkGrey} />
           <Text style={styles.title}>Leaderboard</Text>
         </View>
         <View style={styles.emptyContainer}>
@@ -286,7 +286,7 @@ export default function LeaderboardScreen() {
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
         <View style={styles.header}>
-          <MaterialCommunityIcons name="trophy" size={48} color={COLORS.darkGrey} />
+          <MaterialCommunityIcons name="crown" size={48} color={COLORS.darkGrey} />
           <Text style={styles.title}>Leaderboard</Text>
         </View>
         <TouchableOpacity

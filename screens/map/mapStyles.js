@@ -1,29 +1,12 @@
 import { StyleSheet } from 'react-native';
-import { COLORS } from './constants';
+import { COLORS } from '../../constants/theme';
 
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  locationButton: {
-    position: 'absolute',
-    right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.charcoal,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  missingPubButton: {
-    position: 'absolute',
-    left: 16,
+  mapFloatingButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -37,7 +20,6 @@ export const styles = StyleSheet.create({
     elevation: 5,
   },
   feedbackToast: {
-    position: 'absolute',
     left: 16,
     right: 16,
     paddingVertical: 12,

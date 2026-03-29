@@ -1,15 +1,6 @@
-import boroughCoordinates from '../data/boroughCoordinates.json';
 import { supabase } from '../config/supabase';
-
-const BOROUGH_COORDINATE_MAP = new Map(
-	boroughCoordinates.map((entry) => [
-		entry.borough.toLowerCase(),
-		{
-			name: entry.borough,
-			center: entry.center,
-		},
-	]),
-);
+import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
+import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 
 // ---------------------------------------------------------------------------
 // Server-side visited / favorite tracking
@@ -95,11 +86,29 @@ const convertFeaturesToArray = (pub) => {
 	return features;
 };
 
+const getSpatialAssignment = (pub) => {
+	const embedded = pub?.pub_spatial_assignments;
+	if (Array.isArray(embedded)) return embedded[0] || null;
+	if (embedded && typeof embedded === 'object') return embedded;
+	return null;
+};
+
 const formatPub = (pub, visitedSet, favoritesSet) => {
-	const borough =
-		typeof pub.borough === 'string' && pub.borough.trim().length > 0
-			? pub.borough.trim()
+	const spatial = getSpatialAssignment(pub);
+	const postcodeDistrict =
+		typeof spatial?.postcode_district === 'string' && spatial.postcode_district.trim().length > 0
+			? spatial.postcode_district.trim()
 			: null;
+	const postcodeArea =
+		typeof spatial?.postcode_area === 'string' && spatial.postcode_area.trim().length > 0
+			? spatial.postcode_area.trim()
+			: null;
+	// `area` on pub = postcode district (map filters, profile "district")
+	// `borough` on pub = postcode area letters (parent grouping)
+	const area = postcodeDistrict || (typeof pub.area === 'string' ? pub.area.trim() : '') || null;
+	const borough = postcodeArea
+		|| (typeof pub.borough === 'string' && pub.borough.trim().length > 0 ? pub.borough.trim() : null);
+	const districtDisplayName = area ? getPostcodeDistrictDisplayName(area) : null;
 	return {
 		id: pub.id,
 		name: pub.name,
@@ -110,9 +119,13 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		description: pub.description,
 		founded: pub.founded,
 		history: pub.history,
-		area: pub.area,
+		area,
 		borough,
+		postcodeDistrict,
+		postcodeArea,
+		districtDisplayName,
 		ownership: pub.ownership,
+		website: pub.website || null,
 		photoUrl: pub.photo_url,
 		points: pub.points || 10,
 		features: convertFeaturesToArray(pub),
@@ -122,17 +135,23 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 	};
 };
 
+const SPATIAL_SELECT = [
+	'postcode_district',
+	'postcode_area',
+	'assignment_status',
+].join(', ');
+
 export const fetchLondonPubs = async (options = {}) => {
 	try {
-		const { bounds, boroughs } = options || {};
+		const { bounds, postcodeAreas } = options || {};
 		const hasBounds =
 			bounds &&
 			typeof bounds === 'object' &&
 			['north', 'south', 'east', 'west'].every((key) => Number.isFinite(bounds[key]));
-		const requestedBoroughs = Array.isArray(boroughs)
-			? boroughs.filter((b) => typeof b === 'string' && b.trim().length > 0)
+		const requestedAreas = Array.isArray(postcodeAreas)
+			? postcodeAreas.filter((b) => typeof b === 'string' && b.trim().length > 0)
 			: [];
-		const hasBoroughFilter = requestedBoroughs.length > 0;
+		const hasAreaFilter = requestedAreas.length > 0;
 
 		const { visitedSet, favoritesSet } = await loadVisitedAndFavoriteSets();
 
@@ -141,7 +160,7 @@ export const fetchLondonPubs = async (options = {}) => {
 		let hasMore = true;
 
 		while (hasMore) {
-			let query = supabase.from('pubs_all').select('*');
+			let query = supabase.from('pubs_all').select(`*, pub_spatial_assignments(${SPATIAL_SELECT})`);
 
 			if (hasBounds) {
 				query = query
@@ -150,10 +169,6 @@ export const fetchLondonPubs = async (options = {}) => {
 					.gte('lon', bounds.west)
 					.lte('lon', bounds.east);
 			}
-			if (hasBoroughFilter) {
-				query = query.in('borough', requestedBoroughs);
-			}
-
 			const to = from + PAGE_SIZE - 1;
 			query = query.range(from, to);
 
@@ -177,8 +192,16 @@ export const fetchLondonPubs = async (options = {}) => {
 
 		const formattedPubs = allPubs.map((p) => formatPub(p, visitedSet, favoritesSet));
 
+		const isCoreLondonPostcodeArea = (pub) => {
+			const area = pub.postcodeArea || pub.borough;
+			if (!area || typeof area !== 'string') return false;
+			return CORE_LONDON_AREAS.has(area.trim().toUpperCase());
+		};
+
+		const londonPubsOnly = formattedPubs.filter(isCoreLondonPostcodeArea);
+
 		let filteredPubs = hasBounds
-			? formattedPubs.filter((pub) => {
+			? londonPubsOnly.filter((pub) => {
 				if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
 				return (
 					pub.lat <= bounds.north &&
@@ -187,12 +210,12 @@ export const fetchLondonPubs = async (options = {}) => {
 					pub.lon <= bounds.east
 				);
 			})
-			: formattedPubs;
+			: londonPubsOnly;
 
-		if (hasBoroughFilter) {
-			const boroughFilterSet = new Set(requestedBoroughs.map((b) => b.toLowerCase()));
+		if (hasAreaFilter) {
+			const areaSet = new Set(requestedAreas.map((b) => b.toLowerCase()));
 			filteredPubs = filteredPubs.filter(
-				(pub) => pub.borough && boroughFilterSet.has(pub.borough.toLowerCase()),
+				(pub) => pub.postcodeArea && areaSet.has(pub.postcodeArea.toLowerCase()),
 			);
 		}
 
@@ -203,39 +226,38 @@ export const fetchLondonPubs = async (options = {}) => {
 	}
 };
 
-export const fetchBoroughSummaries = async (userId) => {
+/** Summaries for map colouring at postcode-area zoom (uses get_borough_stats RPC). */
+export const fetchPostcodeAreaSummaries = async (userId) => {
 	try {
 		if (!userId) return [];
 
 		const { data, error } = await supabase.rpc('get_borough_stats', { p_user_id: userId });
 		if (error) throw error;
 
-		return (data || []).map((row) => {
-			// Use hardcoded coordinates for known boroughs — more accurate than pub-weighted average
-			const coordinateEntry = BOROUGH_COORDINATE_MAP.get(row.borough?.toLowerCase());
-			const center = coordinateEntry
-				? coordinateEntry.center
-				: (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
-					? { latitude: row.center_lat, longitude: row.center_lon }
-					: null;
+	return (data || []).filter((row) => row.postcode_area && CORE_LONDON_AREAS.has(row.postcode_area)).map((row) => {
+		const center = (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
+			? { latitude: row.center_lat, longitude: row.center_lon }
+			: null;
 
-			const hasBounds =
-				Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
-				Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
+		const hasBounds =
+			Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
+			Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
 
-			return {
-				borough: row.borough,
-				center,
-				bounds: hasBounds
-					? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
-					: null,
-				totalPubs: Number(row.total_pubs),
-				visitedPubs: Number(row.visited_pubs),
-				completionPercentage: Number(row.percentage),
-			};
-		});
+		return {
+			postcodeArea: row.postcode_area,
+			center,
+			bounds: hasBounds
+				? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
+				: null,
+			totalPubs: Number(row.total_pubs),
+			visitedPubs: Number(row.visited_pubs),
+			completionPercentage: Number(row.percentage),
+			totalDistricts: Number(row.total_districts),
+			completedDistricts: Number(row.completed_districts),
+		};
+	});
 	} catch (error) {
-		console.error('fetchBoroughSummaries error:', error);
+		console.error('fetchPostcodeAreaSummaries error:', error);
 		return [];
 	}
 };
@@ -253,14 +275,25 @@ export const searchPubsByName = async (query, limit = 5) => {
 	});
 
 	if (error) throw error;
-	return (data || []).map((p) => ({
-		id: p.id,
-		name: p.name,
-		lat: parseFloat(p.lat),
-		lon: parseFloat(p.lon),
-		area: p.area,
-		borough: p.borough,
-	}));
+	return (data || [])
+		.filter((p) => {
+			const pa = p.postcode_area || p.borough;
+			return pa && CORE_LONDON_AREAS.has(pa);
+		})
+		.map((p) => {
+			const area = p.postcode_district || p.area;
+			return {
+				id: p.id,
+				name: p.name,
+				lat: parseFloat(p.lat),
+				lon: parseFloat(p.lon),
+				area,
+				borough: p.postcode_area || p.borough,
+				postcodeDistrict: p.postcode_district,
+				postcodeArea: p.postcode_area,
+				districtDisplayName: area ? getPostcodeDistrictDisplayName(area) : null,
+			};
+		});
 };
 
 // ---------------------------------------------------------------------------
@@ -275,7 +308,6 @@ export const togglePubVisited = async (pubId) => {
 		throw new Error('You need to be logged in and online to track visited pubs.');
 	}
 
-	// Ensure we have the latest server-backed set in memory
 	if (!_visitedSet || _cacheUserId !== session.userId) {
 		const { visitedSet } = await loadVisitedAndFavoriteSets();
 		_visitedSet = visitedSet;
@@ -311,7 +343,6 @@ export const togglePubFavorite = async (pubId) => {
 		throw new Error('You need to be logged in and online to track favourite pubs.');
 	}
 
-	// Ensure we have the latest server-backed set in memory
 	if (!_favoritesSet || _cacheUserId !== session.userId) {
 		const { favoritesSet } = await loadVisitedAndFavoriteSets();
 		_favoritesSet = favoritesSet;
