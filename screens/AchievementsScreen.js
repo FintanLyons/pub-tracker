@@ -2,11 +2,25 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import PintGlassIcon from '../components/PintGlassIcon';
 import { getLevelProgress } from '../utils/levelSystem';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
+import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+
+const isLondonTrophy = (trophy) => {
+  const id = typeof trophy.id === 'string' ? trophy.id : '';
+  if (trophy.type === 'district' || trophy.type === 'area') {
+    const m = id.match(/^district-([A-Z]+)/i);
+    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
+  }
+  if (trophy.type === 'postcode_area' || trophy.type === 'borough') {
+    const m = id.match(/^(?:postcode[_-]?area|borough)-([A-Z]+)/i);
+    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
+    return CORE_LONDON_AREAS.has(id.toUpperCase());
+  }
+  return true;
+};
 
 export default function AchievementsScreen() {
   const {
@@ -23,7 +37,7 @@ export default function AchievementsScreen() {
       ...(achievements.districtTrophies || achievements.areaTrophies || []),
       ...(achievements.postcodeAreaTrophies || achievements.boroughTrophies || []),
       ...(achievements.pubAchievements || []),
-    ];
+    ].filter(isLondonTrophy);
     all.sort((a, b) => {
       if (a.isAchieved && !b.isAchieved) return -1;
       if (!a.isAchieved && b.isAchieved) return 1;
@@ -99,7 +113,7 @@ export default function AchievementsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>
-        <PintGlassIcon size={48} color={COLORS.darkGrey} />
+        <MaterialCommunityIcons name="trophy" size={48} color={COLORS.darkGrey} />
         <Text style={styles.title}>Achievements</Text>
       </View>
 

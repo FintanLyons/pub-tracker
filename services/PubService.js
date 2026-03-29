@@ -1,5 +1,6 @@
 import { supabase } from '../config/supabase';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
+import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 
 // ---------------------------------------------------------------------------
 // Server-side visited / favorite tracking
@@ -191,8 +192,16 @@ export const fetchLondonPubs = async (options = {}) => {
 
 		const formattedPubs = allPubs.map((p) => formatPub(p, visitedSet, favoritesSet));
 
+		const isCoreLondonPostcodeArea = (pub) => {
+			const area = pub.postcodeArea || pub.borough;
+			if (!area || typeof area !== 'string') return false;
+			return CORE_LONDON_AREAS.has(area.trim().toUpperCase());
+		};
+
+		const londonPubsOnly = formattedPubs.filter(isCoreLondonPostcodeArea);
+
 		let filteredPubs = hasBounds
-			? formattedPubs.filter((pub) => {
+			? londonPubsOnly.filter((pub) => {
 				if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
 				return (
 					pub.lat <= bounds.north &&
@@ -201,7 +210,7 @@ export const fetchLondonPubs = async (options = {}) => {
 					pub.lon <= bounds.east
 				);
 			})
-			: formattedPubs;
+			: londonPubsOnly;
 
 		if (hasAreaFilter) {
 			const areaSet = new Set(requestedAreas.map((b) => b.toLowerCase()));
@@ -225,28 +234,28 @@ export const fetchPostcodeAreaSummaries = async (userId) => {
 		const { data, error } = await supabase.rpc('get_borough_stats', { p_user_id: userId });
 		if (error) throw error;
 
-		return (data || []).map((row) => {
-			const center = (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
-				? { latitude: row.center_lat, longitude: row.center_lon }
-				: null;
+	return (data || []).filter((row) => row.postcode_area && CORE_LONDON_AREAS.has(row.postcode_area)).map((row) => {
+		const center = (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
+			? { latitude: row.center_lat, longitude: row.center_lon }
+			: null;
 
-			const hasBounds =
-				Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
-				Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
+		const hasBounds =
+			Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
+			Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
 
-			return {
-				postcodeArea: row.postcode_area,
-				center,
-				bounds: hasBounds
-					? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
-					: null,
-				totalPubs: Number(row.total_pubs),
-				visitedPubs: Number(row.visited_pubs),
-				completionPercentage: Number(row.percentage),
-				totalDistricts: Number(row.total_districts),
-				completedDistricts: Number(row.completed_districts),
-			};
-		});
+		return {
+			postcodeArea: row.postcode_area,
+			center,
+			bounds: hasBounds
+				? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
+				: null,
+			totalPubs: Number(row.total_pubs),
+			visitedPubs: Number(row.visited_pubs),
+			completionPercentage: Number(row.percentage),
+			totalDistricts: Number(row.total_districts),
+			completedDistricts: Number(row.completed_districts),
+		};
+	});
 	} catch (error) {
 		console.error('fetchPostcodeAreaSummaries error:', error);
 		return [];
@@ -266,20 +275,25 @@ export const searchPubsByName = async (query, limit = 5) => {
 	});
 
 	if (error) throw error;
-	return (data || []).map((p) => {
-		const area = p.postcode_district || p.area;
-		return {
-			id: p.id,
-			name: p.name,
-			lat: parseFloat(p.lat),
-			lon: parseFloat(p.lon),
-			area,
-			borough: p.postcode_area || p.borough,
-			postcodeDistrict: p.postcode_district,
-			postcodeArea: p.postcode_area,
-			districtDisplayName: area ? getPostcodeDistrictDisplayName(area) : null,
-		};
-	});
+	return (data || [])
+		.filter((p) => {
+			const pa = p.postcode_area || p.borough;
+			return pa && CORE_LONDON_AREAS.has(pa);
+		})
+		.map((p) => {
+			const area = p.postcode_district || p.area;
+			return {
+				id: p.id,
+				name: p.name,
+				lat: parseFloat(p.lat),
+				lon: parseFloat(p.lon),
+				area,
+				borough: p.postcode_area || p.borough,
+				postcodeDistrict: p.postcode_district,
+				postcodeArea: p.postcode_area,
+				districtDisplayName: area ? getPostcodeDistrictDisplayName(area) : null,
+			};
+		});
 };
 
 // ---------------------------------------------------------------------------

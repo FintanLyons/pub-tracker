@@ -8,10 +8,8 @@ import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
 import { COLORS } from '../constants/theme';
 import { getDrinkStats } from '../services/ReviewService';
-
-// The 8 traditional inner-London postcode areas. Outer-London areas (BR, CR, DA…)
-// are excluded from the postcode-area view since they fall outside the core map.
-const CORE_LONDON_AREAS = new Set(['E', 'EC', 'N', 'NW', 'SE', 'SW', 'W', 'WC']);
+import { getLevelProgress } from '../utils/levelSystem';
+import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 
 const SORT_MODES = {
   LOCATION: 'location',
@@ -21,8 +19,8 @@ const SORT_MODES = {
 };
 
 const VIEW_MODES = {
-  DISTRICT: 'district',
-  POSTCODE_AREA: 'postcode_area',
+  DISTRICT: 'area',
+  POSTCODE_AREA: 'region',
 };
 
 export default function ProfileScreen({ navigation }) {
@@ -33,6 +31,7 @@ export default function ProfileScreen({ navigation }) {
     postcodeAreaStats: basePostcodeAreaStats,
     totalVisited,
     totalPubs,
+    achievements,
     loading: statsLoading,
     lastUpdated,
     error: statsError,
@@ -261,13 +260,15 @@ export default function ProfileScreen({ navigation }) {
     );
   };
 
-  const progressPercentage = totalPubs > 0 ? Math.round((totalVisited / totalPubs) * 100) : 0;
+  const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
+  const currentLevel = getLevelProgress(achievements?.totalScore || 0).level;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.headerContainer}>
         <View style={styles.spacer} />
         <View style={styles.header}>
+          <MaterialCommunityIcons name="poll" size={40} color={COLORS.darkGrey} />
           <Text style={styles.title}>Statistics</Text>
         </View>
         {user && (
@@ -280,26 +281,34 @@ export default function ProfileScreen({ navigation }) {
         )}
       </View>
 
+      {/* ── Primary stats card: Drinks | Pubs Visited ─────────────────────── */}
       <View style={styles.statsCard}>
-        <View style={styles.mainStat}>
-          <Text style={styles.visitedNumber}>{totalVisited}</Text>
-          <Text style={styles.totalNumber}>/ {totalPubs}</Text>
-        </View>
-        <Text style={styles.statLabel}>Pubs Visited</Text>
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressBarBackground}>
-            <View 
-              style={[styles.progressBarFill, { width: `${progressPercentage}%` }]} 
-            />
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{drinkStats.total}</Text>
+            <Text style={styles.statItemLabel}>Total Drinks</Text>
           </View>
-          <Text style={styles.progressText}>{progressPercentage}%</Text>
-        </View>
-        {drinkStats.total > 0 && (
-          <View style={styles.statsPintsRow}>
-            <MaterialCommunityIcons name="beer" size={22} color={COLORS.amber} />
-            <Text style={styles.statsPintsText}>{drinkStats.total}</Text>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{totalVisited}</Text>
+            <Text style={styles.statItemLabel}>Pubs Visited</Text>
           </View>
-        )}
+        </View>
+      </View>
+
+      {/* ── Secondary stats card: Areas Completed | Level ──────────────────── */}
+      <View style={[styles.statsCard, styles.statsCardSecondary]}>
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumberSmall}>{completedAreas}</Text>
+            <Text style={styles.statItemLabelSmall}>Areas Completed</Text>
+          </View>
+          <View style={styles.statDividerSmall} />
+          <View style={styles.statItem}>
+            <Text style={styles.statNumberSmall}>{currentLevel}</Text>
+            <Text style={styles.statItemLabelSmall}>Current Level</Text>
+          </View>
+        </View>
       </View>
 
       {statsError != null && (
@@ -333,7 +342,7 @@ export default function ProfileScreen({ navigation }) {
             />
           </TouchableOpacity>
           <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
-            {viewMode === VIEW_MODES.DISTRICT ? 'By district' : 'By postcode area'}
+            {viewMode === VIEW_MODES.DISTRICT ? 'By area' : 'By region'}
           </Text>
           <View style={styles.sectionRightControls}>
             <TouchableOpacity 
@@ -363,7 +372,7 @@ export default function ProfileScreen({ navigation }) {
         </View>
         {viewMode === VIEW_MODES.DISTRICT ? (
           sortedDistrictStats.length === 0 ? (
-            <Text style={styles.emptyText}>No districts found</Text>
+            <Text style={styles.emptyText}>No areas found</Text>
           ) : (
             sortedDistrictStats.map((stat, index) => (
               <TouchableOpacity
@@ -386,15 +395,6 @@ export default function ProfileScreen({ navigation }) {
                         ellipsizeMode="tail"
                       >
                         {stat.district}
-                      </Text>
-                    )}
-                    {stat.postcodeArea && (
-                      <Text
-                        style={styles.postcodeAreaInline}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                      >
-                        {stat.postcodeArea}
                       </Text>
                     )}
                   </View>
@@ -422,7 +422,7 @@ export default function ProfileScreen({ navigation }) {
             ))
           )
         ) : sortedPostcodeAreaStats.length === 0 ? (
-          <Text style={styles.emptyText}>No postcode areas found</Text>
+          <Text style={styles.emptyText}>No regions found</Text>
         ) : (
           sortedPostcodeAreaStats.map((stat, index) => {
             const isInteractive = stat.postcodeArea && stat.postcodeArea !== 'Unknown';
@@ -459,7 +459,7 @@ export default function ProfileScreen({ navigation }) {
                 <View style={styles.districtCompletionSummary}>
                   <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
                   <Text style={styles.districtCompletionSummaryText}>
-                    Districts complete: {stat.completedDistricts} / {stat.totalDistricts}
+                    Areas complete: {stat.completedDistricts} / {stat.totalDistricts}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -609,6 +609,7 @@ const styles = StyleSheet.create({
   header: {
     flex: 1,
     alignItems: 'center',
+    gap: 6,
   },
   logoutButtonHeader: {
     padding: 8,
@@ -625,25 +626,64 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.lightGrey,
     borderRadius: 16,
     padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  statsPintsRow: {
+  statsCardSecondary: {
+    padding: 14,
+    marginBottom: 24,
+  },
+  statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 14,
   },
-  statsPintsText: {
-    fontSize: 18,
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  statNumber: {
+    fontSize: 42,
+    fontWeight: 'bold',
+    color: COLORS.darkGrey,
+  },
+  statItemLabel: {
+    fontSize: 13,
     fontWeight: '600',
-    color: COLORS.amber,
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    textAlign: 'center',
+  },
+  statNumberSmall: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.darkGrey,
+  },
+  statItemLabelSmall: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  statDivider: {
+    width: 1,
+    height: 64,
+    backgroundColor: '#E0E0E0',
+    marginHorizontal: 8,
+  },
+  statDividerSmall: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#E0E0E0',
+    marginHorizontal: 8,
   },
   areaCountRow: {
     flexDirection: 'row',
@@ -654,6 +694,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
+    minWidth: 32,
   },
   inlinePintsText: {
     fontSize: 13,
@@ -676,54 +717,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#B71C1C',
     lineHeight: 20,
-  },
-  mainStat: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 8,
-  },
-  visitedNumber: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: COLORS.darkGrey,
-  },
-  totalNumber: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: COLORS.mediumGrey,
-    marginLeft: 4,
-  },
-  statLabel: {
-    fontSize: 16,
-    color: COLORS.mediumGrey,
-    marginBottom: 20,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  progressBarContainer: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  progressBarBackground: {
-    flex: 1,
-    height: 12,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 6,
-    overflow: 'hidden',
-    marginRight: 12,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: COLORS.darkGrey,
-    borderRadius: 6,
-  },
-  progressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.darkGrey,
-    minWidth: 50,
-    textAlign: 'right',
   },
   section: {
     marginBottom: 20,
@@ -818,18 +811,12 @@ const styles = StyleSheet.create({
     color: COLORS.mediumGrey,
     letterSpacing: 0.3,
   },
-  postcodeAreaInline: {
-    marginLeft: 6,
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.accentGrey,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
   areaCount: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.accentGrey,
+    minWidth: 56,
+    textAlign: 'right',
   },
   areaProgressBarContainer: {
     flexDirection: 'row',

@@ -259,6 +259,7 @@ export default function MapScreen({ safeAreaInsets }) {
     yearRange,
     showOnlyFavorites,
     showOnlyAchievements,
+    closingTimeMin,
     showFilterScreen,
     allFeatures,
     allOwnerships,
@@ -352,6 +353,7 @@ export default function MapScreen({ safeAreaInsets }) {
     const hasYearRange = yearRange && yearRange.min !== null && yearRange.max !== null;
     const hasFavorites = showOnlyFavorites === true;
     const hasAchievements = showOnlyAchievements === true;
+    const hasClosingTime = closingTimeMin != null;
 
     return allPubs.filter((pub) => {
       if (selectedDistrictFeature && !pubInsideFeature(pub, selectedDistrictFeature)) return false;
@@ -371,6 +373,15 @@ export default function MapScreen({ safeAreaInsets }) {
       }
       if (hasFavorites && pub.isFavorite !== true) return false;
       if (hasAchievements && (!pub.achievements || pub.achievements.length === 0)) return false;
+      if (hasClosingTime) {
+        const closingHour = pub.closing_time ?? 23;
+        if (closingTimeMin === 'open_now') {
+          const currentHour = new Date().getHours();
+          if (closingHour <= currentHour) return false;
+        } else if (closingTimeMin === 'past_midnight') {
+          if (closingHour < 24) return false;
+        }
+      }
       return true;
     });
   }, [
@@ -382,6 +393,7 @@ export default function MapScreen({ safeAreaInsets }) {
     yearRange,
     showOnlyFavorites,
     showOnlyAchievements,
+    closingTimeMin,
   ]);
 
   const pubFeatureCollection = useMemo(
@@ -1170,8 +1182,8 @@ export default function MapScreen({ safeAreaInsets }) {
               'icon-size': [
                 'interpolate', ['linear'], ['zoom'],
                 ZOOM_LEVELS.DISTRICTS_MIN, 0.06,
-                ZOOM_LEVELS.PUBS_MIN,      0.12,
-                17.5,                      0.16,
+                ZOOM_LEVELS.PUBS_MIN,      0.10,
+                17.5,                      0.12,
               ],
               'icon-allow-overlap': true,
               'icon-ignore-placement': true,
@@ -1229,6 +1241,7 @@ export default function MapScreen({ safeAreaInsets }) {
         maxYear={availableYearRange.max}
         showOnlyFavorites={showOnlyFavorites}
         showOnlyAchievements={showOnlyAchievements}
+        closingTimeMin={closingTimeMin}
         onApply={handleFilterApply}
       />
 
