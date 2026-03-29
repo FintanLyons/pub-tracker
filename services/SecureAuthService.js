@@ -3,9 +3,12 @@ import { clearVisitedFavoriteCache } from './PubService';
 
 export const registerUserSecure = async (email, username, password) => {
   try {
-    // Sign up first to get an authenticated session -- the users table
-    // SELECT policy requires authentication, so we can't check username
-    // availability before signing up.
+    // Clear any stale local session so signUp with "Confirm email" ON
+    // doesn't leave old tokens in AsyncStorage. Local scope only —
+    // no server call, no risk of network failure aborting registration.
+    await supabase.auth.signOut({ scope: 'local' });
+    clearVisitedFavoriteCache();
+
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -17,80 +20,80 @@ export const registerUserSecure = async (email, username, password) => {
       if (msg.includes('seconds') || msg.includes('rate limit')) {
         throw new Error('Too many registration attempts. Please wait a minute and try again.');
       }
-      if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('exist') || msg.toLowerCase().includes('duplicate')) {
-        throw new Error('EMAIL_ALREADY_EXISTS');
+      if (
+        msg.toLowerCase().includes('already') ||
+        msg.toLowerCase().includes('exist') ||
+        msg.toLowerCase().includes('duplicate')
+      ) {
+        throw new Error('This email is already registered. Please use the login tab instead.');
       }
       throw signUpError;
     }
 
     const userData = authData.user;
     const sessionData = authData.session;
-    if (!userData?.id) throw new Error('Registration failed - user ID missing');
+    if (!userData?.id) throw new Error('Registration failed — please try again.');
 
-    const hasSession = !!sessionData?.access_token;
-    const needsEmailVerification = !userData.email_confirmed_at;
+    const emptyIdentities = !userData.identities || userData.identities.length === 0;
+    const createdSecondsAgo = (Date.now() - new Date(userData.created_at).getTime()) / 1000;
+    if (emptyIdentities || (!sessionData && createdSecondsAgo > 5)) {
+      throw new Error('This email is already registered. Please use the login tab instead.');
+    }
 
-    let user = {
-      id: userData.id,
-      email: userData.email || email,
-      username: userData.user_metadata?.username || username,
-    };
+    if (!sessionData) {
+      return { user: null, session: null, needsEmailVerification: true };
+    }
 
-    if (hasSession) {
-      // Now authenticated -- check username availability before creating profile
-      const { data: existing } = await supabase
-        .from('users')
-        .select('username')
-        .eq('username', username)
-        .limit(1);
+    // Session exists — email auto-confirmed. Create profile now.
+    const { data: existing } = await supabase
+      .from('users')
+      .select('username')
+      .eq('username', username)
+      .limit(1);
 
-      if (existing && existing.length > 0) {
-        // Clean up the auth user we just created
-        await supabase.auth.signOut();
-        throw new Error('Username already taken');
-      }
+    if (existing && existing.length > 0) {
+      await supabase.auth.signOut({ scope: 'local' });
+      throw new Error('Username already taken');
+    }
 
-      const { data: profile, error: profileError } = await supabase
-        .from('users')
-        .upsert({
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .upsert(
+        {
           id: userData.id,
           email,
           username,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'id' })
-        .select()
-        .single();
+        },
+        { onConflict: 'id' },
+      )
+      .select()
+      .single();
 
-      if (profileError) {
-        // Unique constraint violation on username = username taken (race condition)
-        if (profileError.code === '23505' && profileError.message?.includes('username')) {
-          await supabase.auth.signOut();
-          throw new Error('Username already taken');
-        }
-        throw profileError;
+    if (profileError) {
+      if (profileError.code === '23505' && profileError.message?.includes('username')) {
+        await supabase.auth.signOut({ scope: 'local' });
+        throw new Error('Username already taken');
       }
-
-      if (profile) user = profile;
-
-      try {
-        await syncUserStatsLite(user.id);
-      } catch {
-        // Stats sync is best-effort during registration
-      }
+      throw profileError;
     }
 
-    return { user, session: sessionData, needsEmailVerification };
+    try {
+      await syncUserStatsLite(userData.id);
+    } catch {
+      // best-effort
+    }
+
+    const user = profile || { id: userData.id, email, username };
+    return { user, session: sessionData, needsEmailVerification: false };
   } catch (error) {
     const msg = error.message || 'Registration failed';
-    if (msg === 'EMAIL_ALREADY_EXISTS') {
-      throw new Error('This email is already registered. Please use the login tab instead.');
-    }
     if (msg.includes('already registered') || msg.includes('User already registered')) {
       throw new Error('This email is already registered. Please use the login tab instead.');
     }
     if (msg.includes('Username already taken')) throw error;
-    if (msg.includes('rate limit') || msg.includes('seconds')) {
+    if (msg.includes('rate limit') || msg.includes('seconds') || msg.includes('wait')) {
       throw new Error('Too many attempts. Please wait a minute and try again.');
     }
     if (msg.includes('invalid')) {
@@ -102,37 +105,37 @@ export const registerUserSecure = async (email, username, password) => {
 
 export const loginUserSecure = async (usernameOrEmail, password) => {
   try {
+    await supabase.auth.signOut({ scope: 'local' });
+    clearVisitedFavoriteCache();
+
     let email = usernameOrEmail;
 
     if (!usernameOrEmail.includes('@')) {
-      // Username login: look up email via an RPC or try signing in directly.
-      // Since users SELECT requires auth, we use the Supabase Auth admin-safe
-      // approach: store the username, attempt sign-in with a helper query.
-      // We use a lightweight RPC if available, otherwise fall back to a
-      // two-step approach: first try email=username (won't work), then look
-      // up after a temporary sign-in.
-      //
-      // Pragmatic solution: call a DB function that anon can execute.
-      const { data: emailResult, error: rpcError } = await supabase
-        .rpc('get_email_by_username', { lookup_username: usernameOrEmail });
+      const { data: emailResult, error: rpcError } = await supabase.rpc(
+        'get_email_by_username',
+        { lookup_username: usernameOrEmail },
+      );
 
       if (rpcError || !emailResult) {
-        throw new Error('User not found');
+        throw new Error('Invalid username or password.');
       }
       email = emailResult;
     }
 
-    const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    // signInWithPassword replaces whatever session is in AsyncStorage.
+    const { data: authData, error: signInError } =
+      await supabase.auth.signInWithPassword({ email, password });
 
-    if (signInError) throw new Error(signInError.message || 'Login failed');
-    if (!authData.user.email_confirmed_at) {
-      throw new Error('Email not confirmed. Please verify your email before logging in.');
+    if (signInError) {
+      const m = (signInError.message || '').toLowerCase();
+      if (m.includes('email not confirmed') || m.includes('not confirmed')) {
+        throw new Error('Email not confirmed. Please verify your email before logging in.');
+      }
+      throw new Error('Invalid username or password.');
     }
 
-    // Fetch or create user profile (now authenticated)
+    // Ensure public.users profile exists (might be missing if user
+    // registered with "Confirm email" ON — profile wasn't created then).
     let { data: users } = await supabase
       .from('users')
       .select('*')
@@ -146,15 +149,25 @@ export const loginUserSecure = async (usernameOrEmail, password) => {
         .insert({
           id: authData.user.id,
           email: authData.user.email,
-          username: authData.user.user_metadata?.username || authData.user.email.split('@')[0],
+          username:
+            authData.user.user_metadata?.username ||
+            authData.user.email.split('@')[0],
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .select()
         .single();
 
-      if (createError) throw new Error('Unable to set up your account. Please contact support.');
+      if (createError) {
+        throw new Error('Unable to set up your account. Please contact support.');
+      }
       user = newUser;
+
+      try {
+        await syncUserStatsLite(user.id);
+      } catch {
+        // best-effort
+      }
     } else {
       user = users[0];
     }
@@ -162,10 +175,14 @@ export const loginUserSecure = async (usernameOrEmail, password) => {
     return { user, session: authData.session };
   } catch (error) {
     const msg = error.message || '';
-    if (msg.includes('User not found') || msg.includes('Invalid') || msg.includes('not confirmed') || msg.includes('Unable to')) {
+    if (
+      msg.includes('Invalid username or password') ||
+      msg.includes('Email not confirmed') ||
+      msg.includes('Unable to set up')
+    ) {
       throw error;
     }
-    throw error;
+    throw new Error('Invalid username or password.');
   }
 };
 
@@ -179,9 +196,124 @@ export const logoutUserSecure = async () => {
   }
 };
 
+/**
+ * Deletes the current user's app data and auth record via the
+ * `delete_my_account` RPC (scripts/tier2_security_hardening.sql).
+ */
+export const deleteAccountSecure = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const { error } = await supabase.rpc('delete_my_account');
+  if (error) throw error;
+
+  clearVisitedFavoriteCache();
+
+  // The auth.users row is already gone, so signOut may return an error —
+  // that's expected. We just need to clear local storage.
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // Expected: JWT user no longer exists.
+  }
+};
+
+export const googleSignInSecure = async () => {
+  const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+
+  GoogleSignin.configure({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  });
+
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  clearVisitedFavoriteCache();
+
+  const response = await GoogleSignin.signIn();
+
+  if (!response.data?.idToken) {
+    throw new Error('Google Sign-In failed — no ID token returned.');
+  }
+
+  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
+    provider: 'google',
+    token: response.data.idToken,
+  });
+
+  if (signInError) throw signInError;
+
+  const authUser = authData.user;
+
+  // Ensure public.users profile exists
+  let { data: users } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .limit(1);
+
+  let user;
+  if (!users || users.length === 0) {
+    // Derive a username from display name, falling back to email prefix
+    const displayName =
+      authUser.user_metadata?.full_name ||
+      authUser.user_metadata?.name ||
+      authUser.email?.split('@')[0] ||
+      'user';
+
+    let baseUsername = displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/__+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 20);
+
+    if (baseUsername.length < 3) baseUsername = baseUsername.padEnd(3, '0');
+
+    // Ensure uniqueness — if taken, append random digits
+    let username = baseUsername;
+    const { data: taken } = await supabase
+      .from('users')
+      .select('username')
+      .eq('username', baseUsername)
+      .limit(1);
+
+    if (taken && taken.length > 0) {
+      username = `${baseUsername.slice(0, 16)}_${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+
+    const { data: newUser, error: createError } = await supabase
+      .from('users')
+      .insert({
+        id: authUser.id,
+        email: authUser.email,
+        username,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (createError) throw new Error('Unable to set up your account. Please contact support.');
+    user = newUser;
+
+    try {
+      await syncUserStatsLite(user.id);
+    } catch {
+      // best-effort
+    }
+  } else {
+    user = users[0];
+  }
+
+  return { user, session: authData.session };
+};
+
 export const getCurrentUserSecure = async () => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
     if (!session) return null;
 
     const { data: users } = await supabase
@@ -196,10 +328,6 @@ export const getCurrentUserSecure = async () => {
   }
 };
 
-/**
- * Lightweight stats sync used during registration.
- * Full implementation lives in UserService to avoid circular deps.
- */
 const syncUserStatsLite = async (userId) => {
   const { data: existing } = await supabase
     .from('user_stats')

@@ -1,7 +1,8 @@
 import React from 'react';
 import { Image, StyleSheet } from 'react-native';
+import { COLORS } from '../constants/theme';
 
-export default function PintGlassIcon({ size = 24, color = '#2C2C2C', style }) {
+export default function PintGlassIcon({ size = 24, color = COLORS.darkGrey, style }) {
   return (
     <Image 
       source={require('../assets/pub_icon.png')}

@@ -280,7 +280,7 @@ export default function LeaderboardScreen() {
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.amber]} />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.amber} colors={[COLORS.amber]} />
       }
     >
       <View style={styles.headerContainer}>

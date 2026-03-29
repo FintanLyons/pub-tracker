@@ -11,8 +11,13 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { registerUserSecure, loginUserSecure } from '../services/SecureAuthService';
+import {
+  registerUserSecure,
+  loginUserSecure,
+  googleSignInSecure,
+} from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { COLORS } from '../constants/theme';
 
@@ -23,62 +28,61 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const validateEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+  const validateEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+  const validateUsername = (text) => /^[a-zA-Z0-9_]{3,20}$/.test(text);
+
+  const clearForm = () => {
+    setPassword('');
+    setConfirmPassword('');
+    setShowPassword(false);
+    setShowConfirmPassword(false);
   };
 
-  const validateUsername = (username) => {
-    // Username must be 3-20 characters, alphanumeric and underscores only
-    const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
-    return usernameRegex.test(username);
+  const switchMode = () => {
+    setIsLogin(!isLogin);
+    setEmail('');
+    setUsername('');
+    clearForm();
   };
 
   const handleAuth = async () => {
-    // Validation
     if (!username.trim()) {
-      Alert.alert('Error', 'Please enter a username');
+      Alert.alert('Error', isLogin ? 'Please enter a username or email' : 'Please enter a username');
       return;
     }
-
-    if (!validateUsername(username)) {
+    if (!isLogin && !validateUsername(username)) {
       Alert.alert(
         'Invalid Username',
-        'Username must be 3-20 characters and contain only letters, numbers, and underscores'
+        'Username must be 3-20 characters and contain only letters, numbers, and underscores',
       );
       return;
     }
-
     if (!isLogin) {
       if (!email.trim()) {
         Alert.alert('Error', 'Please enter an email');
         return;
       }
-
       if (!validateEmail(email)) {
         Alert.alert('Error', 'Please enter a valid email address');
         return;
       }
-
       if (!password) {
         Alert.alert('Error', 'Please enter a password');
         return;
       }
-
       if (password.length < 6) {
         Alert.alert('Error', 'Password must be at least 6 characters');
         return;
       }
-
       if (password !== confirmPassword) {
         Alert.alert('Error', 'Passwords do not match');
         return;
       }
     }
-
     if (!password) {
       Alert.alert('Error', 'Please enter a password');
       return;
@@ -86,173 +90,118 @@ export default function AuthScreen({ onAuthSuccess }) {
 
     try {
       setLoading(true);
-
       if (isLogin) {
-        // For login, we need email not username
-        // Try to find email by username first
-        const { user, session } = await loginUserSecure(email || username, password);
-        
-        // Check if email is verified
-        if (session?.user?.email_confirmed_at) {
-          Alert.alert('Success', 'Welcome back!');
-        } else {
-          Alert.alert(
-            'Email Not Verified',
-            'Please check your email and click the verification link. You can still use the app, but some features may be limited.',
-            [{ text: 'OK' }]
-          );
-        }
+        await loginUserSecure(email || username, password);
+        await onAuthSuccess();
       } else {
-        const { user, session, needsEmailVerification } = await registerUserSecure(
-          email,
-          username,
-          password
-        );
-        
+        const { needsEmailVerification } = await registerUserSecure(email, username, password);
         if (needsEmailVerification) {
           Alert.alert(
-            '📧 Confirm Your Email',
-            'We sent a verification link to ' + email + '.\n\nPlease check your inbox and click the link to verify your email.\n\nOnce verified, come back here and login with your username and password.',
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  // Switch to login tab
-                  setIsLogin(true);
-                  setPassword('');
-                  setConfirmPassword('');
-                }
-              }
-            ]
+            'Check Your Email',
+            `We sent a verification link to ${email}.\n\nClick the link then come back and log in.`,
+            [{ text: 'OK', onPress: () => { setIsLogin(true); clearForm(); } }],
           );
-          // Don't call onAuthSuccess - user needs to verify first
           return;
-        } else {
-          Alert.alert('Success', 'Account created! You can now compete with friends.');
         }
+        Alert.alert('Success', 'Account created!');
+        await onAuthSuccess();
       }
-
-      onAuthSuccess();
     } catch (error) {
-      let errorMessage = error.message;
-      let alertTitle = 'Error';
-      let shouldSwitchToLogin = false;
-      let isExpectedError = false; // Track if this is a user-facing validation error
-      
-      if (errorMessage.includes('Username already taken')) {
-        errorMessage = 'This username is already taken. Please choose another.';
-        isExpectedError = true;
-      } else if (errorMessage.includes('already registered') || errorMessage.includes('login tab instead')) {
-        alertTitle = '❌ Already Registered';
-        errorMessage = 'This email is already registered.\n\nPlease switch to the LOGIN tab and sign in with your username and password.';
-        shouldSwitchToLogin = true;
-        isExpectedError = true;
-      } else if (errorMessage.includes('Too many attempts') || errorMessage.includes('rate limit') || errorMessage.includes('wait')) {
-        alertTitle = '⏱️ Please Wait';
-        errorMessage = 'Too many attempts. Please wait 1 minute before trying again.';
-        isExpectedError = true;
-      } else if (errorMessage.includes('User not found') || errorMessage.includes('Invalid login')) {
-        errorMessage = 'Invalid username/email or password. Please try again.';
-        isExpectedError = true;
-      } else if (errorMessage.includes('Supabase not configured')) {
-        errorMessage = 'Server configuration error. Please contact support.';
-        isExpectedError = false; // This is a system error
-      } else if (errorMessage.includes('Email not confirmed') || errorMessage.includes('not confirmed')) {
-        alertTitle = '📧 Email Not Verified';
-        errorMessage = 'Please verify your email before logging in.\n\nCheck your inbox for the verification link, click it, then try logging in again.';
-        isExpectedError = true;
-      } else if (errorMessage.includes('Invalid email or password')) {
-        errorMessage = 'Invalid credentials. If you just registered, please verify your email first.';
-        isExpectedError = true;
-      }
-      
-      // Only log unexpected system errors, not user-facing validation errors
-      if (!isExpectedError) {
-        console.error('Auth error:', error);
-      }
-      
-      if (shouldSwitchToLogin) {
+      const msg = error.message || 'Something went wrong';
+      if (msg.includes('Username already taken')) {
+        Alert.alert('Error', 'This username is already taken. Please choose another.');
+      } else if (msg.includes('already registered') || msg.includes('login tab instead')) {
+        Alert.alert('Already Registered', msg, [
+          { text: 'Switch to Login', onPress: () => { setIsLogin(true); clearForm(); } },
+        ]);
+      } else if (msg.includes('Too many') || msg.includes('rate limit') || msg.includes('wait')) {
+        Alert.alert('Please Wait', msg);
+      } else if (msg.includes('Invalid username or password') || msg.includes('Invalid login')) {
+        Alert.alert('Error', 'Invalid username/email or password.');
+      } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
         Alert.alert(
-          alertTitle,
-          errorMessage,
-          [
-            {
-              text: 'Switch to Login',
-              onPress: () => {
-                setIsLogin(true);
-                setPassword('');
-                setConfirmPassword('');
-              }
-            }
-          ]
+          'Email Not Verified',
+          'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
         );
       } else {
-        Alert.alert(alertTitle, errorMessage);
+        console.error('Auth error:', error);
+        Alert.alert('Error', msg);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const switchMode = () => {
-    setIsLogin(!isLogin);
-    setEmail('');
-    setPassword('');
-    setConfirmPassword('');
-    setShowPassword(false);
-    setShowConfirmPassword(false);
+  const handleGoogleSignIn = async () => {
+    try {
+      setGoogleLoading(true);
+      await googleSignInSecure();
+      await onAuthSuccess();
+    } catch (error) {
+      const msg = error.message || '';
+      // User cancelled — not an error worth showing
+      if (
+        msg.includes('SIGN_IN_CANCELLED') ||
+        msg.includes('canceled') ||
+        msg.includes('cancelled')
+      ) {
+        return;
+      }
+      if (msg.includes('PLAY_SERVICES_NOT_AVAILABLE')) {
+        Alert.alert('Error', 'Google Play Services is not available on this device.');
+        return;
+      }
+      console.error('Google Sign-In error:', error);
+      Alert.alert('Error', 'Google Sign-In failed. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   return (
     <SafeAreaProvider>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <View style={styles.header}>
-            <PintGlassIcon size={64} color={COLORS.amber} />
-            <Text style={styles.title}>Pub Tracker</Text>
-            <Text style={styles.subtitle}>
-              {isLogin ? 'Welcome Back!' : 'Join the Community'}
-            </Text>
-          </View>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <PintGlassIcon size={56} color={COLORS.amber} />
+              <Text style={styles.title}>Pub Tracker</Text>
+              <Text style={styles.subtitle}>London's pub community</Text>
+            </View>
 
-          <View style={styles.card}>
+            {/* Tab switcher */}
             <View style={styles.tabContainer}>
               <TouchableOpacity
                 style={[styles.tab, isLogin && styles.activeTab]}
-                onPress={() => setIsLogin(true)}
+                onPress={() => { setIsLogin(true); clearForm(); }}
               >
-                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>
-                  Login
-                </Text>
+                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign In</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.tab, !isLogin && styles.activeTab]}
                 onPress={() => setIsLogin(false)}
               >
-                <Text style={[styles.tabText, !isLogin && styles.activeTabText]}>
-                  Register
-                </Text>
+                <Text style={[styles.tabText, !isLogin && styles.activeTabText]}>Register</Text>
               </TouchableOpacity>
             </View>
 
+            {/* Form */}
             <View style={styles.form}>
               {!isLogin && (
-                <View style={styles.inputContainer}>
-                  <MaterialCommunityIcons
-                    name="email-outline"
-                    size={20}
-                    color={COLORS.mediumGrey}
-                    style={styles.inputIcon}
-                  />
+                <View style={styles.inputRow}>
+                  <MaterialCommunityIcons name="email-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Email"
+                    placeholderTextColor={COLORS.mediumGrey}
                     value={email}
                     onChangeText={setEmail}
                     autoCapitalize="none"
@@ -262,16 +211,12 @@ export default function AuthScreen({ onAuthSuccess }) {
                 </View>
               )}
 
-              <View style={styles.inputContainer}>
-                <MaterialCommunityIcons
-                  name="account-outline"
-                  size={20}
-                  color={COLORS.mediumGrey}
-                  style={styles.inputIcon}
-                />
+              <View style={styles.inputRow}>
+                <MaterialCommunityIcons name="account-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder={isLogin ? "Username or Email" : "Username"}
+                  placeholder={isLogin ? 'Username or email' : 'Username'}
+                  placeholderTextColor={COLORS.mediumGrey}
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
@@ -279,212 +224,299 @@ export default function AuthScreen({ onAuthSuccess }) {
                 />
               </View>
 
-              <View style={styles.inputContainer}>
-                <MaterialCommunityIcons
-                  name="lock-outline"
-                  size={20}
-                  color={COLORS.mediumGrey}
-                  style={styles.inputIcon}
-                />
+              <View style={styles.inputRow}>
+                <MaterialCommunityIcons name="lock-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
+                  placeholderTextColor={COLORS.mediumGrey}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
                   autoComplete="password"
                 />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
-                >
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
                   <MaterialCommunityIcons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={18}
                     color={COLORS.mediumGrey}
                   />
                 </TouchableOpacity>
               </View>
 
               {!isLogin && (
-                <View style={styles.inputContainer}>
-                  <MaterialCommunityIcons
-                    name="lock-check-outline"
-                    size={20}
-                    color={COLORS.mediumGrey}
-                    style={styles.inputIcon}
-                  />
+                <View style={styles.inputRow}>
+                  <MaterialCommunityIcons name="lock-check-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
-                    placeholder="Confirm Password"
+                    placeholder="Confirm password"
+                    placeholderTextColor={COLORS.mediumGrey}
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                     secureTextEntry={!showConfirmPassword}
                     autoComplete="password"
                   />
-                  <TouchableOpacity
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    style={styles.eyeIcon}
-                  >
+                  <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeBtn}>
                     <MaterialCommunityIcons
-                      name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
-                      size={20}
+                      name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                      size={18}
                       color={COLORS.mediumGrey}
                     />
                   </TouchableOpacity>
                 </View>
               )}
 
-              <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
-                onPress={handleAuth}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.buttonText}>
-                    {isLogin ? 'Login' : 'Create Account'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-
               {!isLogin && (
                 <Text style={styles.hint}>
-                  Username: 3-20 characters (letters, numbers, underscores)
+                  Username: 3–20 chars, letters / numbers / underscores only
                 </Text>
               )}
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, loading && styles.btnDisabled]}
+                onPress={handleAuth}
+                disabled={loading || googleLoading}
+              >
+                {loading
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign In' : 'Create Account'}</Text>
+                }
+              </TouchableOpacity>
+
+              {/* Divider */}
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Google Sign-In */}
+              <TouchableOpacity
+                style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
+                onPress={handleGoogleSignIn}
+                disabled={loading || googleLoading}
+              >
+                {googleLoading ? (
+                  <ActivityIndicator size="small" color={COLORS.darkGrey} />
+                ) : (
+                  <>
+                    <GoogleIcon />
+                    <Text style={styles.googleBtnText}>Continue with Google</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+            {/* Footer switch */}
+            <TouchableOpacity style={styles.switchRow} onPress={switchMode}>
+              <Text style={styles.switchText}>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <Text style={styles.switchLink}>{isLogin ? 'Register' : 'Sign in'}</Text>
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-// Import SafeAreaProvider for standalone use
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+// Minimal inline Google 'G' SVG mark rendered with text — avoids svg dependency
+function GoogleIcon() {
+  return (
+    <View style={styles.googleIconContainer}>
+      <Text style={styles.googleIconText}>G</Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F7F7F7',
+  },
+  flex: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
-    paddingTop: 60,
+    paddingHorizontal: 28,
+    paddingVertical: 32,
   },
+
+  // Header
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '700',
     color: COLORS.darkGrey,
-    marginTop: 16,
+    marginTop: 12,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: COLORS.mediumGrey,
-    marginTop: 8,
+    marginTop: 4,
   },
-  card: {
-    backgroundColor: COLORS.lightGrey,
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
+
+  // Tabs
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#E0E0E0',
-    borderRadius: 12,
-    padding: 4,
+    backgroundColor: '#E5E5E5',
+    borderRadius: 10,
+    padding: 3,
     marginBottom: 24,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
     alignItems: 'center',
     borderRadius: 8,
   },
   activeTab: {
     backgroundColor: '#FFFFFF',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
     elevation: 2,
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: COLORS.mediumGrey,
   },
   activeTabText: {
     color: COLORS.darkGrey,
   },
+
+  // Form
   form: {
-    gap: 16,
+    gap: 12,
   },
-  inputContainer: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    height: 52,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: COLORS.darkGrey,
   },
-  eyeIcon: {
+  eyeBtn: {
     padding: 4,
-    marginLeft: 8,
-  },
-  button: {
-    backgroundColor: COLORS.amber,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    marginLeft: 6,
   },
   hint: {
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.mediumGrey,
     textAlign: 'center',
-    marginTop: -8,
+    marginTop: -4,
+    lineHeight: 15,
+  },
+
+  // Primary button
+  primaryBtn: {
+    backgroundColor: COLORS.amber,
+    paddingVertical: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 4,
+    shadowColor: COLORS.amber,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  btnDisabled: {
+    opacity: 0.55,
+  },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+
+  // Divider
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E0E0E0',
+  },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 12,
+    color: COLORS.mediumGrey,
+    fontWeight: '500',
+  },
+
+  // Google button
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    paddingVertical: 13,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  googleIconContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 2,
+    backgroundColor: '#4285F4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleIconText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 14,
+  },
+  googleBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+
+  // Footer
+  switchRow: {
+    alignItems: 'center',
+    marginTop: 28,
+  },
+  switchText: {
+    fontSize: 14,
+    color: COLORS.mediumGrey,
+  },
+  switchLink: {
+    color: COLORS.amber,
+    fontWeight: '700',
   },
 });
-
