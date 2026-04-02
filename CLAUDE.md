@@ -46,11 +46,13 @@ services/         PubService       — fetch pubs, toggle visited/favourite
 screens/          MapScreen, ProfileScreen, LeaderboardScreen,
                   AchievementsScreen, AuthScreen, FilterScreen
 
-screens/map/hooks/  useViewportPubs, useFilterState,
-                    useLocation, useMapRegion, useNearestAreas,
-                    useImageSource
+screens/map/hooks/  useMapCamera — camera ref, location, fit/center/zoom
+                    useViewportPubs — pub fetching, merge, bounds tracking
+                    useMapInteraction — search + selection + deep-link + toggles
+                    useFilterState, useImageSource
 
-screens/map/        layerUtils.js — postcode area + district GeoJSON layers
+screens/map/        mapUtils.js — pure geometry helpers (bounds, feature search)
+                    layerUtils.js — postcode area + district GeoJSON layers
 
 data/geo/           london_postcode_districts.min.json (district polygons);
                     london_postcode_areas.min.json + london_postcode_area_label_points.min.json
