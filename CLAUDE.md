@@ -26,7 +26,7 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 - Level = `floor(total_score / 50) + 1`
 
 Scoring logic lives in two places — keep them in sync if rules change:
-- Client: `utils/levelSystem.js` (used for the Achievements progress bar only; level formula only)
+- Client: `utils/levelSystem.js` (used for Profile level display; level formula only)
 - Server: `scripts/phase6_postcode_migration.sql` (and legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
 
 ## Architecture
@@ -39,18 +39,20 @@ services/         PubService       — fetch pubs, toggle visited/favourite
                   FriendsService   — send/accept requests, leaderboard
                   LeagueService    — create/join/leave leagues
                   UserService      — username search
-                  SecureAuthService — login, register, logout
+                  SecureAuthService — email/password login & register, Google, `ensureUserStub`, `updatePublicUsername` + deferred auth metadata sync, logout
                   ReportService    — report pubs / missing pubs
                   LeaderboardCache — in-memory leaderboard cache
 
-screens/          MapScreen, ProfileScreen, LeaderboardScreen,
-                  AchievementsScreen, AuthScreen, FilterScreen
+screens/          MapScreen, ProfileScreen (stats + trophy modal), LeaderboardScreen,
+                  AuthScreen, ChooseUsernameScreen (post-auth until username set), OnboardingScreen, FilterScreen
 
-screens/map/hooks/  useViewportPubs, useFilterState,
-                    useLocation, useMapRegion, useNearestAreas,
-                    useImageSource
+screens/map/hooks/  useMapCamera — camera ref, location, fit/center/zoom
+                    useViewportPubs — pub fetching, merge, bounds tracking
+                    useMapInteraction — search + selection + deep-link + toggles
+                    useFilterState, useImageSource
 
-screens/map/        layerUtils.js — postcode area + district GeoJSON layers
+screens/map/        mapUtils.js — pure geometry helpers (bounds, feature search)
+                    layerUtils.js — postcode area + district GeoJSON layers
 
 data/geo/           london_postcode_districts.min.json (district polygons);
                     london_postcode_areas.min.json + london_postcode_area_label_points.min.json
@@ -62,7 +64,8 @@ components/       DraggablePubCard, PubCardContent, SearchBar,
                   SearchSuggestions, AddFriendModal, CreateLeagueModal,
                   JoinLeagueModal, LeagueActionsModal, ReportModal,
                   ReportMissingPubModal, OfflineOverlay, ErrorBoundary,
-                  AreaIcon, PintGlassIcon, RangeSlider
+                  UserAchievementsPanel (trophy grid in Profile modal),
+                  PintGlassIcon, RangeSlider
 
 scripts/          SQL migrations and Python data-pipeline scripts.
                   Not deployed code — run manually against Supabase.
@@ -77,7 +80,7 @@ scripts/          SQL migrations and Python data-pipeline scripts.
 | `visited_pubs` | User visit records — trigger auto-updates `user_stats` on INSERT/DELETE |
 | `favorite_pubs` | User favourites |
 | `user_stats` | Denormalised score, level, pubs_visited per user — maintained by DB trigger |
-| `users` | User profiles — username (unique), email |
+| `users` | User profiles — email; `username` unique when set, **nullable** until user picks one (`scripts/username_nullable_migration.sql`) |
 | `friendships` | Bidirectional friendship rows with status `pending` / `accepted` |
 | `leagues` | Private leagues with a unique 6-character invite code |
 | `league_members` | Membership join table |
@@ -91,7 +94,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 - `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`) + totalScore + level
 - `search_pubs(query, limit)` — name search; includes `postcode_district`, `postcode_area`
 - `compute_user_stats(user_id)` — recompute and upsert a user's `user_stats` row
-- `get_email_by_username(username)` — used for username-based login
+- `get_email_by_username(username)` — legacy RPC in some SQL scripts; the app logs in with **email + password** only
 
 ## Key conventions
 
@@ -101,7 +104,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 - **Viewport-based pub loading** — `useViewportPubs` fetches only the pubs visible on screen (debounced 400 ms, bounds-cached to prevent duplicate fetches)
 - **Stats are server-computed** — never aggregate visit counts client-side; use the RPCs
 - **Visited/favourite cache** — module-level Sets in `PubService`. Call `clearVisitedFavoriteCache()` on logout (done in `AuthContext`)
-- **`useFocusEffect` staleness check** — ProfileScreen and AchievementsScreen refresh stats if `lastUpdated` is older than 30 s
+- **`useFocusEffect` staleness check** — ProfileScreen refreshes stats if `lastUpdated` is older than 30 s; opening the trophy modal also refreshes when stale
 
 ## Colour theme
 

@@ -1,0 +1,106 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchLondonPubs } from '../../../services/PubService';
+import { boundsContain, expandBounds, mergeBounds, MIN_PUB_FETCH_ZOOM, parseVisibleBounds } from '../mapUtils';
+
+export function useViewportPubs({ isFocused, mapZoomRef }) {
+  const [allPubs, setAllPubs] = useState([]);
+  const [viewportBounds, setViewportBounds] = useState(null);
+
+  const loadedPubBoundsRef = useRef(null);
+  const inFlightPubFetchRef = useRef(false);
+  const latestPubFetchTokenRef = useRef(0);
+  const pubFetchTimeoutRef = useRef(null);
+
+  useEffect(() => () => {
+    if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+  }, []);
+
+  const mergeFetchedPubs = useCallback((incomingPubs) => {
+    setAllPubs((current) => {
+      const nextById = new Map(current.map((pub) => [pub.id, pub]));
+      (Array.isArray(incomingPubs) ? incomingPubs : []).forEach((pub) => {
+        if (pub?.id) nextById.set(pub.id, pub);
+      });
+      return Array.from(nextById.values());
+    });
+  }, []);
+
+  const requestViewportPubs = useCallback((boundsToFetch) => {
+    if (!boundsToFetch || inFlightPubFetchRef.current) return;
+    inFlightPubFetchRef.current = true;
+    const token = latestPubFetchTokenRef.current + 1;
+    latestPubFetchTokenRef.current = token;
+
+    fetchLondonPubs({ bounds: boundsToFetch })
+      .then((pubs) => {
+        if (latestPubFetchTokenRef.current !== token) return;
+        mergeFetchedPubs(pubs);
+        loadedPubBoundsRef.current = mergeBounds(loadedPubBoundsRef.current, boundsToFetch);
+      })
+      .catch((error) => {
+        console.error('Failed to load viewport pubs:', error);
+      })
+      .finally(() => {
+        if (latestPubFetchTokenRef.current === token) {
+          inFlightPubFetchRef.current = false;
+        }
+      });
+  }, [mergeFetchedPubs]);
+
+  const scheduleViewportPubFetch = useCallback((nextBounds, zoomLevel) => {
+    if (!isFocused) return;
+    if (!nextBounds) return;
+    const effectiveZoom = Number.isFinite(zoomLevel) ? zoomLevel : mapZoomRef.current;
+    if (!Number.isFinite(effectiveZoom) || effectiveZoom < MIN_PUB_FETCH_ZOOM) return;
+
+    const bufferedBounds = expandBounds(nextBounds);
+    if (!bufferedBounds) return;
+    if (boundsContain(loadedPubBoundsRef.current, bufferedBounds)) return;
+
+    if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+    pubFetchTimeoutRef.current = setTimeout(() => {
+      requestViewportPubs(bufferedBounds);
+    }, 120);
+  }, [isFocused, mapZoomRef, requestViewportPubs]);
+
+  useEffect(() => {
+    if (!viewportBounds) return;
+    scheduleViewportPubFetch(viewportBounds, mapZoomRef.current);
+    return () => {
+      if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+    };
+  }, [viewportBounds, mapZoomRef, scheduleViewportPubFetch]);
+
+  const handleRegionChange = useCallback((event) => {
+    const feature = event?.nativeEvent;
+    const zoomLevel = Number.isFinite(feature?.zoomLevel) ? feature.zoomLevel : feature?.zoom;
+    if (Number.isFinite(zoomLevel)) {
+      mapZoomRef.current = zoomLevel;
+    }
+    const nextBounds = parseVisibleBounds(feature?.visibleBounds ?? feature?.bounds);
+    if (nextBounds) {
+      setViewportBounds((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.north - nextBounds.north) < 0.0005 &&
+          Math.abs(prev.south - nextBounds.south) < 0.0005 &&
+          Math.abs(prev.east - nextBounds.east) < 0.0005 &&
+          Math.abs(prev.west - nextBounds.west) < 0.0005
+        ) {
+          return prev;
+        }
+        return nextBounds;
+      });
+      scheduleViewportPubFetch(nextBounds, zoomLevel);
+    }
+  }, [mapZoomRef, scheduleViewportPubFetch]);
+
+  return {
+    allPubs,
+    setAllPubs,
+    requestViewportPubs,
+    scheduleViewportPubFetch,
+    handleRegionChange,
+    loadedPubBoundsRef,
+  };
+}

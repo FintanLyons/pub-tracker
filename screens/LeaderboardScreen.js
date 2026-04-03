@@ -264,12 +264,17 @@ export default function LeaderboardScreen() {
   if (!currentUser) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <MaterialCommunityIcons name="crown" size={48} color={COLORS.darkGrey} />
-          <Text style={styles.title}>Leaderboard</Text>
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Please log in to view the leaderboard</Text>
+        <View style={styles.contentContainerLoggedOut}>
+          <View style={styles.headerContainer}>
+            <View style={styles.headerSideSlot} />
+            <View style={styles.headerTitleWrap}>
+              <Text style={styles.headerTitle}>Leaderboard</Text>
+            </View>
+            <View style={styles.headerSideSlot} />
+          </View>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Please log in to view the leaderboard</Text>
+          </View>
         </View>
       </View>
     );
@@ -284,10 +289,9 @@ export default function LeaderboardScreen() {
       }
     >
       <View style={styles.headerContainer}>
-        <View style={styles.spacer} />
-        <View style={styles.header}>
-          <MaterialCommunityIcons name="crown" size={48} color={COLORS.darkGrey} />
-          <Text style={styles.title}>Leaderboard</Text>
+        <View style={styles.headerSideSlot} />
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitle}>Leaderboard</Text>
         </View>
         <TouchableOpacity
           style={styles.notificationButton}
@@ -295,6 +299,8 @@ export default function LeaderboardScreen() {
             setOpenAddFriendOnRequests(true);
             setShowAddFriendModal(true);
           }}
+          accessibilityLabel="Friend requests and notifications"
+          accessibilityRole="button"
         >
           <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
           {pendingRequestsCount > 0 && (
@@ -499,6 +505,11 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 40,
   },
+  contentContainerLoggedOut: {
+    padding: 20,
+    paddingTop: 40,
+    flex: 1,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -507,29 +518,37 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  spacer: {
-    width: 40,
-  },
-  header: {
-    flex: 1,
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+  headerSideSlot: {
+    width: 40,
+    height: 40,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    minHeight: 40,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
     color: COLORS.darkGrey,
-    marginTop: 12,
+    textAlign: 'center',
+    width: '100%',
   },
   notificationButton: {
     padding: 8,
     borderRadius: 8,
     backgroundColor: COLORS.lightGrey,
-    marginTop: 8,
     position: 'relative',
+    minWidth: 40,
+    minHeight: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   badge: {
     position: 'absolute',

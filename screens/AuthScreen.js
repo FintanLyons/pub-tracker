@@ -24,7 +24,6 @@ import { COLORS } from '../constants/theme';
 export default function AuthScreen({ onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -33,7 +32,6 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const validateEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
-  const validateUsername = (text) => /^[a-zA-Z0-9_]{3,20}$/.test(text);
 
   const clearForm = () => {
     setPassword('');
@@ -44,36 +42,25 @@ export default function AuthScreen({ onAuthSuccess }) {
 
   const switchMode = () => {
     setIsLogin(!isLogin);
-    setEmail('');
-    setUsername('');
     clearForm();
   };
 
   const handleAuth = async () => {
-    if (!username.trim()) {
-      Alert.alert('Error', isLogin ? 'Please enter a username or email' : 'Please enter a username');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert('Error', 'Please enter your email');
       return;
     }
-    if (!isLogin && !validateUsername(username)) {
-      Alert.alert(
-        'Invalid Username',
-        'Username must be 3-20 characters and contain only letters, numbers, and underscores',
-      );
+    if (!validateEmail(trimmedEmail)) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
+    if (!password) {
+      Alert.alert('Error', 'Please enter a password');
+      return;
+    }
+
     if (!isLogin) {
-      if (!email.trim()) {
-        Alert.alert('Error', 'Please enter an email');
-        return;
-      }
-      if (!validateEmail(email)) {
-        Alert.alert('Error', 'Please enter a valid email address');
-        return;
-      }
-      if (!password) {
-        Alert.alert('Error', 'Please enter a password');
-        return;
-      }
       if (password.length < 6) {
         Alert.alert('Error', 'Password must be at least 6 characters');
         return;
@@ -83,22 +70,18 @@ export default function AuthScreen({ onAuthSuccess }) {
         return;
       }
     }
-    if (!password) {
-      Alert.alert('Error', 'Please enter a password');
-      return;
-    }
 
     try {
       setLoading(true);
       if (isLogin) {
-        await loginUserSecure(email || username, password);
+        await loginUserSecure(trimmedEmail, password);
         await onAuthSuccess();
       } else {
-        const { needsEmailVerification } = await registerUserSecure(email, username, password);
+        const { needsEmailVerification } = await registerUserSecure(trimmedEmail, password);
         if (needsEmailVerification) {
           Alert.alert(
             'Check Your Email',
-            `We sent a verification link to ${email}.\n\nClick the link then come back and log in.`,
+            `We sent a verification link to ${trimmedEmail}.\n\nClick the link then come back and log in.`,
             [{ text: 'OK', onPress: () => { setIsLogin(true); clearForm(); } }],
           );
           return;
@@ -108,16 +91,16 @@ export default function AuthScreen({ onAuthSuccess }) {
       }
     } catch (error) {
       const msg = error.message || 'Something went wrong';
-      if (msg.includes('Username already taken')) {
-        Alert.alert('Error', 'This username is already taken. Please choose another.');
-      } else if (msg.includes('already registered') || msg.includes('login tab instead')) {
+      if (msg.includes('already registered') || msg.includes('login tab instead')) {
         Alert.alert('Already Registered', msg, [
           { text: 'Switch to Login', onPress: () => { setIsLogin(true); clearForm(); } },
         ]);
       } else if (msg.includes('Too many') || msg.includes('rate limit') || msg.includes('wait')) {
         Alert.alert('Please Wait', msg);
-      } else if (msg.includes('Invalid username or password') || msg.includes('Invalid login')) {
-        Alert.alert('Error', 'Invalid username/email or password.');
+      } else if (msg.includes('Invalid email or password')) {
+        Alert.alert('Error', 'Invalid email or password.');
+      } else if (msg.includes('valid email')) {
+        Alert.alert('Error', msg);
       } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
         Alert.alert(
           'Email Not Verified',
@@ -139,7 +122,6 @@ export default function AuthScreen({ onAuthSuccess }) {
       await onAuthSuccess();
     } catch (error) {
       const msg = error.message || '';
-      // User cancelled — not an error worth showing
       if (
         msg.includes('SIGN_IN_CANCELLED') ||
         msg.includes('canceled') ||
@@ -170,14 +152,12 @@ export default function AuthScreen({ onAuthSuccess }) {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* Header */}
             <View style={styles.header}>
               <PintGlassIcon size={56} color={COLORS.amber} />
               <Text style={styles.title}>Pub Tracker</Text>
               <Text style={styles.subtitle}>London's pub community</Text>
             </View>
 
-            {/* Tab switcher */}
             <View style={styles.tabContainer}>
               <TouchableOpacity
                 style={[styles.tab, isLogin && styles.activeTab]}
@@ -193,34 +173,18 @@ export default function AuthScreen({ onAuthSuccess }) {
               </TouchableOpacity>
             </View>
 
-            {/* Form */}
             <View style={styles.form}>
-              {!isLogin && (
-                <View style={styles.inputRow}>
-                  <MaterialCommunityIcons name="email-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Email"
-                    placeholderTextColor={COLORS.mediumGrey}
-                    value={email}
-                    onChangeText={setEmail}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    autoComplete="email"
-                  />
-                </View>
-              )}
-
               <View style={styles.inputRow}>
-                <MaterialCommunityIcons name="account-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
+                <MaterialCommunityIcons name="email-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder={isLogin ? 'Username or email' : 'Username'}
+                  placeholder="Email"
                   placeholderTextColor={COLORS.mediumGrey}
-                  value={username}
-                  onChangeText={setUsername}
+                  value={email}
+                  onChangeText={setEmail}
                   autoCapitalize="none"
-                  autoComplete="username"
+                  keyboardType="email-address"
+                  autoComplete="email"
                 />
               </View>
 
@@ -266,12 +230,6 @@ export default function AuthScreen({ onAuthSuccess }) {
                 </View>
               )}
 
-              {!isLogin && (
-                <Text style={styles.hint}>
-                  Username: 3–20 chars, letters / numbers / underscores only
-                </Text>
-              )}
-
               <TouchableOpacity
                 style={[styles.primaryBtn, loading && styles.btnDisabled]}
                 onPress={handleAuth}
@@ -283,14 +241,12 @@ export default function AuthScreen({ onAuthSuccess }) {
                 }
               </TouchableOpacity>
 
-              {/* Divider */}
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
                 <Text style={styles.dividerText}>or</Text>
                 <View style={styles.dividerLine} />
               </View>
 
-              {/* Google Sign-In */}
               <TouchableOpacity
                 style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
                 onPress={handleGoogleSignIn}
@@ -307,7 +263,6 @@ export default function AuthScreen({ onAuthSuccess }) {
               </TouchableOpacity>
             </View>
 
-            {/* Footer switch */}
             <TouchableOpacity style={styles.switchRow} onPress={switchMode}>
               <Text style={styles.switchText}>
                 {isLogin ? "Don't have an account? " : 'Already have an account? '}
@@ -321,7 +276,6 @@ export default function AuthScreen({ onAuthSuccess }) {
   );
 }
 
-// Minimal inline Google 'G' SVG mark rendered with text — avoids svg dependency
 function GoogleIcon() {
   return (
     <View style={styles.googleIconContainer}>
@@ -345,7 +299,6 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
   },
 
-  // Header
   header: {
     alignItems: 'center',
     marginBottom: 32,
@@ -363,7 +316,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // Tabs
   tabContainer: {
     flexDirection: 'row',
     backgroundColor: '#E5E5E5',
@@ -394,7 +346,6 @@ const styles = StyleSheet.create({
     color: COLORS.darkGrey,
   },
 
-  // Form
   form: {
     gap: 12,
   },
@@ -420,15 +371,7 @@ const styles = StyleSheet.create({
     padding: 4,
     marginLeft: 6,
   },
-  hint: {
-    fontSize: 11,
-    color: COLORS.mediumGrey,
-    textAlign: 'center',
-    marginTop: -4,
-    lineHeight: 15,
-  },
 
-  // Primary button
   primaryBtn: {
     backgroundColor: COLORS.amber,
     paddingVertical: 15,
@@ -451,7 +394,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Divider
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -469,7 +411,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Google button
   googleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -506,7 +447,6 @@ const styles = StyleSheet.create({
     color: COLORS.darkGrey,
   },
 
-  // Footer
   switchRow: {
     alignItems: 'center',
     marginTop: 28,

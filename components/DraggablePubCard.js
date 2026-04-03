@@ -1,15 +1,21 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { 
-  View, 
+import {
+  View,
   Text,
-  Dimensions, 
-  Animated, 
+  Dimensions,
+  Animated,
   PanResponder,
   TouchableOpacity,
-  Pressable,
   StyleSheet,
-  Alert
+  Alert,
+  Platform,
 } from 'react-native';
+
+/**
+ * Android: sheet `translateY` with useNativeDriver + children Touchables often desyncs hit-testing
+ * from the drawn frame (first tap misses, second works). iOS keeps native driver for smoothness.
+ */
+const SHEET_USE_NATIVE_DRIVER = Platform.OS !== 'android';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
@@ -278,7 +284,7 @@ export default function DraggablePubCard({
           velocity: useVelocity ? velocity : 0,
           tension: 85,
           friction: 10,
-          useNativeDriver: true,
+          useNativeDriver: SHEET_USE_NATIVE_DRIVER,
         }).start(({ finished }) => {
           if (finished) {
             // Ensure exact position after animation completes
@@ -304,7 +310,7 @@ export default function DraggablePubCard({
           velocity: snapBackY === currentCollapsedY ? 0 : undefined, // No velocity for COLLAPSED_Y
           tension: 85,
           friction: 10,
-          useNativeDriver: true,
+          useNativeDriver: SHEET_USE_NATIVE_DRIVER,
         }).start(({ finished }) => {
           if (finished && snapBackY === currentCollapsedY) {
             // Ensure exact position after animation completes
@@ -333,7 +339,7 @@ export default function DraggablePubCard({
         velocity: 0, // No velocity to ensure exact positioning
         tension: 120,
         friction: 10,
-        useNativeDriver: true,
+        useNativeDriver: SHEET_USE_NATIVE_DRIVER,
       }).start(({ finished }) => {
         if (finished) {
           // Ensure exact position after animation completes
@@ -347,7 +353,7 @@ export default function DraggablePubCard({
         toValue: HIDDEN_Y,
         tension: 120,
         friction: 10,
-        useNativeDriver: true,
+        useNativeDriver: SHEET_USE_NATIVE_DRIVER,
       }).start(() => {
         dragStartY.current = HIDDEN_Y;
         currentPosition.current = HIDDEN_Y;
@@ -357,19 +363,22 @@ export default function DraggablePubCard({
   }, [pub?.id]);
   
   const handleClose = () => {
-    updateIsExpanded(false);
     translateY.stopAnimation();
-    
+
     Animated.spring(translateY, {
       toValue: HIDDEN_Y,
       tension: 120,
       friction: 10,
-      useNativeDriver: true,
+      useNativeDriver: SHEET_USE_NATIVE_DRIVER,
     }).start(() => {
       dragStartY.current = HIDDEN_Y;
       currentPosition.current = HIDDEN_Y;
       scrollY.current = 0;
       updateScrollEnabled(false);
+      // Reset expansion only after the sheet is off-screen. Doing this at the start of handleClose
+      // swapped expanded → collapsed chrome immediately, unmounting the X you tapped and often
+      // cancelling the press / making a second tap on the peek close feel necessary.
+      updateIsExpanded(false);
       onClose();
     });
   };
@@ -402,16 +411,17 @@ export default function DraggablePubCard({
   const expandedHandleTop = expandedHeaderTop + EXPANDED_ACTION_ROW_HEIGHT + EXPANDED_HANDLE_GAP;
   
   return (
-    <Animated.View 
+    <Animated.View
+      collapsable={false}
       style={[
-        styles.cardContainer, 
-        { 
+        styles.cardContainer,
+        {
           height: fullHeight,
           paddingTop: isExpanded ? expandedHeaderTop : 12,
           borderTopLeftRadius: isExpanded ? 0 : 20,
           borderTopRightRadius: isExpanded ? 0 : 20,
-          transform: [{ translateY }]
-        }
+          transform: [{ translateY }],
+        },
       ]}
       {...panResponder.panHandlers}
     >

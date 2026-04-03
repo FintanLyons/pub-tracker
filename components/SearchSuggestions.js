@@ -17,13 +17,18 @@ function SearchSuggestions({
   const insets = useSafeAreaInsets();
   const screenHeight = Dimensions.get('window').height;
 
-  // Only show when visible and keyboard has appeared
-  if (!visible || keyboardHeight === 0) return null;
+  // Gate on `visible` only. Do not require keyboardHeight > 0: the first tap on a row blurs the
+  // TextInput and dismisses the keyboard, so keyboardHeight becomes 0 before onPress runs — if we
+  // unmount here, the suggestion tap is lost (double-tap behaviour).
+  if (!visible) return null;
 
-  // Use the keyboard's top position directly to eliminate gap
-  // This is the Y coordinate where the keyboard starts, which is exactly where we want the card to end
-  const availableHeight = keyboardTop > 0 ? keyboardTop : screenHeight - keyboardHeight;
   const searchBarHeight = Math.max(insets.top, 8) + 8 + 56 + 8; // padding + bar height + bottom padding
+  // While keyboard is up, end the panel at the keyboard top; after dismiss (still visible briefly)
+  // fill the screen so rows stay mounted until onBlur clears `visible`.
+  const availableHeight =
+    keyboardHeight > 0 && keyboardTop > 0
+      ? keyboardTop
+      : screenHeight;
 
   return (
     <View style={[styles.container, { height: availableHeight }]}>

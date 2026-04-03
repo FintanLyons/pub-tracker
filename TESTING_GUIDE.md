@@ -14,15 +14,15 @@ Your authentication system is now fully integrated! Here's how to test everythin
 3. Click the **Register** tab
 4. Fill in:
    - **Email**: `user1@test.com`
-   - **Username**: `user1` (3-20 characters, alphanumeric + underscores)
    - **Password**: `password123` (minimum 6 characters)
    - **Confirm Password**: `password123`
 5. Click **Create Account**
+6. On **Choose your username**, enter `user1` (3–20 characters, letters / numbers / underscores) and tap **Continue**
 
 ### Expected Result:
-- ✅ Success message: "Account created!"
-- ✅ Automatically logged in
-- ✅ App shows the main TabNavigator (Map, Profile, Leaderboard, Achievements)
+- ✅ Success message: "Account created!" (or email verification flow if enabled)
+- ✅ After sign-in: **ChooseUsernameScreen** appears until a username is set
+- ✅ Then onboarding (if first time) or main TabNavigator (Map, Profile, Leaderboard)
 - ✅ Profile screen shows username: `@user1`
 
 ---
@@ -48,14 +48,13 @@ Your authentication system is now fully integrated! Here's how to test everythin
 ### Steps:
 1. On the AuthScreen, ensure you're on the **Login** tab
 2. Fill in:
-   - **Username**: `user1`
+   - **Email**: `user1@test.com`
    - **Password**: `password123`
-3. Click **Login**
+3. Click **Sign In**
 
 ### Expected Result:
-- ✅ Success message: "Welcome back!"
-- ✅ App shows main TabNavigator
-- ✅ Profile shows `@user1`
+- ✅ You reach the main app (or **Choose username** if that account has no username yet)
+- ✅ Profile shows `@user1` once a username is set
 
 ---
 
@@ -63,16 +62,12 @@ Your authentication system is now fully integrated! Here's how to test everythin
 
 ### Steps:
 1. Logout
-2. Try to register again with:
-   - Email: `user2@test.com`
-   - Username: `user1` (same as before)
-   - Password: `password123`
-3. Click Create Account
+2. Register a new account: `user2@test.com` / `password123`
+3. On **Choose your username**, try `user1` (already taken by the first account)
 
 ### Expected Result:
-- ❌ Error: "This username is already taken. Please choose another."
-- ✅ Registration blocked
-- ✅ Try with `user2` and it should work
+- ❌ Error that the username is taken
+- ✅ Choose `user2` (or another free name) and continue successfully
 
 ---
 

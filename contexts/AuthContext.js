@@ -1,6 +1,17 @@
-import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import React, {
+  createContext,
+  useState,
+  useEffect,
+  useContext,
+  useCallback,
+  useRef,
+} from 'react';
 import { supabase } from '../config/supabase';
-import { logoutUserSecure, deleteAccountSecure } from '../services/SecureAuthService';
+import {
+  logoutUserSecure,
+  deleteAccountSecure,
+  ensureUserStub,
+} from '../services/SecureAuthService';
 
 const AuthContext = createContext();
 
@@ -26,31 +37,64 @@ const loadProfile = async (uid) => {
   return users && users.length > 0 ? users[0] : null;
 };
 
+/**
+ * Merge auth user_metadata into the public.users row for gating (ChooseUsername).
+ * appUsernameChosen: false = must complete in-app username; true/undefined handled in App.
+ */
+const mergeAuthIntoProfile = (authUser, profile) => {
+  if (!profile) return null;
+  const meta = authUser?.user_metadata || {};
+  return {
+    ...profile,
+    appUsernameChosen: meta.app_username_chosen,
+  };
+};
+
+const resolveProfileForSession = async (session, authUserHint) => {
+  if (!session?.user?.id) return null;
+  const { id, email } = session.user;
+
+  let authUser = authUserHint;
+  if (!authUser) {
+    const { data } = await supabase.auth.getUser();
+    authUser = data?.user;
+  }
+
+  let profile = await loadProfile(id);
+  if (!profile) {
+    await ensureUserStub(id, email);
+    profile = await loadProfile(id);
+  }
+  if (!profile) return null;
+  return mergeAuthIntoProfile(authUser || session.user, profile);
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  /** Ignore auth-driven profile refresh briefly after local profile apply (avoids stale overwrite). */
+  const skipAuthProfileRefreshUntilRef = useRef(0);
 
   useEffect(() => {
-    // 1. Restore session from AsyncStorage on mount.
-    //    Validate with getUser() (server roundtrip) — if the refresh
-    //    token is dead we clear the stale local session instead of crashing.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
+        let authUser;
         try {
-          const { error } = await supabase.auth.getUser();
+          const { data, error } = await supabase.auth.getUser();
           if (error) {
             await supabase.auth.signOut({ scope: 'local' });
             setUser(null);
             setLoading(false);
             return;
           }
+          authUser = data?.user;
         } catch {
           await supabase.auth.signOut({ scope: 'local' });
           setUser(null);
           setLoading(false);
           return;
         }
-        const profile = await loadProfile(session.user.id);
+        const profile = await resolveProfileForSession(session, authUser);
         setUser(profile);
         setLoading(false);
       } else {
@@ -59,20 +103,26 @@ export const AuthProvider = ({ children }) => {
       }
     });
 
-    // 2. React to auth events (sign-in, sign-out, token refresh).
-    //    SIGNED_IN fires after signInWithPassword / signUp-with-session.
-    //    We load the profile here so the app transitions automatically.
-    //    If the profile doesn't exist yet (register race), that's OK —
-    //    refreshUser() is called explicitly after register/login to catch it.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) {
         setUser(null);
         return;
       }
-      const profile = await loadProfile(session.user.id);
-      if (profile) setUser(profile);
+      // Defer: calling getUser()/resolve inside this callback can deadlock the auth
+      // client (e.g. right after updateUser from ChooseUsername).
+      setTimeout(() => {
+        if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
+          return;
+        }
+        void resolveProfileForSession(session, null).then((profile) => {
+          if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
+            return;
+          }
+          setUser(profile);
+        });
+      }, 0);
     });
 
     return () => subscription.unsubscribe();
@@ -88,8 +138,6 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   }, []);
 
-  // Called by AuthScreen after successful register / login so we can
-  // pick up a profile that may not have existed when onAuthStateChange fired.
   const refreshUser = useCallback(async () => {
     const {
       data: { session },
@@ -98,13 +146,30 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       return;
     }
-    const profile = await loadProfile(session.user.id);
+    const profile = await resolveProfileForSession(session, null);
     setUser(profile);
+  }, []);
+
+  /** After public.users UPDATE — no auth HTTP calls; merges row into state for instant UI. */
+  const applyUserProfileRow = useCallback((row) => {
+    if (!row?.id) return;
+    skipAuthProfileRefreshUntilRef.current = Date.now() + 2500;
+    setUser((prev) => ({
+      ...row,
+      appUsernameChosen: prev?.appUsernameChosen,
+    }));
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, logout, deleteAccount, refreshUser }}
+      value={{
+        user,
+        loading,
+        logout,
+        deleteAccount,
+        refreshUser,
+        applyUserProfileRow,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -11,6 +11,7 @@ import {
   InteractionManager,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -21,6 +22,7 @@ import { COLORS } from '../constants/theme';
 import { getDrinkStats } from '../services/ReviewService';
 import { getLevelProgress } from '../utils/levelSystem';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import UserAchievementsPanel from '../components/UserAchievementsPanel';
 
 const SORT_MODES = {
   LOCATION: 'location',
@@ -55,6 +57,7 @@ export default function ProfileScreen({ navigation }) {
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showTrophiesModal, setShowTrophiesModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
@@ -328,7 +331,19 @@ export default function ProfileScreen({ navigation }) {
     }
   }, [userId, refreshUserStats]);
 
+  useEffect(() => {
+    if (!showTrophiesModal) return;
+    const isStale = !lastUpdated || (Date.now() - lastUpdated > 30000);
+    if (!isStale && achievements) return;
+    InteractionManager.runAfterInteractions(() => {
+      refreshUserStats().catch((error) => {
+        console.error('Error refreshing trophies data:', error);
+      });
+    });
+  }, [showTrophiesModal, lastUpdated, achievements, refreshUserStats]);
+
   return (
+    <>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.contentContainer}
@@ -342,10 +357,25 @@ export default function ProfileScreen({ navigation }) {
       }
     >
       <View style={styles.headerContainer}>
-        <View style={styles.spacer} />
-        <View style={styles.header}>
-          <MaterialCommunityIcons name="poll" size={40} color={COLORS.darkGrey} />
-          <Text style={styles.title}>Statistics</Text>
+        <TouchableOpacity
+          onPress={() => setShowTrophiesModal(true)}
+          style={styles.trophyHeaderButton}
+          activeOpacity={0.7}
+          accessibilityLabel="View trophies"
+          accessibilityRole="button"
+        >
+          <MaterialCommunityIcons name="trophy" size={22} color={COLORS.amber} />
+        </TouchableOpacity>
+        <View style={styles.headerUsernameWrap}>
+          {user?.username ? (
+            <Text
+              style={styles.headerUsername}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {user.username}
+            </Text>
+          ) : null}
         </View>
         {user && (
           <TouchableOpacity
@@ -662,6 +692,29 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </Modal>
     </ScrollView>
+
+    <Modal
+      visible={showTrophiesModal}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => setShowTrophiesModal(false)}
+    >
+      <SafeAreaView style={styles.trophiesModalRoot} edges={['top', 'left', 'right']}>
+        <View style={styles.trophiesModalHeader}>
+          <Text style={styles.trophiesModalTitle}>Trophies</Text>
+          <TouchableOpacity
+            onPress={() => setShowTrophiesModal(false)}
+            style={styles.trophiesModalClose}
+            accessibilityLabel="Close trophies"
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons name="close" size={28} color={COLORS.darkGrey} />
+          </TouchableOpacity>
+        </View>
+        <UserAchievementsPanel />
+      </SafeAreaView>
+    </Modal>
+    </>
   );
 }
 
@@ -676,28 +729,57 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-  },
-  spacer: {
-    width: 40,
-  },
-  header: {
-    flex: 1,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  trophyHeaderButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.lightGrey,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trophiesModalRoot: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  trophiesModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  trophiesModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.darkGrey,
+  },
+  trophiesModalClose: {
+    padding: 8,
+  },
+  headerUsernameWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    minHeight: 40,
+  },
+  headerUsername: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+    width: '100%',
   },
   logoutButtonHeader: {
     padding: 8,
     borderRadius: 8,
     backgroundColor: COLORS.lightGrey,
-    marginTop: 8,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.darkGrey,
   },
   statsCard: {
     backgroundColor: COLORS.lightGrey,

@@ -90,7 +90,7 @@ export const deleteReview = async (userId, pubId) => {
 };
 
 // ---------------------------------------------------------------------------
-// Drink stats (for Statistics screen)
+// Drink stats (for Profile screen)
 // ---------------------------------------------------------------------------
 
 export const getDrinkStats = async (userId) => {

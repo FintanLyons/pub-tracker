@@ -1,18 +1,83 @@
 import { supabase } from '../config/supabase';
 import { clearVisitedFavoriteCache } from './PubService';
 
-export const registerUserSecure = async (email, username, password) => {
+const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
+
+/** Auth user_metadata key — false = must complete ChooseUsernameScreen (set on new signup). */
+const META_APP_USERNAME_CHOSEN = 'app_username_chosen';
+
+const setAuthUsernamePending = async () => {
+  const { error } = await supabase.auth.updateUser({
+    data: { [META_APP_USERNAME_CHOSEN]: false },
+  });
+  if (error) {
+    console.warn('setAuthUsernamePending:', error.message);
+  }
+};
+
+export const isValidUsernameFormat = (username) =>
+  typeof username === 'string' && USERNAME_REGEX.test(username.trim());
+
+/**
+ * Supabase projects often have a trigger on auth.users that INSERTs public.users
+ * with a placeholder username (e.g. email local-part) before the client runs.
+ * ensureUserStub then sees an existing row and skips — ChooseUsername never shows.
+ * Call after sign-up / brand-new OAuth so the app owns the first username set.
+ */
+const clearUsernameForInAppChoice = async (userId) => {
+  if (!userId) return;
+  const { error } = await supabase
+    .from('users')
+    .update({ username: null, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (error) {
+    console.warn('clearUsernameForInAppChoice:', error.message);
+  }
+};
+
+/**
+ * Ensure a public.users row exists for this auth user (username may be NULL).
+ * Call when session exists but SELECT returned no row (cold start / race).
+ */
+export const ensureUserStub = async (userId, email) => {
+  if (!userId) return;
+
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', userId)
+    .limit(1);
+
+  if (existing && existing.length > 0) return;
+
+  const { error: insertError } = await supabase.from('users').insert({
+    id: userId,
+    email: email || '',
+    username: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (insertError && insertError.code !== '23505') {
+    console.warn('ensureUserStub insert:', insertError.message);
+    return;
+  }
+
   try {
-    // Clear any stale local session so signUp with "Confirm email" ON
-    // doesn't leave old tokens in AsyncStorage. Local scope only —
-    // no server call, no risk of network failure aborting registration.
+    await syncUserStatsLite(userId);
+  } catch {
+    // best-effort
+  }
+};
+
+export const registerUserSecure = async (email, password) => {
+  try {
     await supabase.auth.signOut({ scope: 'local' });
     clearVisitedFavoriteCache();
 
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { username } },
     });
 
     if (signUpError) {
@@ -44,55 +109,24 @@ export const registerUserSecure = async (email, username, password) => {
       return { user: null, session: null, needsEmailVerification: true };
     }
 
-    // Session exists — email auto-confirmed. Create profile now.
-    const { data: existing } = await supabase
-      .from('users')
-      .select('username')
-      .eq('username', username)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      await supabase.auth.signOut({ scope: 'local' });
-      throw new Error('Username already taken');
-    }
+    await ensureUserStub(userData.id, email);
+    await clearUsernameForInAppChoice(userData.id);
+    await setAuthUsernamePending();
 
     const { data: profile, error: profileError } = await supabase
       .from('users')
-      .upsert(
-        {
-          id: userData.id,
-          email,
-          username,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'id' },
-      )
-      .select()
+      .select('*')
+      .eq('id', userData.id)
       .single();
 
-    if (profileError) {
-      if (profileError.code === '23505' && profileError.message?.includes('username')) {
-        await supabase.auth.signOut({ scope: 'local' });
-        throw new Error('Username already taken');
-      }
-      throw profileError;
-    }
+    if (profileError) throw profileError;
 
-    try {
-      await syncUserStatsLite(userData.id);
-    } catch {
-      // best-effort
-    }
-
-    const user = profile || { id: userData.id, email, username };
-    return { user, session: sessionData, needsEmailVerification: false };
+    return { user: profile, session: sessionData, needsEmailVerification: false };
   } catch (error) {
     const msg = error.message || 'Registration failed';
     if (msg.includes('already registered') || msg.includes('User already registered')) {
       throw new Error('This email is already registered. Please use the login tab instead.');
     }
-    if (msg.includes('Username already taken')) throw error;
     if (msg.includes('rate limit') || msg.includes('seconds') || msg.includes('wait')) {
       throw new Error('Too many attempts. Please wait a minute and try again.');
     }
@@ -103,39 +137,30 @@ export const registerUserSecure = async (email, username, password) => {
   }
 };
 
-export const loginUserSecure = async (usernameOrEmail, password) => {
+const isValidEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((text || '').trim());
+
+export const loginUserSecure = async (email, password) => {
   try {
+    if (!isValidEmail(email)) {
+      throw new Error('Please enter a valid email address.');
+    }
+
     await supabase.auth.signOut({ scope: 'local' });
     clearVisitedFavoriteCache();
 
-    let email = usernameOrEmail;
+    const trimmedEmail = email.trim();
 
-    if (!usernameOrEmail.includes('@')) {
-      const { data: emailResult, error: rpcError } = await supabase.rpc(
-        'get_email_by_username',
-        { lookup_username: usernameOrEmail },
-      );
-
-      if (rpcError || !emailResult) {
-        throw new Error('Invalid username or password.');
-      }
-      email = emailResult;
-    }
-
-    // signInWithPassword replaces whatever session is in AsyncStorage.
     const { data: authData, error: signInError } =
-      await supabase.auth.signInWithPassword({ email, password });
+      await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
 
     if (signInError) {
       const m = (signInError.message || '').toLowerCase();
       if (m.includes('email not confirmed') || m.includes('not confirmed')) {
         throw new Error('Email not confirmed. Please verify your email before logging in.');
       }
-      throw new Error('Invalid username or password.');
+      throw new Error('Invalid email or password.');
     }
 
-    // Ensure public.users profile exists (might be missing if user
-    // registered with "Confirm email" ON — profile wasn't created then).
     let { data: users } = await supabase
       .from('users')
       .select('*')
@@ -144,30 +169,16 @@ export const loginUserSecure = async (usernameOrEmail, password) => {
 
     let user;
     if (!users || users.length === 0) {
-      const { data: newUser, error: createError } = await supabase
+      await ensureUserStub(authData.user.id, authData.user.email);
+      const { data: refetch } = await supabase
         .from('users')
-        .insert({
-          id: authData.user.id,
-          email: authData.user.email,
-          username:
-            authData.user.user_metadata?.username ||
-            authData.user.email.split('@')[0],
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
+        .select('*')
+        .eq('id', authData.user.id)
         .single();
-
-      if (createError) {
+      if (!refetch) {
         throw new Error('Unable to set up your account. Please contact support.');
       }
-      user = newUser;
-
-      try {
-        await syncUserStatsLite(user.id);
-      } catch {
-        // best-effort
-      }
+      user = refetch;
     } else {
       user = users[0];
     }
@@ -176,14 +187,75 @@ export const loginUserSecure = async (usernameOrEmail, password) => {
   } catch (error) {
     const msg = error.message || '';
     if (
-      msg.includes('Invalid username or password') ||
+      msg.includes('Invalid email or password') ||
+      msg.includes('valid email') ||
       msg.includes('Email not confirmed') ||
       msg.includes('Unable to set up')
     ) {
       throw error;
     }
-    throw new Error('Invalid username or password.');
+    throw new Error('Invalid email or password.');
   }
+};
+
+/**
+ * Persist username to public.users only — no getSession/getUser/updateUser here.
+ * Avoids Supabase auth client deadlocks during ChooseUsername submit (see AuthContext).
+ */
+export const updatePublicUsername = async (userId, username) => {
+  const trimmed = (username || '').trim();
+  if (!userId) throw new Error('Not signed in');
+  if (!isValidUsernameFormat(trimmed)) {
+    throw new Error(
+      'Username must be 3–20 characters and contain only letters, numbers, and underscores.',
+    );
+  }
+
+  const { data: taken } = await supabase
+    .from('users')
+    .select('id')
+    .eq('username', trimmed)
+    .neq('id', userId)
+    .limit(1);
+
+  if (taken && taken.length > 0) {
+    throw new Error('Username already taken');
+  }
+
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      username: trimmed,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('Username already taken');
+    }
+    throw error;
+  }
+
+  return data;
+};
+
+/**
+ * Sync app_username_chosen to auth metadata after a delay — do not await from UI;
+ * updateUser can deadlock with onAuthStateChange if called inline with getSession/getUser.
+ */
+export const scheduleAuthUsernameMetadataSync = () => {
+  setTimeout(() => {
+    void supabase.auth
+      .updateUser({
+        data: { [META_APP_USERNAME_CHOSEN]: true },
+      })
+      .then(({ error }) => {
+        if (error) console.warn('scheduleAuthUsernameMetadataSync:', error.message);
+      });
+  }, 250);
 };
 
 export const logoutUserSecure = async () => {
@@ -211,8 +283,6 @@ export const deleteAccountSecure = async () => {
 
   clearVisitedFavoriteCache();
 
-  // The auth.users row is already gone, so signOut may return an error —
-  // that's expected. We just need to clear local storage.
   try {
     await supabase.auth.signOut({ scope: 'local' });
   } catch {
@@ -245,65 +315,30 @@ export const googleSignInSecure = async () => {
 
   const authUser = authData.user;
 
-  // Ensure public.users profile exists
   let { data: users } = await supabase
     .from('users')
     .select('*')
     .eq('id', authUser.id)
     .limit(1);
 
-  let user;
   if (!users || users.length === 0) {
-    // Derive a username from display name, falling back to email prefix
-    const displayName =
-      authUser.user_metadata?.full_name ||
-      authUser.user_metadata?.name ||
-      authUser.email?.split('@')[0] ||
-      'user';
+    await ensureUserStub(authUser.id, authUser.email);
+  }
 
-    let baseUsername = displayName
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, '_')
-      .replace(/__+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 20);
+  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
+  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
+  if (isBrandNewAuthUser) {
+    await clearUsernameForInAppChoice(authUser.id);
+    await setAuthUsernamePending();
+  }
 
-    if (baseUsername.length < 3) baseUsername = baseUsername.padEnd(3, '0');
-
-    // Ensure uniqueness — if taken, append random digits
-    let username = baseUsername;
-    const { data: taken } = await supabase
-      .from('users')
-      .select('username')
-      .eq('username', baseUsername)
-      .limit(1);
-
-    if (taken && taken.length > 0) {
-      username = `${baseUsername.slice(0, 16)}_${Math.floor(1000 + Math.random() * 9000)}`;
-    }
-
-    const { data: newUser, error: createError } = await supabase
-      .from('users')
-      .insert({
-        id: authUser.id,
-        email: authUser.email,
-        username,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (createError) throw new Error('Unable to set up your account. Please contact support.');
-    user = newUser;
-
-    try {
-      await syncUserStatsLite(user.id);
-    } catch {
-      // best-effort
-    }
-  } else {
-    user = users[0];
+  const { data: user, error: fetchError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .single();
+  if (fetchError || !user) {
+    throw new Error('Unable to set up your account. Please contact support.');
   }
 
   return { user, session: authData.session };
