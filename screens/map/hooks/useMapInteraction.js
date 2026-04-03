@@ -141,14 +141,24 @@ export function useMapInteraction({
     setSelectedPub(pub);
     if (updateSearch) setSearchQuery(pub.name || '');
     centerOnPub(pub);
-  }, [centerOnPub, hasUserInteractedRef]);
+    // Server/typeahead suggestions can reference a pub not yet in viewport `allPubs`. Toggles use
+    // `allPubs.find` for baseline state and map updates — without this, visited/favourite can look
+    // broken until a viewport fetch adds the row (feels like "wait for load").
+    if (pub.id != null) {
+      setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
+    }
+  }, [centerOnPub, hasUserInteractedRef, setAllPubs]);
 
   // ── Toggle callbacks (optimistic) ────────────────────────────
 
   const handleToggleVisited = useCallback(async (pubId) => {
     const originalPubs = [...allPubs];
     const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const newState = !allPubs.find((pub) => pub.id === pubId)?.isVisited;
+    const prev =
+      selectedPub?.id === pubId
+        ? selectedPub
+        : allPubs.find((pub) => pub.id === pubId);
+    const newState = !prev?.isVisited;
 
     if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isVisited: newState });
     setAllPubs((current) => current.map((pub) => (
@@ -167,7 +177,11 @@ export function useMapInteraction({
   const handleToggleFavorite = useCallback(async (pubId) => {
     const originalPubs = [...allPubs];
     const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const newState = !allPubs.find((pub) => pub.id === pubId)?.isFavorite;
+    const prev =
+      selectedPub?.id === pubId
+        ? selectedPub
+        : allPubs.find((pub) => pub.id === pubId);
+    const newState = !prev?.isFavorite;
 
     if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isFavorite: newState });
     setAllPubs((current) => current.map((pub) => (
@@ -345,7 +359,7 @@ export function useMapInteraction({
     }
   }, [selectedDistrictFeature, selectedPostcodeArea, requestViewportPubs, loadedPubBoundsRef]);
 
-  // Deep-link from Achievements → Map
+  // Deep-link from Profile → Map
   useFocusEffect(
     useCallback(() => {
       const districtToSearch = route.params?.districtToSearch;

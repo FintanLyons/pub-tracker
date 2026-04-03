@@ -7,7 +7,6 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
-import AchievementsScreen from '../screens/AchievementsScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchPostcodeAreaSummaries } from '../services/PubService';
 import { serializePostcodeAreaSummaries } from '../screens/map/utils';
@@ -31,7 +30,6 @@ function MapScreenWithSafeInsets(props) {
 
 const SafeProfileScreen = withErrorBoundary(ProfileScreen, 'Your profile failed to load. Please try again.');
 const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderboard failed to load. Please try again.');
-const SafeAchievementsScreen = withErrorBoundary(AchievementsScreen, 'Achievements failed to load. Please try again.');
 
 const Tab = createBottomTabNavigator();
 
@@ -113,11 +111,11 @@ export default function TabNavigator() {
             }}
           />
           <Tab.Screen 
-            name="Statistics" 
+            name="Profile" 
             component={SafeProfileScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="poll" size={size} color={color} />
+                <MaterialCommunityIcons name="account-circle-outline" size={size} color={color} />
               ),
             }}
           />
@@ -127,15 +125,6 @@ export default function TabNavigator() {
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="crown-outline" size={size} color={color} />
-              ),
-            }}
-          />
-          <Tab.Screen 
-            name="Achievements" 
-            component={SafeAchievementsScreen}
-            options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="trophy" size={size} color={color} />
               ),
             }}
           />

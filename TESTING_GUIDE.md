@@ -22,7 +22,7 @@ Your authentication system is now fully integrated! Here's how to test everythin
 ### Expected Result:
 - ✅ Success message: "Account created!"
 - ✅ Automatically logged in
-- ✅ App shows the main TabNavigator (Map, Profile, Leaderboard, Achievements)
+- ✅ App shows the main TabNavigator (Map, Profile, Leaderboard)
 - ✅ Profile screen shows username: `@user1`
 
 ---

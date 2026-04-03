@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Linking,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
@@ -263,6 +264,7 @@ export default function PubCardContent({
       scrollEventThrottle={16}
       bounces={false}
       directionalLockEnabled={true}
+      nestedScrollEnabled={Platform.OS === 'android'}
       ref={scrollRef}
     >
       {/* ── Name row ─────────────────────────────────────────────────────── */}

@@ -26,7 +26,7 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 - Level = `floor(total_score / 50) + 1`
 
 Scoring logic lives in two places — keep them in sync if rules change:
-- Client: `utils/levelSystem.js` (used for the Achievements progress bar only; level formula only)
+- Client: `utils/levelSystem.js` (used for Profile level display; level formula only)
 - Server: `scripts/phase6_postcode_migration.sql` (and legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
 
 ## Architecture
@@ -43,8 +43,8 @@ services/         PubService       — fetch pubs, toggle visited/favourite
                   ReportService    — report pubs / missing pubs
                   LeaderboardCache — in-memory leaderboard cache
 
-screens/          MapScreen, ProfileScreen, LeaderboardScreen,
-                  AchievementsScreen, AuthScreen, FilterScreen
+screens/          MapScreen, ProfileScreen (stats + trophy modal), LeaderboardScreen,
+                  AuthScreen, FilterScreen
 
 screens/map/hooks/  useMapCamera — camera ref, location, fit/center/zoom
                     useViewportPubs — pub fetching, merge, bounds tracking
@@ -64,7 +64,8 @@ components/       DraggablePubCard, PubCardContent, SearchBar,
                   SearchSuggestions, AddFriendModal, CreateLeagueModal,
                   JoinLeagueModal, LeagueActionsModal, ReportModal,
                   ReportMissingPubModal, OfflineOverlay, ErrorBoundary,
-                  AreaIcon, PintGlassIcon, RangeSlider
+                  UserAchievementsPanel (trophy grid in Profile modal),
+                  PintGlassIcon, RangeSlider
 
 scripts/          SQL migrations and Python data-pipeline scripts.
                   Not deployed code — run manually against Supabase.
@@ -103,7 +104,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 - **Viewport-based pub loading** — `useViewportPubs` fetches only the pubs visible on screen (debounced 400 ms, bounds-cached to prevent duplicate fetches)
 - **Stats are server-computed** — never aggregate visit counts client-side; use the RPCs
 - **Visited/favourite cache** — module-level Sets in `PubService`. Call `clearVisitedFavoriteCache()` on logout (done in `AuthContext`)
-- **`useFocusEffect` staleness check** — ProfileScreen and AchievementsScreen refresh stats if `lastUpdated` is older than 30 s
+- **`useFocusEffect` staleness check** — ProfileScreen refreshes stats if `lastUpdated` is older than 30 s; opening the trophy modal also refreshes when stale
 
 ## Colour theme
 
