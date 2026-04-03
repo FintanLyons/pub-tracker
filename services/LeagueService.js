@@ -1,21 +1,25 @@
+import * as Crypto from 'expo-crypto';
 import { supabase } from '../config/supabase';
+import { getDrinkTotalsByUserIds } from './DrinkTotalsService';
 
+/** 32 chars: 256 % 32 === 0 so uniform index = byte % 32 */
 const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const LEAGUE_CODE_LENGTH = 6;
 const MAX_CODE_GENERATION_ATTEMPTS = 10;
 
-const generateLeagueCode = () => {
+const generateLeagueCode = async () => {
+  const bytes = await Crypto.getRandomBytesAsync(LEAGUE_CODE_LENGTH);
+  const base = LEAGUE_CODE_ALPHABET.length;
   let code = '';
   for (let i = 0; i < LEAGUE_CODE_LENGTH; i += 1) {
-    const idx = Math.floor(Math.random() * LEAGUE_CODE_ALPHABET.length);
-    code += LEAGUE_CODE_ALPHABET[idx];
+    code += LEAGUE_CODE_ALPHABET[bytes[i] % base];
   }
   return code;
 };
 
 const generateUniqueLeagueCode = async () => {
   for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt += 1) {
-    const code = generateLeagueCode();
+    const code = await generateLeagueCode();
     const { data } = await supabase
       .from('leagues')
       .select('id')
@@ -169,10 +173,19 @@ export const getLeagueLeaderboard = async (leagueId) => {
 
   const leaderboard = (users || []).map(u => ({
     ...u,
-    stats: statsMap[u.id] || { pubs_visited: 0, total_score: 0, level: 1 },
+    stats: statsMap[u.id] || { pubs_visited: 0, total_score: 0, level: 1, total_drinks: 0 },
   }));
 
   leaderboard.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
-  return leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
+  const ranked = leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
+  const drinkMap = await getDrinkTotalsByUserIds(ranked.map((u) => u.id));
+
+  return ranked.map((u) => ({
+    ...u,
+    stats: {
+      ...u.stats,
+      total_drinks: drinkMap[u.id] ?? 0,
+    },
+  }));
 };

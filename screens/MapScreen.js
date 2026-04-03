@@ -102,7 +102,6 @@ export default function MapScreen({ safeAreaInsets }) {
     showOnlyAchievements,
     closingTimeMin,
     showFilterScreen,
-    allFeatures,
     allOwnerships,
     availableYearRange,
     handleFilterApply,
@@ -544,7 +543,6 @@ export default function MapScreen({ safeAreaInsets }) {
       <FilterScreen
         visible={showFilterScreen}
         onClose={handleFilterClose}
-        allFeatures={allFeatures}
         selectedFeatures={selectedFeatures}
         allOwnerships={allOwnerships}
         selectedOwnerships={selectedOwnerships}

@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import { getDrinkTotalsByUserIds } from './DrinkTotalsService';
 
 /**
  * Send a friend request
@@ -105,7 +106,7 @@ export const getFriends = async (userId) => {
 
   return (users || []).map(u => ({
     ...u,
-    stats: statsMap[u.id] || { pubs_visited: 0, total_score: 0, level: 1 },
+    stats: statsMap[u.id] || { pubs_visited: 0, total_score: 0, level: 1, total_drinks: 0 },
   }));
 };
 
@@ -152,11 +153,20 @@ export const getFriendsLeaderboard = async (userId) => {
 
   const currentUser = {
     ...(meArr?.[0] || {}),
-    stats: meStatsArr?.[0] || { pubs_visited: 0, total_score: 0, level: 1 },
+    stats: meStatsArr?.[0] || { pubs_visited: 0, total_score: 0, level: 1, total_drinks: 0 },
   };
 
   const allUsers = [currentUser, ...friends];
   allUsers.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
-  return allUsers.map((user, index) => ({ ...user, rank: index + 1 }));
+  const ranked = allUsers.map((user, index) => ({ ...user, rank: index + 1 }));
+  const drinkMap = await getDrinkTotalsByUserIds(ranked.map((u) => u.id));
+
+  return ranked.map((u) => ({
+    ...u,
+    stats: {
+      ...u.stats,
+      total_drinks: drinkMap[u.id] ?? 0,
+    },
+  }));
 };

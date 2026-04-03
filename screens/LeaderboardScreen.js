@@ -1,5 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Modal,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
@@ -10,6 +20,7 @@ import AddFriendModal from '../components/AddFriendModal';
 import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
 import LeagueActionsModal from '../components/LeagueActionsModal';
+import ShareLeagueModal from '../components/ShareLeagueModal';
 import { COLORS } from '../constants/theme';
 
 export default function LeaderboardScreen() {
@@ -29,6 +40,13 @@ export default function LeaderboardScreen() {
   const [showLeagueActionsModal, setShowLeagueActionsModal] = useState(false);
   const [showJoinLeagueModal, setShowJoinLeagueModal] = useState(false);
   const [leavingLeague, setLeavingLeague] = useState(false);
+  const [showShareLeagueModal, setShowShareLeagueModal] = useState(false);
+  const [showLeaveLeagueModal, setShowLeaveLeagueModal] = useState(false);
+  const selectedLeagueIdRef = useRef(null);
+
+  useEffect(() => {
+    selectedLeagueIdRef.current = selectedLeague?.id ?? null;
+  }, [selectedLeague?.id]);
 
   const loadData = useCallback(async () => {
     try {
@@ -75,11 +93,16 @@ export default function LeaderboardScreen() {
         setPendingRequestsCount(pendingRequests.length);
         setLeagues(userLeagues);
 
-        // Load first league's leaderboard if available
+        const preferId = selectedLeagueIdRef.current;
+        let nextLeague = null;
         if (userLeagues.length > 0) {
-          const firstLeague = userLeagues[0];
-          setSelectedLeague(firstLeague);
-          const leagueBoard = await getLeagueLeaderboard(firstLeague.id);
+          if (preferId && userLeagues.some((l) => l.id === preferId)) {
+            nextLeague = userLeagues.find((l) => l.id === preferId);
+          } else {
+            nextLeague = userLeagues[0];
+          }
+          setSelectedLeague(nextLeague);
+          const leagueBoard = await getLeagueLeaderboard(nextLeague.id);
           setLeagueLeaderboard(leagueBoard);
         } else {
           setSelectedLeague(null);
@@ -128,98 +151,41 @@ export default function LeaderboardScreen() {
     }
   };
 
-  const handleLeaveLeague = () => {
+  const confirmLeaveLeague = async () => {
     if (!selectedLeague || !currentUser || leavingLeague) {
       return;
     }
 
     const leagueName = selectedLeague.name;
+    const leagueId = selectedLeague.id;
 
-    Alert.alert(
-      'Leave League',
-      `Are you sure you want to leave ${leagueName}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setLeavingLeague(true);
-              setLoading(true);
-              await removeLeagueMember(selectedLeague.id, currentUser.id);
-              await loadData();
-              Alert.alert('League Left', `You have left ${leagueName}.`);
-            } catch (error) {
-              console.error('Error leaving league:', error);
-              Alert.alert(
-                'Error',
-                'Failed to leave league. Please try again.'
-              );
-            } finally {
-              setLeavingLeague(false);
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    try {
+      setLeavingLeague(true);
+      setLoading(true);
+      await removeLeagueMember(leagueId, currentUser.id);
+      setShowLeaveLeagueModal(false);
+      await loadData();
+      Alert.alert('League Left', `You have left ${leagueName}.`);
+    } catch (error) {
+      console.error('Error leaving league:', error);
+      Alert.alert('Error', 'Failed to leave league. Please try again.');
+    } finally {
+      setLeavingLeague(false);
+      setLoading(false);
+    }
   };
 
-  const renderCurrentUserCard = (user) => {
-    if (!user) return null;
-    
-    const rankColor = user.rank === 1 ? '#FFD700' : user.rank === 2 ? '#C0C0C0' : user.rank === 3 ? '#CD7F32' : COLORS.accentGrey;
-    const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
-
-    return (
-      <>
-        <View style={styles.currentUserCard}>
-          <Text style={styles.currentUserLabel}>Your Position</Text>
-          <View style={styles.currentUserRow}>
-            <View style={styles.rankContainer}>
-              <Text style={[styles.rankText, { color: rankColor }]}>
-                {user.rank}
-              </Text>
-            </View>
-            <View style={styles.userInfo}>
-              <Text style={[styles.username, styles.currentUserText]}>
-                {user.username}
-                {showAdminLabel && (
-                  <Text style={styles.adminLabel}> - Admin</Text>
-                )}
-              </Text>
-              <View style={styles.statsRow}>
-                <Text style={styles.statText}>
-                  Pubs: {user.stats?.pubs_visited || 0}
-                </Text>
-                <Text style={styles.statText}>
-                  Level: {user.stats?.level || 1}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.scoreContainer}>
-              <Text style={[styles.scoreText, styles.currentUserText]}>
-                {user.stats?.total_score || 0}
-              </Text>
-              <Text style={styles.scoreLabel}>Score</Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.separator} />
-      </>
-    );
-  };
-
-  const renderLeaderboardRow = (user, index) => {
+  const renderLeaderboardRow = (user) => {
     const isCurrentUser = user.id === currentUser?.id;
-    const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : COLORS.accentGrey;
+    const r = user.rank ?? 0;
+    const rankColor =
+      r === 1 ? '#FFD700' : r === 2 ? '#C0C0C0' : r === 3 ? '#CD7F32' : COLORS.accentGrey;
     const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
       <View
         key={user.id}
-        style={styles.leaderboardRow}
+        style={[styles.leaderboardRow, isCurrentUser && styles.leaderboardRowSelf]}
       >
         <View style={styles.rankContainer}>
           <Text style={[styles.rankText, { color: rankColor }]}>
@@ -227,24 +193,37 @@ export default function LeaderboardScreen() {
           </Text>
         </View>
         <View style={styles.userInfo}>
-          <Text style={[styles.username, isCurrentUser && styles.currentUserText]}>
+          <Text style={styles.username}>
             {user.username}
-            {isCurrentUser && ' (You)'}
             {showAdminLabel && (
               <Text style={styles.adminLabel}> - Admin</Text>
             )}
           </Text>
           <View style={styles.statsRow}>
-            <Text style={styles.statText}>
-              Pubs: {user.stats?.pubs_visited || 0}
-            </Text>
-            <Text style={styles.statText}>
-              Level: {user.stats?.level || 1}
-            </Text>
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>Pubs</Text>
+              <Text style={styles.statValue} numberOfLines={1}>
+                {user.stats?.pubs_visited || 0}
+              </Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>Drinks</Text>
+              <Text style={styles.statValue} numberOfLines={1}>
+                {user.stats?.total_drinks ?? 0}
+              </Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>Level</Text>
+              <Text style={styles.statValue} numberOfLines={1}>
+                {user.stats?.level || 1}
+              </Text>
+            </View>
           </View>
         </View>
         <View style={styles.scoreContainer}>
-          <Text style={[styles.scoreText, isCurrentUser && styles.currentUserText]}>
+          <Text style={styles.scoreText}>
             {user.stats?.total_score || 0}
           </Text>
           <Text style={styles.scoreLabel}>Score</Text>
@@ -354,8 +333,7 @@ export default function LeaderboardScreen() {
             </View>
           ) : (
             <View style={styles.leaderboardContainer}>
-              {renderCurrentUserCard(friendsLeaderboard.find(user => user.id === currentUser?.id))}
-              {friendsLeaderboard.map((user, index) => renderLeaderboardRow(user, index))}
+              {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
             </View>
           )}
         </View>
@@ -365,47 +343,29 @@ export default function LeaderboardScreen() {
       {activeTab === 'leagues' && (
         <View style={styles.tabContent}>
           <View style={styles.sectionHeader}>
-            <View style={styles.leagueTitleContainer}>
-              <View style={styles.leagueNameRow}>
-                <Text style={styles.sectionTitle}>
-                  {selectedLeague ? selectedLeague.name : 'No League Selected'}
-                </Text>
-                {selectedLeague?.code && (
-                  <Text style={styles.leagueCodeText}>{selectedLeague.code}</Text>
-                )}
-              </View>
-              {leagues.length > 1 && (
+            <Text style={styles.sectionTitle}>League</Text>
+            <View style={styles.leagueHeaderRight}>
+              {leagues.length > 1 ? (
                 <TouchableOpacity
-                  style={styles.switchLeagueButton}
+                  style={styles.leagueListButton}
                   onPress={() => setShowLeagueSelector(!showLeagueSelector)}
+                  accessibilityLabel="Choose league"
+                  accessibilityRole="button"
                 >
-                  <MaterialCommunityIcons name="swap-horizontal" size={20} color={COLORS.darkGrey} />
+                  <MaterialCommunityIcons name="format-list-bulleted" size={22} color={COLORS.darkGrey} />
                 </TouchableOpacity>
-              )}
-            </View>
-            <View style={styles.leagueActions}>
-              {selectedLeague && (
-                <TouchableOpacity
-                  style={[
-                    styles.leaveLeagueButton,
-                    (leavingLeague || loading) && styles.leaveLeagueButtonDisabled,
-                  ]}
-                  onPress={handleLeaveLeague}
-                  disabled={leavingLeague || loading}
-                >
-                  <Text style={styles.leaveLeagueButtonText}>-</Text>
-                </TouchableOpacity>
-              )}
+              ) : null}
               <TouchableOpacity
                 style={styles.addButton}
                 onPress={() => setShowLeagueActionsModal(true)}
+                accessibilityLabel="Create or join league"
+                accessibilityRole="button"
               >
                 <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* League Selector */}
           {showLeagueSelector && leagues.length > 0 && (
             <View style={styles.leagueSelector}>
               {leagues.map((league) => (
@@ -438,22 +398,62 @@ export default function LeaderboardScreen() {
             </View>
           )}
 
-          {!selectedLeague ? (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="trophy-outline" size={64} color={COLORS.mediumGrey} />
-              <Text style={styles.emptyText}>No leagues yet</Text>
-              <Text style={styles.emptySubtext}>Create a league to compete with friends!</Text>
-            </View>
-          ) : leagueLeaderboard.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No members in this league</Text>
-            </View>
-          ) : (
-            <View style={styles.leaderboardContainer}>
-              {renderCurrentUserCard(leagueLeaderboard.find(user => user.id === currentUser?.id))}
-              {leagueLeaderboard.map((user, index) => renderLeaderboardRow(user, index))}
-            </View>
-          )}
+          <View style={styles.leagueCurrentCard}>
+            {selectedLeague ? (
+              <View style={styles.leagueCurrentRow}>
+                <View style={styles.leagueCurrentMain}>
+                  <Text style={styles.leagueCurrentName}>{selectedLeague.name}</Text>
+                  {selectedLeague.code ? (
+                    <Text style={styles.leagueCurrentCode}>
+                      {String(selectedLeague.code).toUpperCase()}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.leagueCurrentActions}>
+                  <TouchableOpacity
+                    style={styles.leagueInlineIconButton}
+                    onPress={() => setShowShareLeagueModal(true)}
+                    accessibilityLabel="Share league"
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.darkGrey} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.leagueLeaveIconButton,
+                      (leavingLeague || loading) && styles.leagueLeaveIconButtonDisabled,
+                    ]}
+                    onPress={() => setShowLeaveLeagueModal(true)}
+                    disabled={leavingLeague || loading}
+                    accessibilityLabel="Leave league"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.leagueLeaveMinus}>-</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.leagueEmptyCardInner}>
+                <MaterialCommunityIcons name="trophy-outline" size={36} color={COLORS.mediumGrey} />
+                <Text style={styles.leagueEmptyTitle}>No league yet</Text>
+                <Text style={styles.leagueEmptySubtext}>
+                  Tap + to create a league or join with a code.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {selectedLeague ? (
+            leagueLeaderboard.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No members in this league</Text>
+              </View>
+            ) : (
+              <View style={styles.leaderboardContainer}>
+                {leagueLeaderboard.map((user) => renderLeaderboardRow(user))}
+              </View>
+            )
+          ) : null}
         </View>
       )}
 
@@ -492,6 +492,96 @@ export default function LeaderboardScreen() {
           setTimeout(() => setShowJoinLeagueModal(true), 150);
         }}
       />
+
+      <ShareLeagueModal
+        visible={showShareLeagueModal}
+        onClose={() => setShowShareLeagueModal(false)}
+        leagueName={selectedLeague?.name}
+        leagueCode={selectedLeague?.code}
+      />
+
+      <Modal
+        visible={showLeaveLeagueModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!leavingLeague) setShowLeaveLeagueModal(false);
+        }}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => {
+              if (!leavingLeague) setShowLeaveLeagueModal(false);
+            }}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Leave league</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!leavingLeague) setShowLeaveLeagueModal(false);
+                }}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.leaveLeagueIconWrap}>
+              {leavingLeague ? (
+                <ActivityIndicator size="large" color={COLORS.amber} />
+              ) : (
+                <View style={styles.leaveLeagueIconCircle}>
+                  <MaterialCommunityIcons name="exit-run" size={36} color={COLORS.errorRed} />
+                </View>
+              )}
+            </View>
+
+            <Text style={styles.leaveLeagueBody}>
+              {selectedLeague
+                ? `You will leave "${selectedLeague.name}" and disappear from its leaderboard until you join again.`
+                : ''}
+            </Text>
+
+            <View style={styles.leaveLeagueActions}>
+              <TouchableOpacity
+                style={[
+                  styles.leaveLeagueBtn,
+                  styles.leaveLeagueBtnHalf,
+                  styles.leaveLeagueBtnSecondary,
+                ]}
+                onPress={() => setShowLeaveLeagueModal(false)}
+                disabled={leavingLeague}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+              >
+                <Text style={styles.leaveLeagueBtnTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.leaveLeagueBtn,
+                  styles.leaveLeagueBtnHalf,
+                  styles.leaveLeagueBtnDanger,
+                  leavingLeague && styles.leaveLeagueBtnDisabled,
+                ]}
+                onPress={confirmLeaveLeague}
+                disabled={leavingLeague}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+              >
+                <Text style={styles.leaveLeagueBtnTextDanger}>
+                  {leavingLeague ? 'Leaving…' : 'Leave'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -605,55 +695,214 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  leagueTitleContainer: {
-    flex: 1,
+  leagueHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
-  leagueNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  leagueActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  leagueCodeText: {
-    fontSize: 16,
-    color: COLORS.mediumGrey,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  leaveLeagueButton: {
+  leagueListButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 2,
-    borderColor: COLORS.mediumGrey,
+    backgroundColor: COLORS.lightGrey,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
   },
-  leaveLeagueButtonText: {
-    fontSize: 24,
+  leagueCurrentCard: {
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  leagueCurrentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  leagueCurrentMain: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  leagueCurrentName: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#D32F2F',
-    lineHeight: 24,
+    color: COLORS.darkGrey,
+    marginBottom: 6,
   },
-  leaveLeagueButtonDisabled: {
-    opacity: 0.6,
+  leagueCurrentCode: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.mediumGrey,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    fontVariant: ['tabular-nums'],
+  },
+  leagueCurrentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  leagueInlineIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  leagueLeaveIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+  },
+  leagueLeaveIconButtonDisabled: {
+    opacity: 0.5,
+  },
+  leagueLeaveMinus: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: COLORS.errorRed,
+    lineHeight: 28,
+  },
+  leagueEmptyCardInner: {
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  leagueEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  leagueEmptySubtext: {
+    fontSize: 14,
+    color: COLORS.mediumGrey,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  floatingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  floatingCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  floatingCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  floatingCardTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'left',
+    paddingRight: 8,
+  },
+  floatingCardClose: {
+    padding: 6,
+    marginRight: -2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  leaveLeagueIconWrap: {
+    alignItems: 'center',
+    paddingTop: 20,
+    paddingBottom: 8,
+    minHeight: 88,
+    justifyContent: 'center',
+  },
+  leaveLeagueIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.errorLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  leaveLeagueBody: {
+    paddingHorizontal: 22,
+    paddingTop: 8,
+    paddingBottom: 20,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '400',
+    color: COLORS.accentGrey,
+    textAlign: 'center',
+  },
+  leaveLeagueActions: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingHorizontal: 22,
+    paddingBottom: 22,
+    gap: 12,
+  },
+  leaveLeagueBtn: {
+    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  leaveLeagueBtnHalf: {
+    flex: 1,
+  },
+  leaveLeagueBtnSecondary: {
+    backgroundColor: COLORS.lightGrey,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  leaveLeagueBtnDanger: {
+    backgroundColor: COLORS.errorRed,
+  },
+  leaveLeagueBtnDisabled: {
+    opacity: 0.65,
+  },
+  leaveLeagueBtnTextSecondary: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+  },
+  leaveLeagueBtnTextDanger: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+    textAlign: 'center',
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.darkGrey,
-  },
-  switchLeagueButton: {
-    marginLeft: 12,
-    padding: 4,
   },
   addButton: {
     backgroundColor: COLORS.amber,
@@ -707,61 +956,37 @@ const styles = StyleSheet.create({
   leaderboardContainer: {
     marginTop: 8,
   },
-  currentUserCard: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: COLORS.amber,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  currentUserLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.amber,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  currentUserRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  separator: {
-    height: 2,
-    backgroundColor: COLORS.lightGrey,
-    marginVertical: 16,
-    borderRadius: 1,
-  },
   leaderboardRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.lightGrey,
     borderRadius: 12,
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     marginBottom: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 2,
     elevation: 2,
   },
+  leaderboardRowSelf: {
+    borderColor: COLORS.amber,
+  },
   rankContainer: {
-    width: 40,
+    width: 32,
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 8,
   },
   rankText: {
-    fontSize: 24,
+    fontSize: 21,
     fontWeight: 'bold',
   },
   userInfo: {
     flex: 1,
+    minWidth: 0,
   },
   username: {
     fontSize: 18,
@@ -774,16 +999,38 @@ const styles = StyleSheet.create({
     color: COLORS.mediumGrey,
     letterSpacing: 0.5,
   },
-  currentUserText: {
-    color: COLORS.amber,
-  },
   statsRow: {
     flexDirection: 'row',
-    gap: 16,
+    alignItems: 'stretch',
+    marginTop: 2,
   },
-  statText: {
-    fontSize: 14,
+  statCell: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 2,
+    gap: 6,
+  },
+  statLabel: {
+    fontSize: 12,
     color: COLORS.mediumGrey,
+    flexShrink: 0,
+  },
+  statValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.accentGrey,
+    flexShrink: 0,
+    fontVariant: ['tabular-nums'],
+  },
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.divider,
+    alignSelf: 'stretch',
+    marginVertical: 1,
   },
   scoreContainer: {
     alignItems: 'flex-end',

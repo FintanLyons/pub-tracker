@@ -26,7 +26,7 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 - Level = `floor(total_score / 50) + 1`
 
 Scoring logic lives in two places — keep them in sync if rules change:
-- Client: `utils/levelSystem.js` (used for Profile level display; level formula only)
+- Client: `utils/levelSystem.js` — level math plus **exported constants** (`DEFAULT_PUB_VISIT_POINTS`, `DISTRICT_COMPLETION_BONUS_POINTS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_PER_LEVEL`) used by Profile settings scoring copy
 - Server: `scripts/phase6_postcode_migration.sql` (and legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
 
 ## Architecture

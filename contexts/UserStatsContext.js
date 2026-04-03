@@ -2,6 +2,9 @@ import React, { createContext, useCallback, useContext, useState, useEffect, use
 import { supabase } from '../config/supabase';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { getDrinkStats } from '../services/ReviewService';
+
+const EMPTY_DRINK_STATS = { total: 0, byDistrict: {}, byPostcodeArea: {} };
 
 const UserStatsContext = createContext(null);
 
@@ -11,6 +14,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 	const [totalVisited, setTotalVisited] = useState(0);
 	const [totalPubs, setTotalPubs] = useState(0);
 	const [achievements, setAchievements] = useState(null);
+	const [drinkStats, setDrinkStats] = useState(EMPTY_DRINK_STATS);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState(null);
 	const [lastUpdated, setLastUpdated] = useState(null);
@@ -22,10 +26,14 @@ export const UserStatsProvider = ({ userId, children }) => {
 		setLoading(true);
 		setError(null);
 		try {
-			const [districtResult, areaResult, achievementsResult] = await Promise.all([
+			const [districtResult, areaResult, achievementsResult, drinkStatsResult] = await Promise.all([
 				supabase.rpc('get_area_stats', { p_user_id: userId }),
 				supabase.rpc('get_borough_stats', { p_user_id: userId }),
 				supabase.rpc('get_achievements', { p_user_id: userId }),
+				getDrinkStats(userId).catch((err) => {
+					console.error('Error loading drink stats:', err);
+					return EMPTY_DRINK_STATS;
+				}),
 			]);
 
 			if (districtResult.error) throw districtResult.error;
@@ -65,6 +73,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 			setTotalVisited(totalVisitedCount);
 			setTotalPubs(totalPubsCount);
 			setAchievements(achievementsResult.data || null);
+			setDrinkStats(drinkStatsResult || EMPTY_DRINK_STATS);
 			setLastUpdated(Date.now());
 		} catch (err) {
 			console.error('Error loading user stats:', err);
@@ -87,6 +96,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 				totalVisited,
 				totalPubs,
 				achievements,
+				drinkStats,
 				loading,
 				error,
 				lastUpdated,

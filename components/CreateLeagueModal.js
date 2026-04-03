@@ -14,22 +14,26 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createLeague, addLeagueMember } from '../services/LeagueService';
 import { getFriends } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
+import ShareLeagueModal from './ShareLeagueModal';
 
 export default function CreateLeagueModal({ visible, onClose, currentUserId, onLeagueCreated }) {
   const [leagueName, setLeagueName] = useState('');
   const [friends, setFriends] = useState([]);
   const [selectedFriends, setSelectedFriends] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState(1); // 1 = name, 2 = add friends
+  const [step, setStep] = useState(1); // 1 = name, 2 = league exists: share + add friends + done
+  const [createdLeague, setCreatedLeague] = useState(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   useEffect(() => {
     if (visible) {
       loadFriends();
     } else {
-      // Reset state when modal closes
       setLeagueName('');
       setSelectedFriends([]);
       setStep(1);
+      setCreatedLeague(null);
+      setShowShareModal(false);
     }
   }, [visible]);
 
@@ -50,15 +54,8 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
     );
   };
 
-  const handleNext = () => {
-    if (!leagueName.trim()) {
-      Alert.alert('Error', 'Please enter a league name');
-      return;
-    }
-    setStep(2);
-  };
-
-  const handleCreate = async () => {
+  /** Creates the league on the server so the invite code exists before the add-friends step. */
+  const handleNext = async () => {
     if (!leagueName.trim()) {
       Alert.alert('Error', 'Please enter a league name');
       return;
@@ -66,28 +63,32 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
 
     try {
       setLoading(true);
-
-      // Create the league
-      const league = await createLeague(currentUserId, leagueName);
-
-      // Add selected friends to the league
-      for (const friendId of selectedFriends) {
-        try {
-          await addLeagueMember(league.id, friendId);
-        } catch (error) {
-          console.error('Error adding friend to league:', error);
-        }
-      }
-
-      Alert.alert('Success', 'League created successfully!');
+      const league = await createLeague(currentUserId, leagueName.trim());
+      setCreatedLeague(league);
+      setStep(2);
       if (onLeagueCreated) onLeagueCreated();
-      onClose();
     } catch (error) {
       console.error('Error creating league:', error);
       Alert.alert('Error', 'Failed to create league');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDone = async () => {
+    if (!createdLeague) return;
+
+    setLoading(true);
+    for (const friendId of selectedFriends) {
+      try {
+        await addLeagueMember(createdLeague.id, friendId);
+      } catch (error) {
+        console.error('Error adding friend to league:', error);
+      }
+    }
+    if (onLeagueCreated) onLeagueCreated();
+    setLoading(false);
+    onClose();
   };
 
   const renderFriendItem = ({ item }) => {
@@ -115,117 +116,132 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {step === 1 ? 'Create League' : 'Add Friends'}
-            </Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
-            </TouchableOpacity>
-          </View>
-
-          {/* Step Indicator */}
-          <View style={styles.stepIndicator}>
-            <View style={[styles.stepDot, styles.activeDot]} />
-            <View style={[styles.stepLine, step === 2 && styles.activeStepLine]} />
-            <View style={[styles.stepDot, step === 2 && styles.activeDot]} />
-          </View>
-
-          {/* Step 1: League Name */}
-          {step === 1 && (
-            <View style={styles.stepContent}>
-              <Text style={styles.label}>League Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter league name..."
-                value={leagueName}
-                onChangeText={setLeagueName}
-                maxLength={50}
-                autoFocus
-              />
-              <Text style={styles.hint}>
-                Choose a creative name for your league
-              </Text>
-
-              <TouchableOpacity
-                style={styles.nextButton}
-                onPress={handleNext}
-                disabled={!leagueName.trim()}
-              >
-                <Text style={styles.nextButtonText}>Next</Text>
-                <MaterialCommunityIcons name="arrow-right" size={20} color="#FFFFFF" />
+    <>
+      <Modal
+        visible={visible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create League</Text>
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
               </TouchableOpacity>
             </View>
-          )}
 
-          {/* Step 2: Add Friends */}
-          {step === 2 && (
-            <View style={styles.stepContent}>
-              <Text style={styles.label}>
-                Add Friends ({selectedFriends.length} selected)
-              </Text>
-              <Text style={styles.hint}>
-                Select friends to invite to your league (optional)
-              </Text>
-
-              {friends.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <MaterialCommunityIcons
-                    name="account-group-outline"
-                    size={64}
-                    color={COLORS.mediumGrey}
-                  />
-                  <Text style={styles.emptyText}>No friends yet</Text>
-                  <Text style={styles.emptySubtext}>
-                    You can add friends later and invite them to the league
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={friends}
-                  renderItem={renderFriendItem}
-                  keyExtractor={(item) => item.id}
-                  style={styles.friendsList}
-                />
-              )}
-
-              <View style={styles.buttonRow}>
+            {step === 2 && createdLeague && (
+              <View style={styles.shareUnderHeader}>
                 <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => setStep(1)}
+                  style={styles.shareLeagueBanner}
+                  onPress={() => setShowShareModal(true)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share league"
                 >
-                  <MaterialCommunityIcons name="arrow-left" size={20} color={COLORS.darkGrey} />
-                  <Text style={styles.backButtonText}>Back</Text>
+                  <MaterialCommunityIcons name="share-variant" size={22} color="#FFFFFF" />
+                  <Text style={styles.shareLeagueBannerText}>Share league</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={styles.modalDivider} />
+
+            {step === 1 && (
+              <View style={styles.stepContent}>
+                <Text style={styles.label}>League Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter league name..."
+                  value={leagueName}
+                  onChangeText={setLeagueName}
+                  maxLength={50}
+                  autoFocus
+                />
+                <Text style={styles.hint}>
+                  Choose a creative name for your league
+                </Text>
 
                 <TouchableOpacity
-                  style={[styles.createButton, loading && styles.disabledButton]}
-                  onPress={handleCreate}
-                  disabled={loading}
+                  style={[styles.nextButton, loading && styles.disabledButton]}
+                  onPress={handleNext}
+                  disabled={!leagueName.trim() || loading}
                 >
                   {loading ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <>
-                      <MaterialCommunityIcons name="check" size={20} color="#FFFFFF" />
-                      <Text style={styles.createButtonText}>Create</Text>
+                      <Text style={styles.nextButtonText}>Next</Text>
+                      <MaterialCommunityIcons name="arrow-right" size={20} color="#FFFFFF" />
                     </>
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
+            )}
+
+            {step === 2 && createdLeague && (
+              <View style={[styles.stepContent, styles.stepContentFinal]}>
+                <Text style={styles.leagueSummaryName}>{createdLeague.name}</Text>
+                <Text style={styles.leagueSummaryCodeLabel}>League code</Text>
+                <Text style={styles.leagueSummaryCode}>
+                  {String(createdLeague.code || '').toUpperCase()}
+                </Text>
+
+                <Text style={[styles.label, styles.friendsLabel]}>
+                  Add friends ({selectedFriends.length} selected)
+                </Text>
+
+                {friends.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <MaterialCommunityIcons
+                      name="account-group-outline"
+                      size={64}
+                      color={COLORS.mediumGrey}
+                    />
+                    <Text style={styles.emptyText}>No friends yet</Text>
+                    <Text style={styles.emptySubtext}>
+                      Use Share league to send your code, or add friends later from the leaderboard.
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={friends}
+                    renderItem={renderFriendItem}
+                    keyExtractor={(item) => item.id}
+                    style={styles.friendsList}
+                  />
+                )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.nextButton,
+                    styles.doneButton,
+                    loading && styles.disabledButton,
+                  ]}
+                  onPress={handleDone}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.nextButtonText}>Done</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+
+      <ShareLeagueModal
+        visible={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        leagueName={createdLeague?.name}
+        leagueCode={createdLeague?.code}
+      />
+    </>
   );
 }
 
@@ -240,7 +256,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     height: '80%',
-    paddingBottom: 20,
+    paddingBottom: 32,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -260,39 +276,49 @@ const styles = StyleSheet.create({
   closeButton: {
     padding: 4,
   },
-  stepIndicator: {
+  shareUnderHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  shareLeagueBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
-  },
-  stepDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: COLORS.lightGrey,
-  },
-  activeDot: {
     backgroundColor: COLORS.amber,
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 10,
   },
-  stepLine: {
-    width: 60,
-    height: 2,
+  shareLeagueBannerText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  modalDivider: {
+    height: 1,
+    marginVertical: 14,
+    marginHorizontal: 20,
     backgroundColor: COLORS.lightGrey,
-    marginHorizontal: 8,
-  },
-  activeStepLine: {
-    backgroundColor: COLORS.amber,
   },
   stepContent: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  stepContentFinal: {
+    paddingBottom: 6,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.darkGrey,
     marginBottom: 8,
+  },
+  friendsLabel: {
+    marginTop: 4,
+    marginBottom: 12,
   },
   input: {
     height: 48,
@@ -305,7 +331,29 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: 14,
     color: COLORS.mediumGrey,
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  leagueSummaryName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    marginBottom: 10,
+  },
+  leagueSummaryCodeLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  leagueSummaryCode: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.darkGrey,
+    letterSpacing: 2,
+    marginBottom: 8,
+    fontVariant: ['tabular-nums'],
   },
   nextButton: {
     flexDirection: 'row',
@@ -315,15 +363,24 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,
+    marginTop: 16,
+  },
+  doneButton: {
+    marginTop: 10,
+    marginBottom: 6,
   },
   nextButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  disabledButton: {
+    opacity: 0.6,
+  },
   friendsList: {
     flex: 1,
-    marginTop: 12,
+    marginTop: 8,
+    marginBottom: 8,
   },
   friendItem: {
     flexDirection: 'row',
@@ -360,49 +417,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.mediumGrey,
   },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-  },
-  backButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.lightGrey,
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  backButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.darkGrey,
-  },
-  createButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.amber,
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  createButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 24,
+    minHeight: 120,
   },
   emptyText: {
     fontSize: 16,
@@ -414,7 +434,6 @@ const styles = StyleSheet.create({
     color: COLORS.mediumGrey,
     marginTop: 8,
     textAlign: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 24,
   },
 });
-

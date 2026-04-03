@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 
@@ -73,18 +74,8 @@ export const clearVisitedFavoriteCache = () => {
 const PAGE_SIZE = 500;
 const SAFETY_LIMIT = 5000;
 
-const convertFeaturesToArray = (pub) => {
-	const features = [];
-	if (pub.has_pub_garden) features.push('Pub garden');
-	if (pub.has_live_music) features.push('Live music');
-	if (pub.has_food_available) features.push('Food available');
-	if (pub.has_dog_friendly) features.push('Dog friendly');
-	if (pub.has_pool_darts) features.push('Pool/darts');
-	if (pub.has_parking) features.push('Parking');
-	if (pub.has_accommodation) features.push('Accommodation');
-	if (pub.has_cask_real_ale) features.push('Cask/real ale');
-	return features;
-};
+const convertFeaturesToArray = (pub) =>
+	PUB_FEATURE_CHIPS.filter((f) => pub[f.flag]).map((f) => f.name);
 
 const getSpatialAssignment = (pub) => {
 	const embedded = pub?.pub_spatial_assignments;
