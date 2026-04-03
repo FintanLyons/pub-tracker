@@ -39,12 +39,12 @@ services/         PubService       — fetch pubs, toggle visited/favourite
                   FriendsService   — send/accept requests, leaderboard
                   LeagueService    — create/join/leave leagues
                   UserService      — username search
-                  SecureAuthService — login, register, logout
+                  SecureAuthService — email/password login & register, Google, `ensureUserStub`, `updatePublicUsername` + deferred auth metadata sync, logout
                   ReportService    — report pubs / missing pubs
                   LeaderboardCache — in-memory leaderboard cache
 
 screens/          MapScreen, ProfileScreen (stats + trophy modal), LeaderboardScreen,
-                  AuthScreen, FilterScreen
+                  AuthScreen, ChooseUsernameScreen (post-auth until username set), OnboardingScreen, FilterScreen
 
 screens/map/hooks/  useMapCamera — camera ref, location, fit/center/zoom
                     useViewportPubs — pub fetching, merge, bounds tracking
@@ -80,7 +80,7 @@ scripts/          SQL migrations and Python data-pipeline scripts.
 | `visited_pubs` | User visit records — trigger auto-updates `user_stats` on INSERT/DELETE |
 | `favorite_pubs` | User favourites |
 | `user_stats` | Denormalised score, level, pubs_visited per user — maintained by DB trigger |
-| `users` | User profiles — username (unique), email |
+| `users` | User profiles — email; `username` unique when set, **nullable** until user picks one (`scripts/username_nullable_migration.sql`) |
 | `friendships` | Bidirectional friendship rows with status `pending` / `accepted` |
 | `leagues` | Private leagues with a unique 6-character invite code |
 | `league_members` | Membership join table |
@@ -94,7 +94,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 - `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`) + totalScore + level
 - `search_pubs(query, limit)` — name search; includes `postcode_district`, `postcode_area`
 - `compute_user_stats(user_id)` — recompute and upsert a user's `user_stats` row
-- `get_email_by_username(username)` — used for username-based login
+- `get_email_by_username(username)` — legacy RPC in some SQL scripts; the app logs in with **email + password** only
 
 ## Key conventions
 

@@ -9,15 +9,43 @@ import ErrorBoundary from './components/ErrorBoundary';
 import OfflineOverlay from './components/OfflineOverlay';
 import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
+import ChooseUsernameScreen from './screens/ChooseUsernameScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
 import { COLORS } from './constants/theme';
+import { isValidUsernameFormat } from './services/SecureAuthService';
 
 function onboardingKeyForUser(userId) {
   return `hasSeenOnboarding:${userId}`;
+}
+
+/**
+ * Choose username before onboarding/tabs when:
+ * - New signup set app_username_chosen === false in auth metadata, or
+ * - DB username missing/empty, or
+ * - DB username is not a valid app handle (common trigger placeholders e.g. email local-part with dots).
+ *
+ * If metadata is still false but public.users already has a valid handle (e.g. metadata sync deferred),
+ * do not block — avoids spinner after successful UPDATE.
+ */
+function needsUsername(user) {
+  if (!user) return false;
+
+  const raw = user.username;
+  const trimmed = raw == null ? '' : String(raw).trim();
+  const hasValidHandle = trimmed !== '' && isValidUsernameFormat(trimmed);
+
+  if (user.appUsernameChosen === false) {
+    if (hasValidHandle) return false;
+    return true;
+  }
+
+  if (trimmed === '') return true;
+  if (!isValidUsernameFormat(trimmed)) return true;
+  return false;
 }
 
 function AppContent() {
@@ -59,6 +87,28 @@ function AppContent() {
     );
   }
 
+  if (!user) {
+    return (
+      <PaperProvider>
+        <View style={styles.appContainer}>
+          <AuthScreen onAuthSuccess={refreshUser} />
+          <OfflineOverlay />
+        </View>
+      </PaperProvider>
+    );
+  }
+
+  if (needsUsername(user)) {
+    return (
+      <PaperProvider>
+        <View style={styles.appContainer}>
+          <ChooseUsernameScreen />
+          <OfflineOverlay />
+        </View>
+      </PaperProvider>
+    );
+  }
+
   const showUserOnboarding =
     user && userOnboardingDone === false;
 
@@ -78,15 +128,11 @@ function AppContent() {
     <NavigationContainer>
       <PaperProvider>
         <View style={styles.appContainer}>
-          {user ? (
-            <LocationProvider>
-              <UserStatsProvider userId={user.id}>
-                <TabNavigator />
-              </UserStatsProvider>
-            </LocationProvider>
-          ) : (
-            <AuthScreen onAuthSuccess={refreshUser} />
-          )}
+          <LocationProvider>
+            <UserStatsProvider userId={user.id}>
+              <TabNavigator />
+            </UserStatsProvider>
+          </LocationProvider>
           <OfflineOverlay />
         </View>
       </PaperProvider>
