@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Modal,
   Animated,
-  Alert,
   InteractionManager,
   RefreshControl,
 } from 'react-native';
@@ -36,6 +35,13 @@ const VIEW_MODES = {
   POSTCODE_AREA: 'region',
 };
 
+const DELETE_MODAL = {
+  NONE: 'none',
+  WARN: 'warn',
+  FINAL: 'final',
+  ERROR: 'error',
+};
+
 export default function ProfileScreen({ navigation }) {
   const { logout, user, deleteAccount } = useAuth();
   const userId = user?.id ?? null;
@@ -57,7 +63,10 @@ export default function ProfileScreen({ navigation }) {
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showTrophiesModal, setShowTrophiesModal] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(DELETE_MODAL.NONE);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
@@ -254,64 +263,33 @@ export default function ProfileScreen({ navigation }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showFilterModal]);
 
-  const handleDeleteAccount = useCallback(() => {
-    Alert.alert(
-      'Delete account?',
-      'Your profile, visits, favourites, friends, and league memberships will be removed permanently.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Continue',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Last step',
-              'Are you sure? You will not be able to recover this account.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete account',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteAccount();
-                    } catch (e) {
-                      Alert.alert(
-                        'Something went wrong',
-                        e?.message ||
-                          'Could not delete your account. If the problem persists, contact support.'
-                      );
-                    }
-                  },
-                },
-              ]
-            );
-          },
-        },
-      ]
-    );
-  }, [deleteAccount]);
+  const closeDeleteFlow = useCallback(() => {
+    setDeleteModal(DELETE_MODAL.NONE);
+    setDeleteErrorMessage('');
+  }, []);
 
-  const handleAccountMenu = useCallback(() => {
-    Alert.alert(
-      'Account',
-      'Sign out of this device, or permanently delete your account and all data.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign out',
-          onPress: async () => {
-            await logout();
-          },
-        },
-        {
-          text: 'Delete account',
-          style: 'destructive',
-          onPress: handleDeleteAccount,
-        },
-      ]
-    );
-  }, [logout, handleDeleteAccount]);
+  const handleSignOutFromSettings = useCallback(async () => {
+    setShowSettingsModal(false);
+    await logout();
+  }, [logout]);
+
+  const handleDeleteFromSettings = useCallback(() => {
+    setShowSettingsModal(false);
+    setDeleteModal(DELETE_MODAL.WARN);
+  }, []);
+
+  const handleDeleteAccountConfirm = useCallback(async () => {
+    try {
+      await deleteAccount();
+      closeDeleteFlow();
+    } catch (e) {
+      setDeleteErrorMessage(
+        e?.message ||
+          'Could not delete your account. If the problem persists, contact support.'
+      );
+      setDeleteModal(DELETE_MODAL.ERROR);
+    }
+  }, [deleteAccount, closeDeleteFlow]);
 
   const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
   const currentLevel = getLevelProgress(achievements?.totalScore || 0).level;
@@ -379,11 +357,12 @@ export default function ProfileScreen({ navigation }) {
         </View>
         {user && (
           <TouchableOpacity
-            onPress={handleAccountMenu}
-            style={styles.logoutButtonHeader}
-            accessibilityLabel="Account: sign out or delete account"
+            onPress={() => setShowSettingsModal(true)}
+            style={styles.settingsButtonHeader}
+            accessibilityLabel="Open settings"
+            accessibilityRole="button"
           >
-            <MaterialCommunityIcons name="logout" size={24} color="#F44336" />
+            <MaterialCommunityIcons name="cog-outline" size={24} color={COLORS.darkGrey} />
           </TouchableOpacity>
         )}
       </View>
@@ -691,6 +670,239 @@ export default function ProfileScreen({ navigation }) {
           </Animated.View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showSettingsModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowSettingsModal(false)}
+            accessibilityLabel="Dismiss settings"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Settings</Text>
+              <TouchableOpacity
+                onPress={() => setShowSettingsModal(false)}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close settings"
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.settingsBody}>
+              <View style={styles.settingsUserCard}>
+                <Text style={styles.settingsUserLabel}>Username</Text>
+                <Text
+                  style={[
+                    styles.settingsUserValue,
+                    !user?.username && styles.settingsUserValueMuted,
+                  ]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {user?.username?.trim() ? user.username : 'Not set yet'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.settingsActionCard, styles.settingsActionCardNeutral]}
+                onPress={handleSignOutFromSettings}
+                activeOpacity={0.7}
+                accessibilityLabel="Sign out"
+                accessibilityRole="button"
+              >
+                <View style={styles.settingsActionIconSlot}>
+                  <MaterialCommunityIcons name="logout-variant" size={22} color={COLORS.darkGrey} />
+                </View>
+                <Text style={styles.settingsActionLabel}>Sign out</Text>
+                <View style={styles.settingsActionChevronSlot}>
+                  <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.mediumGrey} />
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.settingsActionCard, styles.settingsActionCardDanger]}
+                onPress={handleDeleteFromSettings}
+                activeOpacity={0.7}
+                accessibilityLabel="Delete account"
+                accessibilityRole="button"
+              >
+                <View style={styles.settingsActionIconSlot}>
+                  <MaterialCommunityIcons name="delete-outline" size={22} color={COLORS.errorRed} />
+                </View>
+                <Text style={styles.settingsActionLabelDanger}>Delete account</Text>
+                <View style={styles.settingsActionChevronSlot}>
+                  <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.errorRed} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={deleteModal === DELETE_MODAL.WARN}
+        animationType="fade"
+        transparent
+        onRequestClose={closeDeleteFlow}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closeDeleteFlow}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Delete account?</Text>
+              <TouchableOpacity
+                onPress={closeDeleteFlow}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.floatingCardBody}>
+              Your profile, visits, favourites, friends, and league memberships will be removed
+              permanently.
+            </Text>
+            <View style={styles.floatingCardActions}>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnSecondary,
+                ]}
+                onPress={closeDeleteFlow}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnDangerOutline,
+                ]}
+                onPress={() => setDeleteModal(DELETE_MODAL.FINAL)}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.floatingActionBtnTextDanger}>Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={deleteModal === DELETE_MODAL.FINAL}
+        animationType="fade"
+        transparent
+        onRequestClose={closeDeleteFlow}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closeDeleteFlow}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Last step</Text>
+              <TouchableOpacity
+                onPress={closeDeleteFlow}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.floatingCardBody}>
+              Are you sure? You will not be able to recover this account.
+            </Text>
+            <View style={styles.floatingCardActions}>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnSecondary,
+                ]}
+                onPress={closeDeleteFlow}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnDangerFill,
+                ]}
+                onPress={handleDeleteAccountConfirm}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.floatingActionBtnTextOnDanger}>Delete account</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={deleteModal === DELETE_MODAL.ERROR}
+        animationType="fade"
+        transparent
+        onRequestClose={closeDeleteFlow}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={closeDeleteFlow}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Something went wrong</Text>
+              <TouchableOpacity
+                onPress={closeDeleteFlow}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.floatingCardBody}>{deleteErrorMessage}</Text>
+            <View style={styles.floatingCardActionsSingle}>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnStretch,
+                  styles.floatingActionBtnPrimary,
+                ]}
+                onPress={closeDeleteFlow}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.floatingActionBtnTextPrimary}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
 
     <Modal
@@ -776,10 +988,209 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: '100%',
   },
-  logoutButtonHeader: {
-    padding: 8,
-    borderRadius: 8,
+  settingsButtonHeader: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.lightGrey,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  floatingModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  floatingCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  floatingCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  floatingCardTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'left',
+    paddingRight: 8,
+  },
+  floatingCardClose: {
+    padding: 6,
+    marginRight: -2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  floatingCardBody: {
+    paddingHorizontal: 22,
+    paddingTop: 16,
+    paddingBottom: 20,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '400',
+    color: COLORS.accentGrey,
+    textAlign: 'left',
+  },
+  floatingCardActions: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingHorizontal: 22,
+    paddingBottom: 22,
+    gap: 12,
+  },
+  floatingCardActionsSingle: {
+    paddingHorizontal: 22,
+    paddingBottom: 22,
+  },
+  floatingActionBtn: {
+    minHeight: 48,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  floatingActionBtnHalf: {
+    flex: 1,
+  },
+  floatingActionBtnStretch: {
+    alignSelf: 'stretch',
+  },
+  floatingActionBtnSecondary: {
+    backgroundColor: COLORS.lightGrey,
+  },
+  floatingActionBtnDangerOutline: {
+    backgroundColor: COLORS.errorLight,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.errorRed,
+  },
+  floatingActionBtnDangerFill: {
+    backgroundColor: COLORS.errorRed,
+  },
+  floatingActionBtnPrimary: {
+    backgroundColor: COLORS.amber,
+  },
+  floatingActionBtnTextSecondary: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+  },
+  floatingActionBtnTextDanger: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.errorRed,
+    textAlign: 'center',
+  },
+  floatingActionBtnTextOnDanger: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+    textAlign: 'center',
+  },
+  floatingActionBtnTextPrimary: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.charcoal,
+    textAlign: 'center',
+  },
+  settingsBody: {
+    paddingHorizontal: 22,
+    paddingTop: 16,
+    paddingBottom: 22,
+  },
+  settingsUserCard: {
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  settingsUserLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+    textAlign: 'left',
+  },
+  settingsUserValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'left',
+  },
+  settingsUserValueMuted: {
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+  },
+  settingsActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  settingsActionCardNeutral: {
+    backgroundColor: COLORS.lightGrey,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  settingsActionCardDanger: {
+    backgroundColor: COLORS.errorLight,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#FFCDD2',
+    marginBottom: 0,
+  },
+  settingsActionIconSlot: {
+    width: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsActionChevronSlot: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsActionLabel: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+    textAlign: 'left',
+    marginLeft: 4,
+    marginRight: 4,
+  },
+  settingsActionLabelDanger: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.errorRed,
+    textAlign: 'left',
+    marginLeft: 4,
+    marginRight: 4,
   },
   statsCard: {
     backgroundColor: COLORS.lightGrey,
