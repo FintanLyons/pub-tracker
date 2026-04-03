@@ -12,15 +12,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RangeSlider from '../components/RangeSlider';
 import { COLORS } from '../constants/theme';
-
-const ALL_FEATURES_WITH_ICONS = [
-  { name: 'Pub garden', icon: 'tree' },
-  { name: 'Live music', icon: 'music' },
-  { name: 'Food available', icon: 'silverware-fork-knife' },
-  { name: 'Dog friendly', icon: 'dog' },
-  { name: 'Pool/darts', icon: 'billiards' },
-  { name: 'Accommodation', icon: 'bed' },
-];
+import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 
 const CLOSING_TIME_OPTIONS = [
   { label: 'Open now', value: 'open_now', icon: 'clock-check-outline' },
@@ -46,7 +38,6 @@ const chunkOwnership = (items, pageSize) => {
 export default function FilterScreen({ 
   visible, 
   onClose, 
-  allFeatures, 
   selectedFeatures,
   allOwnerships,
   selectedOwnerships,
@@ -204,7 +195,7 @@ export default function FilterScreen({
 
             <Text style={styles.sectionTitle}>Features</Text>
             <View style={styles.filterRowSection}>
-              {ALL_FEATURES_WITH_ICONS.map((feature) => {
+              {PUB_FEATURE_CHIPS.map((feature) => {
                 const isSelected = localSelectedFeatures.has(feature.name);
                 return (
                   <TouchableOpacity

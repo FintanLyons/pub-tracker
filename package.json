@@ -25,6 +25,7 @@
     "@turf/boolean-point-in-polygon": "^7.3.4",
     "@turf/helpers": "^7.3.4",
     "expo": "~54.0.33",
+    "expo-crypto": "~15.0.8",
     "expo-dev-client": "~6.0.20",
     "expo-image": "~3.0.11",
     "expo-location": "~19.0.8",

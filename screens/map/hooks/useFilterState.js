@@ -9,16 +9,6 @@ export function useFilterState(allPubs) {
   const [closingTimeMin, setClosingTimeMin] = useState(null);
   const [showFilterScreen, setShowFilterScreen] = useState(false);
 
-  const allFeatures = useMemo(() => {
-    const featureSet = new Set();
-    allPubs.forEach(pub => {
-      if (pub.features && Array.isArray(pub.features)) {
-        pub.features.forEach(f => featureSet.add(f));
-      }
-    });
-    return Array.from(featureSet).sort();
-  }, [allPubs]);
-
   const allOwnerships = useMemo(() => {
     const counts = {};
     allPubs.forEach(pub => {
@@ -63,7 +53,6 @@ export function useFilterState(allPubs) {
     showOnlyAchievements,
     closingTimeMin,
     showFilterScreen,
-    allFeatures,
     allOwnerships,
     availableYearRange,
     handleFilterApply,
