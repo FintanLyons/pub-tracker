@@ -18,8 +18,13 @@ import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
 import { COLORS } from '../constants/theme';
-import { getDrinkStats } from '../services/ReviewService';
-import { getLevelProgress } from '../utils/levelSystem';
+import {
+  getLevelProgress,
+  POINTS_PER_LEVEL,
+  DEFAULT_PUB_VISIT_POINTS,
+  DISTRICT_COMPLETION_BONUS_POINTS,
+  POSTCODE_AREA_COMPLETION_BONUS_POINTS,
+} from '../utils/levelSystem';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 import UserAchievementsPanel from '../components/UserAchievementsPanel';
 
@@ -44,13 +49,13 @@ const DELETE_MODAL = {
 
 export default function ProfileScreen({ navigation }) {
   const { logout, user, deleteAccount } = useAuth();
-  const userId = user?.id ?? null;
   const {
     districtStats: baseDistrictStats,
     postcodeAreaStats: basePostcodeAreaStats,
     totalVisited,
     totalPubs,
     achievements,
+    drinkStats,
     loading: statsLoading,
     lastUpdated,
     error: statsError,
@@ -59,7 +64,6 @@ export default function ProfileScreen({ navigation }) {
   const location = useUserLocation();
   const [districtStatsRaw, setDistrictStatsRaw] = useState([]);
   const [postcodeAreaStatsRaw, setPostcodeAreaStatsRaw] = useState([]);
-  const [drinkStats, setDrinkStats] = useState({ total: 0, byDistrict: {}, byPostcodeArea: {} });
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
   const [viewMode, setViewMode] = useState(VIEW_MODES.DISTRICT);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -151,16 +155,6 @@ export default function ProfileScreen({ navigation }) {
       basePostcodeAreaStats.length,
       refreshUserStats,
     ])
-  );
-
-  // Refresh drink stats whenever the screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      if (!userId) return;
-      getDrinkStats(userId)
-        .then(setDrinkStats)
-        .catch((err) => console.error('Error fetching drink stats:', err));
-    }, [userId])
   );
 
   const sortStats = useCallback(
@@ -292,22 +286,20 @@ export default function ProfileScreen({ navigation }) {
   }, [deleteAccount, closeDeleteFlow]);
 
   const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
-  const currentLevel = getLevelProgress(achievements?.totalScore || 0).level;
+  const totalScore = achievements?.totalScore ?? 0;
+  const levelProgress = useMemo(() => getLevelProgress(totalScore), [totalScore]);
+  const levelBarWidth = Math.min(100, Math.max(0, levelProgress.progressPercentage));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await refreshUserStats();
-      if (userId) {
-        const nextDrinks = await getDrinkStats(userId);
-        setDrinkStats(nextDrinks);
-      }
     } catch (error) {
       console.error('Error refreshing profile stats:', error);
     } finally {
       setRefreshing(false);
     }
-  }, [userId, refreshUserStats]);
+  }, [refreshUserStats]);
 
   useEffect(() => {
     if (!showTrophiesModal) return;
@@ -382,7 +374,7 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
-      {/* ── Secondary stats card: Areas Completed | Level ──────────────────── */}
+      {/* ── Secondary stats card: Areas | Level | Score + level progress bar ─ */}
       <View style={[styles.statsCard, styles.statsCardSecondary]}>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
@@ -391,8 +383,38 @@ export default function ProfileScreen({ navigation }) {
           </View>
           <View style={styles.statDividerSmall} />
           <View style={styles.statItem}>
-            <Text style={styles.statNumberSmall}>{currentLevel}</Text>
+            <Text style={styles.statNumberSmall}>{levelProgress.level}</Text>
             <Text style={styles.statItemLabelSmall}>Current Level</Text>
+          </View>
+          <View style={styles.statDividerSmall} />
+          <View style={styles.statItem}>
+            <Text
+              style={styles.statNumberSmall}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.65}
+            >
+              {totalScore.toLocaleString()}
+            </Text>
+            <Text style={styles.statItemLabelSmall}>Score</Text>
+          </View>
+        </View>
+        <View
+          style={styles.levelBarSection}
+          accessible
+          accessibilityLabel={`Toward next level. Bar shows how far through your current level you are: ${levelProgress.pointsInCurrentLevel} of ${levelProgress.pointsNeededForLevel} points toward level ${levelProgress.level + 1}.`}
+          accessibilityValue={{
+            min: 0,
+            max: levelProgress.pointsNeededForLevel,
+            now: levelProgress.pointsInCurrentLevel,
+          }}
+        >
+          <View style={styles.levelBarLabelRow} importantForAccessibility="no">
+            <MaterialCommunityIcons name="stairs-up" size={18} color={COLORS.mediumGrey} />
+            <Text style={styles.levelBarHeaderText}>Toward next level</Text>
+          </View>
+          <View style={styles.levelBarTrack} importantForAccessibility="no">
+            <View style={[styles.levelBarFill, { width: `${levelBarWidth}%` }]} />
           </View>
         </View>
       </View>
@@ -710,6 +732,54 @@ export default function ProfileScreen({ navigation }) {
                 >
                   {user?.username?.trim() ? user.username : 'Not set yet'}
                 </Text>
+              </View>
+
+              <View style={styles.settingsScoringCard}>
+                <Text style={styles.settingsScoringLabel}>Scoring</Text>
+                <View style={[styles.scoringRuleRow, styles.scoringRuleRowFirst]}>
+                  <Text style={styles.scoringRuleLeft}>A pub visit</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+{DEFAULT_PUB_VISIT_POINTS}</Text>
+                </View>
+                <Text style={styles.scoringRuleHint}>Excluding Rare Pubs</Text>
+                <View style={styles.scoringRuleRow}>
+                  <Text style={styles.scoringRuleLeft}>Area finished</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+{DISTRICT_COMPLETION_BONUS_POINTS}</Text>
+                </View>
+                <View style={[styles.scoringRuleRow, styles.scoringRuleRowTight]}>
+                  <Text style={styles.scoringRuleLeft}>Region finished</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>
+                    +{POSTCODE_AREA_COMPLETION_BONUS_POINTS}
+                  </Text>
+                </View>
+                <View style={styles.scoringRulesDivider} />
+                <View style={styles.scoringRuleRow}>
+                  <Text style={styles.scoringRuleLeft}>Every {POINTS_PER_LEVEL} points</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+1 level</Text>
+                </View>
               </View>
 
               <TouchableOpacity
@@ -1144,6 +1214,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.mediumGrey,
   },
+  settingsScoringCard: {
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  settingsScoringLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    textAlign: 'left',
+  },
+  scoringRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  scoringRuleRowFirst: {
+    marginTop: 4,
+  },
+  scoringRuleRowTight: {
+    marginTop: 8,
+  },
+  scoringRuleLeft: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  scoringRuleArrow: {
+    marginHorizontal: 6,
+  },
+  scoringRuleValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.amber,
+    minWidth: 52,
+    textAlign: 'right',
+  },
+  scoringRuleHint: {
+    marginTop: 4,
+    marginBottom: 2,
+    fontSize: 11,
+    lineHeight: 15,
+    color: COLORS.mediumGrey,
+  },
+  scoringRulesDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.divider,
+    marginTop: 12,
+    marginBottom: 4,
+  },
   settingsActionCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1251,9 +1379,40 @@ const styles = StyleSheet.create({
   },
   statDividerSmall: {
     width: 1,
-    height: 40,
+    alignSelf: 'stretch',
+    minHeight: 40,
     backgroundColor: '#E0E0E0',
-    marginHorizontal: 8,
+    marginHorizontal: 6,
+  },
+  levelBarSection: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.divider,
+  },
+  levelBarLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  levelBarHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.3,
+  },
+  levelBarTrack: {
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.divider,
+    overflow: 'hidden',
+  },
+  levelBarFill: {
+    height: '100%',
+    borderRadius: 5,
+    backgroundColor: COLORS.amber,
   },
   areaCountRow: {
     flexDirection: 'row',

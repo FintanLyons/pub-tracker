@@ -1,17 +1,21 @@
 /**
- * Level System Configuration
- * 
- * Level progression:
- * - Level 1: 0-49 points (50 points required)
- * - Level 2: 50-99 points (50 points required)
- * - Level 3: 100-149 points (50 points required)
- * - Level 4: 150-199 points (50 points required)
- * - And so on...
- * 
- * Each level requires 50 points to complete.
+ * Scoring & level rules (client).
+ *
+ * Keep in sync with server: `compute_user_stats` / `get_achievements` in
+ * `scripts/phase6_postcode_migration.sql` (and legacy `phase3_server_functions.sql`).
  */
 
-const POINTS_PER_LEVEL = 50;
+/** Points required to advance one level (total score). */
+export const POINTS_PER_LEVEL = 50;
+
+/** When a pub has no `points` set, visits use this many points. */
+export const DEFAULT_PUB_VISIT_POINTS = 10;
+
+/** Bonus when every pub in a postcode district is visited. */
+export const DISTRICT_COMPLETION_BONUS_POINTS = 50;
+
+/** Bonus when every pub in a letter postcode area (e.g. SW) is visited. */
+export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 500;
 
 /**
  * Calculate the level for a given score
@@ -20,7 +24,6 @@ const POINTS_PER_LEVEL = 50;
  */
 export const getLevel = (score) => {
   if (score < 0) return 1;
-  // Level 1 starts at 0, so we add 1 to the floor division
   return Math.floor(score / POINTS_PER_LEVEL) + 1;
 };
 
@@ -54,7 +57,7 @@ export const getLevelProgress = (score) => {
   const pointsInCurrentLevel = score - minPoints;
   const pointsNeededForLevel = POINTS_PER_LEVEL;
   const progressPercentage = Math.min(100, (pointsInCurrentLevel / pointsNeededForLevel) * 100);
-  
+
   return {
     level,
     progressPercentage,
@@ -64,4 +67,3 @@ export const getLevelProgress = (score) => {
     maxPoints: getMaxPointsForLevel(level),
   };
 };
-
