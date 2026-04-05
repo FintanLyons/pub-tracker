@@ -23,21 +23,7 @@ import {
   upsertReview,
   deleteReview,
 } from '../services/ReviewService';
-
-// Parking and Cask/real ale removed — data remains in the database
-const ALL_FEATURES = [
-  { name: 'Pub garden',     icon: 'tree' },
-  { name: 'Live music',     icon: 'music' },
-  { name: 'Food available', icon: 'silverware-fork-knife' },
-  { name: 'Dog friendly',   icon: 'dog' },
-  { name: 'Pool/darts',     icon: 'billiards' },
-  { name: 'Accommodation',  icon: 'bed' },
-];
-
-const hasFeature = (pubFeatures, featureName) => {
-  if (!pubFeatures || !Array.isArray(pubFeatures)) return false;
-  return pubFeatures.some(f => f.toLowerCase() === featureName.toLowerCase());
-};
+import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 
 const openDirections = (lat, lon) => {
   Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`);
@@ -301,8 +287,8 @@ export default function PubCardContent({
 
       {/* ── Feature icons ────────────────────────────────────────────────── */}
       <View style={styles.featuresContainer}>
-        {ALL_FEATURES.map((feature, index) => {
-          const isActive = hasFeature(pub.features, feature.name);
+        {PUB_FEATURES_DISPLAY.map((feature, index) => {
+          const isActive = hasPubFeature(pub.features, feature.name);
           return (
             <View key={index} style={styles.featureIconWrapper}>
               <MaterialCommunityIcons

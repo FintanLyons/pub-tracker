@@ -62,8 +62,8 @@ utils/              postcodeDistrictDisplayNames.js — getPostcodeDistrictDispl
 
 components/       DraggablePubCard, PubCardContent, SearchBar,
                   SearchSuggestions, AddFriendModal, CreateLeagueModal,
-                  JoinLeagueModal, LeagueActionsModal, ReportModal,
-                  ReportMissingPubModal, OfflineOverlay, ErrorBoundary,
+                  JoinLeagueModal, LeagueActionsModal, PubReportFormModal,
+                  OfflineOverlay, ErrorBoundary,
                   UserAchievementsPanel (trophy grid in Profile modal),
                   PintGlassIcon, RangeSlider
 

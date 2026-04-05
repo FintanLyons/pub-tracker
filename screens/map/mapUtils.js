@@ -3,7 +3,7 @@ import { point } from '@turf/helpers';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../utils/postcodeDistrictDisplayNames';
 import { ZOOM_LEVELS } from './layerUtils';
 
-export const PUB_FETCH_BUFFER_RATIO = 0.35;
+export const PUB_FETCH_BUFFER_RATIO = 0.55;
 export const MIN_PUB_FETCH_ZOOM = ZOOM_LEVELS.PUBS_MIN - 0.15;
 
 export const findFeatureByPostcodeArea = (featureCollection, areaCode) => {

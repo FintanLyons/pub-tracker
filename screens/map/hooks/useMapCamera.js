@@ -3,7 +3,14 @@ import * as Location from 'expo-location';
 import { useUserLocation } from '../../../contexts/LocationContext';
 import { DEFAULT_CAMERA, getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
 
-export function useMapCamera({ setIsLocationLoaded }) {
+/** Throttle watch callbacks so the map dot only moves after this many metres. */
+const MAP_LOCATION_DISTANCE_INTERVAL_M = 20;
+
+/** Location button: animated pan + zoom (ms). */
+const LOCATE_ANIM_MS = 1000;
+const LOCATE_REFINE_MS = 650;
+
+export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
   const contextLocation = useUserLocation();
   const [localLocation, setLocalLocation] = useState(null);
 
@@ -11,8 +18,56 @@ export function useMapCamera({ setIsLocationLoaded }) {
   const mapZoomRef = useRef(DEFAULT_CAMERA.zoom);
   const initialCameraSetRef = useRef(false);
   const hasUserInteractedRef = useRef(false);
+  const currentLocationRef = useRef(null);
 
   const currentLocation = localLocation || contextLocation;
+
+  useEffect(() => {
+    currentLocationRef.current = currentLocation;
+  }, [currentLocation]);
+
+  useEffect(() => {
+    if (!isMapFocused) return undefined;
+
+    let cancelled = false;
+    let subscription = null;
+
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+
+        const sub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: MAP_LOCATION_DISTANCE_INTERVAL_M,
+          },
+          (loc) => {
+            if (cancelled) return;
+            setLocalLocation({
+              latitude: loc.coords.latitude,
+              longitude: loc.coords.longitude,
+            });
+          }
+        );
+
+        if (cancelled) {
+          sub.remove();
+          return;
+        }
+        subscription = sub;
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('useMapCamera: location watch failed', err?.message);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [isMapFocused]);
 
   useEffect(() => {
     if (contextLocation && !initialCameraSetRef.current && !hasUserInteractedRef.current && cameraRef.current) {
@@ -58,29 +113,73 @@ export function useMapCamera({ setIsLocationLoaded }) {
   const handleCurrentLocation = useCallback(async () => {
     try {
       hasUserInteractedRef.current = true;
-      let nextLocation = currentLocation;
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
 
-      if (!nextLocation) {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        nextLocation = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-        setLocalLocation(nextLocation);
+      const zoom = Math.max(mapZoomRef.current, ZOOM_LEVELS.CURRENT_LOCATION_MIN);
+      const seed = currentLocationRef.current;
+      let hasAnimatedThisPress = false;
+      const animateTo = (lat, lon, duration) => {
+        if (!cameraRef.current) return;
+        cameraRef.current.easeTo({
+          center: [lon, lat],
+          zoom,
+          duration,
+          easing: 'ease',
+        });
+        hasAnimatedThisPress = true;
+      };
+
+      if (seed && cameraRef.current) {
+        animateTo(seed.latitude, seed.longitude, LOCATE_ANIM_MS);
       }
 
-      if (!nextLocation) return;
-      cameraRef.current?.easeTo({
-        center: [nextLocation.longitude, nextLocation.latitude],
-        zoom: Math.max(mapZoomRef.current, 14.5),
-        duration: 700,
-      });
+      const last = await Location.getLastKnownPositionAsync({ maxAge: 120000 });
+      if (last) {
+        const fromCache = {
+          latitude: last.coords.latitude,
+          longitude: last.coords.longitude,
+        };
+        setLocalLocation(fromCache);
+        animateTo(
+          fromCache.latitude,
+          fromCache.longitude,
+          hasAnimatedThisPress ? LOCATE_REFINE_MS : LOCATE_ANIM_MS,
+        );
+      }
+
+      try {
+        const fresh = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low,
+        });
+        const nextLocation = {
+          latitude: fresh.coords.latitude,
+          longitude: fresh.coords.longitude,
+        };
+        setLocalLocation(nextLocation);
+        animateTo(
+          nextLocation.latitude,
+          nextLocation.longitude,
+          hasAnimatedThisPress ? LOCATE_REFINE_MS : LOCATE_ANIM_MS,
+        );
+      } catch (fineErr) {
+        if (!last && !seed) {
+          console.warn('useMapCamera: no quick location, trying balanced fix', fineErr?.message);
+          const fallback = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          const nextLocation = {
+            latitude: fallback.coords.latitude,
+            longitude: fallback.coords.longitude,
+          };
+          setLocalLocation(nextLocation);
+          animateTo(nextLocation.latitude, nextLocation.longitude, LOCATE_ANIM_MS);
+        }
+      }
     } catch (error) {
       console.error('Error getting current location:', error);
     }
-  }, [currentLocation]);
+  }, []);
 
   const currentLocationShape = useMemo(() => {
     if (!currentLocation) return null;

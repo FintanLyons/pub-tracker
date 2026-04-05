@@ -31,6 +31,13 @@ export default {
         },
       ],
       'expo-mail-composer',
+      [
+        'expo-image-picker',
+        {
+          photosPermission:
+            'Allow Pub Tracker to attach photos to pub reports.',
+        },
+      ],
       '@react-native-google-signin/google-signin',
     ],
     ios: {

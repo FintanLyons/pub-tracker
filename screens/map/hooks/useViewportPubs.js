@@ -10,6 +10,8 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
   const inFlightPubFetchRef = useRef(false);
   const latestPubFetchTokenRef = useRef(0);
   const pubFetchTimeoutRef = useRef(null);
+  /** When a fetch is already running, latest viewport bounds to fetch next (avoids dropped pans). */
+  const pendingPubFetchBoundsRef = useRef(null);
 
   useEffect(() => () => {
     if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
@@ -26,7 +28,11 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
   }, []);
 
   const requestViewportPubs = useCallback((boundsToFetch) => {
-    if (!boundsToFetch || inFlightPubFetchRef.current) return;
+    if (!boundsToFetch) return;
+    if (inFlightPubFetchRef.current) {
+      pendingPubFetchBoundsRef.current = boundsToFetch;
+      return;
+    }
     inFlightPubFetchRef.current = true;
     const token = latestPubFetchTokenRef.current + 1;
     latestPubFetchTokenRef.current = token;
@@ -44,6 +50,14 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
         if (latestPubFetchTokenRef.current === token) {
           inFlightPubFetchRef.current = false;
         }
+        const pending = pendingPubFetchBoundsRef.current;
+        pendingPubFetchBoundsRef.current = null;
+        if (
+          pending
+          && !boundsContain(loadedPubBoundsRef.current, pending)
+        ) {
+          requestViewportPubs(pending);
+        }
       });
   }, [mergeFetchedPubs]);
 
@@ -60,7 +74,7 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
     if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
     pubFetchTimeoutRef.current = setTimeout(() => {
       requestViewportPubs(bufferedBounds);
-    }, 120);
+    }, 80);
   }, [isFocused, mapZoomRef, requestViewportPubs]);
 
   useEffect(() => {

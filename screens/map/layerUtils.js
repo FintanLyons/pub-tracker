@@ -81,6 +81,8 @@ export const ZOOM_LEVELS = {
   DISTRICTS_MAX: 13.0,
   /** Pub markers + amber district shading at/above this zoom; raise to hide pubs sooner when zooming out. */
   PUBS_MIN: 12.35,
+  /** Floor zoom when centring on GPS via the location control (below this = wider neighbourhood context). */
+  CURRENT_LOCATION_MIN: 13.85,
 };
 
 /**

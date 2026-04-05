@@ -118,6 +118,12 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		ownership: pub.ownership,
 		website: pub.website || null,
 		photoUrl: pub.photo_url,
+		closing_time: (() => {
+			const raw = pub.closing_time;
+			if (raw == null || raw === '') return null;
+			const n = Number(raw);
+			return Number.isFinite(n) ? n : null;
+		})(),
 		points: pub.points || 10,
 		features: convertFeaturesToArray(pub),
 		achievements: pub.achievement ? [pub.achievement] : [],
