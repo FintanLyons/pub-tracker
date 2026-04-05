@@ -1,6 +1,5 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../config/supabase';
-import { getDrinkTotalsByUserIds } from './DrinkTotalsService';
 
 /** 32 chars: 256 % 32 === 0 so uniform index = byte % 32 */
 const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -178,14 +177,5 @@ export const getLeagueLeaderboard = async (leagueId) => {
 
   leaderboard.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
-  const ranked = leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
-  const drinkMap = await getDrinkTotalsByUserIds(ranked.map((u) => u.id));
-
-  return ranked.map((u) => ({
-    ...u,
-    stats: {
-      ...u.stats,
-      total_drinks: drinkMap[u.id] ?? 0,
-    },
-  }));
+  return leaderboard.map((user, index) => ({ ...user, rank: index + 1 }));
 };

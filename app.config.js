@@ -43,6 +43,11 @@ export default {
           'This app needs access to location to show pubs near you.',
       },
     },
+    androidNavigationBar: {
+      // Native theme (works with edge-to-edge); avoids expo-navigation-bar setBackgroundColorAsync warning.
+      backgroundColor: '#1C1C1C',
+      barStyle: 'light-content',
+    },
     android: {
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {

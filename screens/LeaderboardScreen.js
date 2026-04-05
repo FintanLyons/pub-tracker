@@ -179,7 +179,7 @@ export default function LeaderboardScreen() {
     const isCurrentUser = user.id === currentUser?.id;
     const r = user.rank ?? 0;
     const rankColor =
-      r === 1 ? '#FFD700' : r === 2 ? '#C0C0C0' : r === 3 ? '#CD7F32' : COLORS.accentGrey;
+      r === 1 ? COLORS.gold : r === 2 ? COLORS.silver : r === 3 ? COLORS.bronze : COLORS.accentGrey;
     const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
@@ -320,6 +320,8 @@ export default function LeaderboardScreen() {
             <TouchableOpacity
               style={styles.addButton}
               onPress={() => setShowAddFriendModal(true)}
+              accessibilityLabel="Add friend"
+              accessibilityRole="button"
             >
               <MaterialCommunityIcons name="account-plus" size={24} color="#FFFFFF" />
             </TouchableOpacity>

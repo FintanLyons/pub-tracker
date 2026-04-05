@@ -359,17 +359,17 @@ export default function ProfileScreen({ navigation }) {
         )}
       </View>
 
-      {/* ── Primary stats card: Drinks | Pubs Visited ─────────────────────── */}
+      {/* ── Primary stats card: Drinks | Pubs ─────────────────────── */}
       <View style={styles.statsCard}>
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{drinkStats.total}</Text>
-            <Text style={styles.statItemLabel}>Total Drinks</Text>
+            <Text style={styles.statItemLabel}>Drinks</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{totalVisited}</Text>
-            <Text style={styles.statItemLabel}>Pubs Visited</Text>
+            <Text style={styles.statItemLabel}>Pubs</Text>
           </View>
         </View>
       </View>
@@ -379,12 +379,12 @@ export default function ProfileScreen({ navigation }) {
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={styles.statNumberSmall}>{completedAreas}</Text>
-            <Text style={styles.statItemLabelSmall}>Areas Completed</Text>
+            <Text style={styles.statItemLabelSmall}>Areas</Text>
           </View>
           <View style={styles.statDividerSmall} />
           <View style={styles.statItem}>
             <Text style={styles.statNumberSmall}>{levelProgress.level}</Text>
-            <Text style={styles.statItemLabelSmall}>Current Level</Text>
+            <Text style={styles.statItemLabelSmall}>Level</Text>
           </View>
           <View style={styles.statDividerSmall} />
           <View style={styles.statItem}>

@@ -91,6 +91,13 @@ WHERE psa.pub_id = pa.id
   AND (p.district IS NOT NULL OR p.area IS NOT NULL);
 
 -- ---------------------------------------------------------------------------
+-- 2b. Drink totals on user_stats (requires public.pub_drinks)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.user_stats
+  ADD COLUMN IF NOT EXISTS total_drinks INTEGER NOT NULL DEFAULT 0;
+
+-- ---------------------------------------------------------------------------
 -- 3. compute_user_stats
 -- ---------------------------------------------------------------------------
 
@@ -106,6 +113,7 @@ DECLARE
   v_completed_areas      INT;
   v_total_score          INT;
   v_level                INT;
+  v_total_drinks         INT;
 BEGIN
   SELECT COUNT(*)
     INTO v_pubs_visited
@@ -168,15 +176,71 @@ BEGIN
                  + (v_completed_areas * 500);
   v_level := FLOOR(v_total_score / 50.0)::INT + 1;
 
-  INSERT INTO public.user_stats (user_id, pubs_visited, total_score, level, last_synced_at)
-  VALUES (p_user_id, v_pubs_visited, v_total_score, v_level, NOW())
+  SELECT COALESCE(SUM(count), 0)::INT
+    INTO v_total_drinks
+    FROM public.pub_drinks
+   WHERE user_id = p_user_id;
+
+  INSERT INTO public.user_stats (user_id, pubs_visited, total_score, level, total_drinks, last_synced_at)
+  VALUES (p_user_id, v_pubs_visited, v_total_score, v_level, v_total_drinks, NOW())
   ON CONFLICT (user_id) DO UPDATE SET
     pubs_visited   = EXCLUDED.pubs_visited,
     total_score    = EXCLUDED.total_score,
     level          = EXCLUDED.level,
+    total_drinks   = EXCLUDED.total_drinks,
     last_synced_at = EXCLUDED.last_synced_at;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 3a. Keep total_drinks in sync when pub_drinks rows change
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.sync_user_total_drinks(p_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_sum INTEGER;
+BEGIN
+  SELECT COALESCE(SUM(count), 0)::INT INTO v_sum
+    FROM public.pub_drinks
+   WHERE user_id = p_user_id;
+
+  UPDATE public.user_stats
+     SET total_drinks = v_sum,
+         last_synced_at = NOW()
+   WHERE user_id = p_user_id;
+
+  IF NOT FOUND THEN
+    PERFORM public.compute_user_stats(p_user_id);
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_pub_drinks_sync_total_drinks()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM public.sync_user_total_drinks(OLD.user_id);
+    RETURN OLD;
+  END IF;
+  PERFORM public.sync_user_total_drinks(NEW.user_id);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_pub_drinks_sync_total_drinks ON public.pub_drinks;
+CREATE TRIGGER trg_pub_drinks_sync_total_drinks
+  AFTER INSERT OR UPDATE OF count OR DELETE ON public.pub_drinks
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_pub_drinks_sync_total_drinks();
 
 -- ---------------------------------------------------------------------------
 -- 3b. Drop RPCs whose TABLE return columns changed
