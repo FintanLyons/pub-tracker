@@ -186,6 +186,7 @@ Stats are automatically synced when:
 - ✅ Shows username `@username` under title
 - ✅ Logout button in top right (red icon)
 - ✅ Logout confirmation dialog
+- ✅ After `scripts/get_achievements_read_user_stats.sql` is applied: headline **score** on Profile matches **Leaderboard** / `user_stats` (trophy modal still loads trophy JSON from the RPC)
 
 ### Leaderboard Screen:
 - ✅ Friends/Leagues tab switcher

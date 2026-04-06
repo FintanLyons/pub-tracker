@@ -1,8 +1,9 @@
 /**
  * Scoring & level rules (client).
  *
- * Keep in sync with server: `compute_user_stats` / `get_achievements` in
- * `scripts/phase6_postcode_migration.sql` (and legacy `phase3_server_functions.sql`).
+ * Server source of truth: `compute_user_stats` in `scripts/phase6_postcode_migration.sql`
+ * (and `get_achievements`, which returns the same totalScore/level as `user_stats`
+ * — see `scripts/get_achievements_read_user_stats.sql`).
  */
 
 /** Points required to advance one level (total score). */
