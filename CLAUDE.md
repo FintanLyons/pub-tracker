@@ -28,7 +28,7 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 
 Scoring logic lives in two places — keep them in sync if rules change:
 - Client: `utils/levelSystem.js` — level math plus **exported constants** (`DEFAULT_PUB_VISIT_POINTS`, `POINTS_PER_DRINK`, `DISTRICT_COMPLETION_BONUS_POINTS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_PER_LEVEL`) used by Profile settings scoring copy
-- Server: `scripts/phase6_postcode_migration.sql` (and legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
+- Server: `scripts/phase6_postcode_migration.sql` (and `scripts/get_achievements_read_user_stats.sql` forward migration; legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
 
 ## Architecture
 
@@ -92,7 +92,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 
 - `get_area_stats(user_id)` — per-**postcode district** visited/total/percentage/center + parent `postcode_area`
 - `get_borough_stats(user_id)` — per-**postcode area** stats + district completion counts (`total_districts`, `completed_districts`)
-- `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`) + totalScore + level
+- `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`, `pubAchievements`); `totalScore` / `level` / `pubsVisited` match `user_stats`
 - `search_pubs(query, limit)` — name search; includes `postcode_district`, `postcode_area`
 - `compute_user_stats(user_id)` — recompute and upsert a user's `user_stats` row
 - `get_email_by_username(username)` — legacy RPC in some SQL scripts; the app logs in with **email + password** only
@@ -113,4 +113,4 @@ All colours are defined in `constants/theme.js` and imported as `COLORS`. Do not
 
 ## Known issues to be aware of
 
-- `get_achievements` recomputes `total_score` and `level` from scratch (3 full-table scans) rather than reading from `user_stats`. Acceptable for now but worth optimising if performance becomes a concern.
+- `get_achievements` still aggregates trophy JSON from `pubs_all` / visits on each call; only `totalScore` / `level` / `pubsVisited` are read from `user_stats` (`scripts/get_achievements_read_user_stats.sql`). Further gains would require sharing work with `get_area_stats` / `get_borough_stats` or materializing trophy rows.
