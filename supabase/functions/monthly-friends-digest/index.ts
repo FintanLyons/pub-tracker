@@ -12,6 +12,7 @@
  * Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, EXPO_ACCESS_TOKEN, NOTIFICATION_CRON_SECRET
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { APP_DISPLAY_NAME } from "../_shared/app-brand.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { assertCronSecret } from "../_shared/cron-auth.ts";
 import { sendExpoPushMulticast } from "../_shared/expo-push.ts";
@@ -219,7 +220,7 @@ async function computeDigest(
   const total = leaderboard.length;
 
   return {
-    body: `You're #${rank} of ${total} on your friends leaderboard this month. Open Pub Tracker to see the full board.`,
+    body: `You're #${rank} of ${total} on your friends leaderboard this month. Open ${APP_DISPLAY_NAME} to see the full board.`,
     data: { rank, friend_count: friendIds.size, total_in_board: total },
   };
 }

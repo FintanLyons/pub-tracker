@@ -8,6 +8,7 @@
  * Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, EXPO_ACCESS_TOKEN, NOTIFICATION_CRON_SECRET
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { APP_DISPLAY_NAME } from "../_shared/app-brand.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { assertCronSecret } from "../_shared/cron-auth.ts";
 import { sendExpoPushMulticast } from "../_shared/expo-push.ts";
@@ -145,7 +146,7 @@ async function resolveMessage(
     }
     return {
       title: "Friend request",
-      body: `${name} wants to be friends on Pub Tracker`,
+      body: `${name} wants to be friends on ${APP_DISPLAY_NAME}`,
       data: { friendship_id: p.friendship_id, requester_id: requesterId },
     };
   }
@@ -179,7 +180,7 @@ async function resolveMessage(
   }
 
   return {
-    title: "Pub Tracker",
+    title: APP_DISPLAY_NAME,
     body: "You have a new notification",
     data: {},
   };

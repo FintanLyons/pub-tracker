@@ -108,13 +108,14 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
-  v_pubs_visited         INT;
-  v_pub_points           INT;
-  v_completed_districts INT;
-  v_completed_areas      INT;
-  v_total_score          INT;
-  v_level                INT;
-  v_total_drinks         INT;
+  v_pubs_visited          INT;
+  v_pub_points            INT;
+  v_completed_districts   INT;
+  v_completed_areas       INT;
+  v_data_contribution_pts INT;
+  v_total_score           INT;
+  v_level                 INT;
+  v_total_drinks          INT;
 BEGIN
   SELECT COUNT(*)
     INTO v_pubs_visited
@@ -177,8 +178,24 @@ BEGIN
     FROM public.pub_drinks
    WHERE user_id = p_user_id;
 
+  -- Pub data contributions (reports): one row per submission (missing_pub +20, pub_correction +5)
+  SELECT COALESCE(
+           SUM(
+             CASE
+               WHEN r.report_type = 'missing_pub' THEN 20
+               WHEN r.report_type = 'pub_correction' THEN 5
+               ELSE 0
+             END
+           ),
+           0
+         )::INT
+    INTO v_data_contribution_pts
+    FROM public.reports r
+   WHERE r.reporter_id = p_user_id;
+
   v_total_score := v_pub_points
                  + v_total_drinks
+                 + v_data_contribution_pts
                  + (v_completed_districts * 50)
                  + (v_completed_areas * 1000);
   v_level := FLOOR(v_total_score / 50.0)::INT + 1;
@@ -232,7 +249,31 @@ CREATE TRIGGER trg_pub_drinks_sync_total_drinks
   EXECUTE FUNCTION public.trg_pub_drinks_sync_total_drinks();
 
 -- ---------------------------------------------------------------------------
--- 3b. Drop RPCs whose TABLE return columns changed
+-- 3c. Recompute user_stats when a pub data report is submitted
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.trg_reports_recompute_user_stats()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.reporter_id IS NOT NULL THEN
+    PERFORM public.compute_user_stats(NEW.reporter_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_reports_recompute_user_stats ON public.reports;
+CREATE TRIGGER trg_reports_recompute_user_stats
+  AFTER INSERT ON public.reports
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_reports_recompute_user_stats();
+
+-- ---------------------------------------------------------------------------
+-- 3d. Drop RPCs whose TABLE return columns changed
 -- ---------------------------------------------------------------------------
 -- CREATE OR REPLACE cannot alter OUT / RETURNS TABLE row types (42P13).
 -- PostgREST clients only call these by name; re-GRANT after recreate.
@@ -557,7 +598,10 @@ DO $$
 DECLARE
   uid UUID;
 BEGIN
-  FOR uid IN SELECT DISTINCT user_id FROM public.visited_pubs
+  FOR uid IN
+    SELECT DISTINCT user_id FROM public.visited_pubs
+    UNION
+    SELECT DISTINCT reporter_id FROM public.reports WHERE reporter_id IS NOT NULL
   LOOP
     PERFORM public.compute_user_stats(uid);
   END LOOP;

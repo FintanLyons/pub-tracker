@@ -9,16 +9,12 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import { APP_DISPLAY_NAME, PLAY_STORE_LISTING_URL } from '../constants/app';
 import { COLORS } from '../constants/theme';
-
-const ANDROID_PACKAGE =
-  process.env.EXPO_PUBLIC_ANDROID_PACKAGE || 'com.fintanlyons.pubtracker';
-
-const PLAY_STORE_LISTING_URL = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
 
 function buildInviteMessage(leagueName, leagueCode) {
   const code = (leagueCode || '').toUpperCase();
-  return `Join my league "${leagueName}" on Pub Tracker! League code: ${code}\n\nGet the app on Google Play:\n${PLAY_STORE_LISTING_URL}`;
+  return `Join my league "${leagueName}" on ${APP_DISPLAY_NAME}! League code: ${code}\n\nGet the app on Google Play:\n${PLAY_STORE_LISTING_URL}`;
 }
 
 export default function ShareLeagueModal({
@@ -45,7 +41,7 @@ export default function ShareLeagueModal({
   const handleShareInvite = async () => {
     try {
       await Share.share({
-        message: buildInviteMessage(leagueName || 'Pub Tracker league', code),
+        message: buildInviteMessage(leagueName || `${APP_DISPLAY_NAME} league`, code),
       });
     } catch (e) {
       console.warn('Share failed', e);

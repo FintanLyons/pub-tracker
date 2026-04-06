@@ -4,6 +4,7 @@
  * Server source of truth: `compute_user_stats` in `scripts/phase6_postcode_migration.sql`
  * (and `get_achievements`, which returns the same totalScore/level as `user_stats`
  * — see `scripts/get_achievements_read_user_stats.sql`).
+ * Contribution points from `reports`: `scripts/scoring_contribution_reports.sql`.
  */
 
 /** Points required to advance one level (total score). */
@@ -20,6 +21,12 @@ export const DISTRICT_COMPLETION_BONUS_POINTS = 50;
 
 /** Bonus when every pub in a letter postcode area (e.g. SW) is visited. */
 export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 1000;
+
+/** Points per missing-pub report submitted (one row = one submission). */
+export const POINTS_NEW_PUB_REPORT = 20;
+
+/** Points per pub correction report (one submission, any number of fields). */
+export const POINTS_PUB_CORRECTION_REPORT = 5;
 
 /**
  * Calculate the level for a given score

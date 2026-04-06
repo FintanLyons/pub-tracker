@@ -1,4 +1,5 @@
 import bbox from '@turf/bbox';
+import { APP_DISPLAY_NAME } from '../../constants/app';
 import { COLORS } from '../../constants/theme';
 import { formatDistrictWithCode } from '../../utils/postcodeDistrictDisplayNames';
 import { interpolateColor } from './utils';
@@ -33,7 +34,7 @@ export const MAP_COMPLETION_STYLE = {
 
 export const MAP_STYLE = {
   version: 8,
-  name: 'Pub Tracker Raster',
+  name: `${APP_DISPLAY_NAME} Raster`,
   // Required for any symbol layer with text-field; without it Mbgl-HttpRequest logs
   // "Unable to parse resourceUrl" on Android/iOS native.
   glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',

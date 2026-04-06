@@ -20,13 +20,14 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_pubs_visited         INT;
-  v_pub_points           INT;
-  v_completed_districts INT;
-  v_completed_areas      INT;
-  v_total_score          INT;
-  v_level                INT;
-  v_total_drinks         INT;
+  v_pubs_visited          INT;
+  v_pub_points            INT;
+  v_completed_districts   INT;
+  v_completed_areas       INT;
+  v_data_contribution_pts INT;
+  v_total_score           INT;
+  v_level                 INT;
+  v_total_drinks          INT;
 BEGIN
   IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM p_user_id THEN
     RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
@@ -93,8 +94,23 @@ BEGIN
     FROM public.pub_drinks
    WHERE user_id = p_user_id;
 
+  SELECT COALESCE(
+           SUM(
+             CASE
+               WHEN r.report_type = 'missing_pub' THEN 20
+               WHEN r.report_type = 'pub_correction' THEN 5
+               ELSE 0
+             END
+           ),
+           0
+         )::INT
+    INTO v_data_contribution_pts
+    FROM public.reports r
+   WHERE r.reporter_id = p_user_id;
+
   v_total_score := v_pub_points
                  + v_total_drinks
+                 + v_data_contribution_pts
                  + (v_completed_districts * 50)
                  + (v_completed_areas * 1000);
   v_level := FLOOR(v_total_score / 50.0)::INT + 1;

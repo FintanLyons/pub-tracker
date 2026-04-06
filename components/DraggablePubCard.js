@@ -580,11 +580,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
-    elevation: 10,
+    elevation: 12,
     paddingHorizontal: 16,
     paddingBottom: 16,
     overflow: 'hidden',
-    zIndex: 1000,
+    zIndex: 1100,
   },
   cardHandleContainer: {
     position: 'absolute',
