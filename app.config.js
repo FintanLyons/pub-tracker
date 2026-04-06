@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { APP_DISPLAY_NAME } from './constants/app.js';
 import { EAS_PROJECT_ID } from './constants/easProject.js';
 
 // Android push (FCM): add Firebase Android app with package = android.package, download
@@ -19,7 +20,7 @@ const androidPackage =
 
 export default {
   expo: {
-    name: 'Pub Tracker',
+    name: APP_DISPLAY_NAME,
     slug: 'pub-tracker',
     version: '1.0.0',
     orientation: 'portrait',
@@ -37,17 +38,16 @@ export default {
         'expo-location',
         {
           locationAlwaysAndWhenInUsePermission:
-            'Allow Pub Tracker to access your location to show nearby pubs',
+            `Allow ${APP_DISPLAY_NAME} to access your location to show nearby pubs`,
           locationWhenInUsePermission:
-            'Allow Pub Tracker to access your location to show nearby pubs',
+            `Allow ${APP_DISPLAY_NAME} to access your location to show nearby pubs`,
         },
       ],
       'expo-mail-composer',
       [
         'expo-image-picker',
         {
-          photosPermission:
-            'Allow Pub Tracker to attach photos to pub reports.',
+          photosPermission: `Allow ${APP_DISPLAY_NAME} to attach photos to pub reports.`,
         },
       ],
       '@react-native-google-signin/google-signin',
@@ -64,10 +64,8 @@ export default {
       supportsTablet: true,
       bundleIdentifier: iosBundleId,
       infoPlist: {
-        NSLocationWhenInUseUsageDescription:
-          'This app needs access to location to show pubs near you.',
-        NSLocationAlwaysUsageDescription:
-          'This app needs access to location to show pubs near you.',
+        NSLocationWhenInUseUsageDescription: `${APP_DISPLAY_NAME} needs your location to show pubs near you.`,
+        NSLocationAlwaysUsageDescription: `${APP_DISPLAY_NAME} needs your location to show pubs near you.`,
       },
     },
     androidNavigationBar: {

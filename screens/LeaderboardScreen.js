@@ -215,16 +215,20 @@ export default function LeaderboardScreen() {
           <View style={styles.statsRow}>
             <View style={styles.statCell}>
               <Text style={styles.statLabel}>Pubs</Text>
-              <Text style={styles.statValue} numberOfLines={1}>
-                {user.stats?.pubs_visited || 0}
-              </Text>
+              <View style={styles.statValueSlot}>
+                <Text style={styles.statValue} numberOfLines={1}>
+                  {user.stats?.pubs_visited || 0}
+                </Text>
+              </View>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statCell}>
               <Text style={styles.statLabel}>Drinks</Text>
-              <Text style={styles.statValue} numberOfLines={1}>
-                {user.stats?.total_drinks ?? 0}
-              </Text>
+              <View style={styles.statValueSlot}>
+                <Text style={styles.statValue} numberOfLines={1}>
+                  {user.stats?.total_drinks ?? 0}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -473,6 +477,7 @@ export default function LeaderboardScreen() {
           setOpenAddFriendOnRequests(false);
         }}
         currentUserId={currentUser?.id}
+        currentUsername={currentUser?.username}
         onFriendAdded={loadData}
         initialTab={openAddFriendOnRequests ? 'requests' : 'search'}
       />
@@ -1026,30 +1031,35 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexGrow: 0,
     marginTop: 2,
+    gap: 7,
   },
   statCell: {
-    flex: 1,
-    flexBasis: 0,
-    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 5,
-    gap: 6,
+    flexShrink: 0,
+    flexGrow: 0,
+    gap: 5,
   },
   statLabel: {
     fontSize: 12,
     color: COLORS.mediumGrey,
     flexShrink: 0,
   },
+  statValueSlot: {
+    width: 20,
+    alignItems: 'flex-start',
+  },
   statValue: {
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.accentGrey,
-    flexShrink: 0,
     fontVariant: ['tabular-nums'],
+    textAlign: 'left',
+    width: '100%',
   },
   statDivider: {
     width: StyleSheet.hairlineWidth,

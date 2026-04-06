@@ -34,6 +34,8 @@ import {
   POINTS_PER_DRINK,
   DISTRICT_COMPLETION_BONUS_POINTS,
   POSTCODE_AREA_COMPLETION_BONUS_POINTS,
+  POINTS_NEW_PUB_REPORT,
+  POINTS_PUB_CORRECTION_REPORT,
 } from '../utils/levelSystem';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 import UserAchievementsPanel from '../components/UserAchievementsPanel';
@@ -82,6 +84,7 @@ export default function ProfileScreen({ navigation }) {
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [showAvatarOptionsModal, setShowAvatarOptionsModal] = useState(false);
   const [showRemoveAvatarConfirm, setShowRemoveAvatarConfirm] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
@@ -104,6 +107,12 @@ export default function ProfileScreen({ navigation }) {
     }
     navigation.navigate('Map', { postcodeAreaToSearch: postcodeAreaName });
   }, [navigation]);
+
+  useEffect(() => {
+    if (!showSettingsModal) {
+      setShowAvatarOptionsModal(false);
+    }
+  }, [showSettingsModal]);
 
   useEffect(() => {
     if (!baseDistrictStats?.length) {
@@ -310,6 +319,16 @@ export default function ProfileScreen({ navigation }) {
     if (!user?.id || !user?.avatar_url || avatarBusy) return;
     setShowRemoveAvatarConfirm(true);
   }, [user?.id, user?.avatar_url, avatarBusy]);
+
+  const handleAvatarOptionsChangePhoto = useCallback(() => {
+    setShowAvatarOptionsModal(false);
+    handlePickProfilePhoto();
+  }, [handlePickProfilePhoto]);
+
+  const handleAvatarOptionsRemove = useCallback(() => {
+    setShowAvatarOptionsModal(false);
+    handleRemoveProfilePhoto();
+  }, [handleRemoveProfilePhoto]);
 
   const confirmRemoveProfilePhoto = useCallback(async () => {
     if (!user?.id) return;
@@ -774,89 +793,63 @@ export default function ProfileScreen({ navigation }) {
 
             <View style={styles.settingsBody}>
               <View style={styles.settingsUserCard}>
-                <Text style={styles.settingsUserLabel}>Username</Text>
-                <Text
-                  style={[
-                    styles.settingsUserValue,
-                    !user?.username && styles.settingsUserValueMuted,
-                  ]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {user?.username?.trim() ? user.username : 'Not set yet'}
-                </Text>
-
-                <Text style={styles.settingsPhotoLabel}>Profile photo</Text>
-                <View style={styles.settingsAvatarRow}>
-                  {user?.avatar_url ? (
-                    <Image
-                      source={{ uri: user.avatar_url }}
-                      style={styles.settingsAvatarImage}
-                      contentFit="cover"
-                      transition={120}
-                    />
-                  ) : (
-                    <View style={styles.settingsAvatarPlaceholder}>
-                      <MaterialCommunityIcons
-                        name="account-outline"
-                        size={36}
-                        color={COLORS.mediumGrey}
-                      />
-                    </View>
-                  )}
-                </View>
-                {avatarBusy ? (
-                  <ActivityIndicator style={styles.settingsAvatarSpinner} color={COLORS.amber} />
-                ) : null}
-                <View style={styles.settingsPhotoActionsRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.settingsPhotoActionBtn,
-                      styles.settingsPhotoActionBtnPrimary,
-                      (avatarBusy || !user?.id) && styles.settingsPhotoActionBtnDisabled,
-                    ]}
-                    onPress={handlePickProfilePhoto}
-                    disabled={avatarBusy || !user?.id}
-                    activeOpacity={0.75}
-                    accessibilityLabel="Change profile photo"
-                    accessibilityRole="button"
-                  >
-                    <MaterialCommunityIcons name="camera-outline" size={18} color={COLORS.darkGrey} />
-                    <Text style={styles.settingsPhotoActionBtnText}>Change photo</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.settingsPhotoActionBtn,
-                      styles.settingsPhotoActionBtnMuted,
-                      (avatarBusy || !user?.avatar_url) && styles.settingsPhotoActionBtnDisabled,
-                    ]}
-                    onPress={handleRemoveProfilePhoto}
-                    disabled={avatarBusy || !user?.avatar_url}
-                    activeOpacity={0.75}
-                    accessibilityLabel="Remove profile photo"
-                    accessibilityRole="button"
-                  >
-                    <MaterialCommunityIcons
-                      name="trash-can-outline"
-                      size={18}
-                      color={user?.avatar_url && !avatarBusy ? COLORS.darkGrey : COLORS.mediumGrey}
-                    />
+                <View style={styles.settingsUserTopRow}>
+                  <View style={styles.settingsUserTextCol}>
+                    <Text style={styles.settingsUserLabel}>Username</Text>
                     <Text
                       style={[
-                        styles.settingsPhotoActionBtnTextMuted,
-                        (!user?.avatar_url || avatarBusy) && styles.settingsPhotoActionBtnTextDisabled,
+                        styles.settingsUserValue,
+                        !user?.username && styles.settingsUserValueMuted,
                       ]}
+                      numberOfLines={2}
+                      ellipsizeMode="tail"
                     >
-                      Remove
+                      {user?.username?.trim() ? user.username : 'Not set yet'}
                     </Text>
-                  </TouchableOpacity>
+                  </View>
+                  <View style={styles.settingsUserRightCol}>
+                    <View style={styles.settingsAvatarTapWrap}>
+                      <TouchableOpacity
+                        onPress={() => !avatarBusy && user?.id && setShowAvatarOptionsModal(true)}
+                        disabled={avatarBusy || !user?.id}
+                        activeOpacity={0.82}
+                        accessibilityLabel="Profile photo — change or remove"
+                        accessibilityRole="button"
+                        style={styles.settingsAvatarTouchable}
+                      >
+                        <View style={styles.settingsAvatarWrap}>
+                          {user?.avatar_url ? (
+                            <Image
+                              source={{ uri: user.avatar_url }}
+                              style={styles.settingsAvatarImage}
+                              contentFit="cover"
+                              transition={120}
+                            />
+                          ) : (
+                            <View style={styles.settingsAvatarPlaceholder}>
+                              <MaterialCommunityIcons
+                                name="account-outline"
+                                size={36}
+                                color={COLORS.mediumGrey}
+                              />
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                      {avatarBusy ? (
+                        <View style={styles.settingsAvatarBusyOverlay} pointerEvents="none">
+                          <ActivityIndicator color={COLORS.amber} />
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
                 </View>
               </View>
 
               <View style={styles.settingsScoringCard}>
                 <Text style={styles.settingsScoringLabel}>Scoring</Text>
                 <View style={[styles.scoringRuleRow, styles.scoringRuleRowFirst]}>
-                  <Text style={styles.scoringRuleLeft}>A pub visit</Text>
+                  <Text style={styles.scoringRuleLeft}>Each pub visited</Text>
                   <MaterialCommunityIcons
                     name="arrow-right"
                     size={18}
@@ -865,7 +858,6 @@ export default function ProfileScreen({ navigation }) {
                   />
                   <Text style={styles.scoringRuleValue}>+{DEFAULT_PUB_VISIT_POINTS}</Text>
                 </View>
-                <Text style={styles.scoringRuleHint}>Default visit; some pubs award more</Text>
                 <View style={styles.scoringRuleRow}>
                   <Text style={styles.scoringRuleLeft}>Each drink logged</Text>
                   <MaterialCommunityIcons
@@ -876,6 +868,28 @@ export default function ProfileScreen({ navigation }) {
                   />
                   <Text style={styles.scoringRuleValue}>+{POINTS_PER_DRINK}</Text>
                 </View>
+                <View style={styles.scoringRuleRow}>
+                  <Text style={styles.scoringRuleLeft}>New pub suggestion</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+{POINTS_NEW_PUB_REPORT}</Text>
+                </View>
+                <View style={styles.scoringRuleDividerLight} />
+                <View style={styles.scoringRuleRow}>
+                  <Text style={styles.scoringRuleLeft}>Pub correction</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+{POINTS_PUB_CORRECTION_REPORT}</Text>
+                </View>
+                <View style={styles.scoringRuleDividerLight} />
                 <View style={styles.scoringRuleRow}>
                   <Text style={styles.scoringRuleLeft}>Area finished</Text>
                   <MaterialCommunityIcons
@@ -942,6 +956,70 @@ export default function ProfileScreen({ navigation }) {
                   <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.errorRed} />
                 </View>
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showAvatarOptionsModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !avatarBusy && setShowAvatarOptionsModal(false)}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => !avatarBusy && setShowAvatarOptionsModal(false)}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Profile photo</Text>
+              <TouchableOpacity
+                onPress={() => !avatarBusy && setShowAvatarOptionsModal(false)}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                disabled={avatarBusy}
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.floatingCardPickerBody}>
+              <TouchableOpacity
+                style={[
+                  styles.settingsActionCard,
+                  styles.settingsActionCardNeutral,
+                  styles.avatarPickerAction,
+                ]}
+                onPress={handleAvatarOptionsChangePhoto}
+                activeOpacity={0.75}
+                disabled={avatarBusy || !user?.id}
+                accessibilityLabel="Change profile photo"
+                accessibilityRole="button"
+              >
+                <View style={styles.settingsActionIconSlot}>
+                  <MaterialCommunityIcons name="camera-outline" size={22} color={COLORS.darkGrey} />
+                </View>
+                <Text style={styles.settingsActionLabel}>Change photo</Text>
+              </TouchableOpacity>
+              {user?.avatar_url ? (
+                <TouchableOpacity
+                  style={[styles.settingsActionCard, styles.settingsActionCardDanger]}
+                  onPress={handleAvatarOptionsRemove}
+                  activeOpacity={0.75}
+                  disabled={avatarBusy}
+                  accessibilityLabel="Remove profile photo"
+                  accessibilityRole="button"
+                >
+                  <View style={styles.settingsActionIconSlot}>
+                    <MaterialCommunityIcons name="trash-can-outline" size={22} color={COLORS.errorRed} />
+                  </View>
+                  <Text style={styles.settingsActionLabelDanger}>Remove photo</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         </View>
@@ -1261,6 +1339,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingBottom: 22,
   },
+  floatingCardPickerBody: {
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 22,
+    gap: 10,
+  },
+  avatarPickerAction: {
+    marginBottom: 0,
+  },
   floatingActionBtn: {
     minHeight: 48,
     paddingVertical: 14,
@@ -1346,19 +1433,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.mediumGrey,
   },
-  settingsPhotoLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.mediumGrey,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginTop: 16,
-    marginBottom: 10,
-    textAlign: 'left',
-  },
-  settingsAvatarRow: {
+  settingsUserTopRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+  },
+  settingsUserTextCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  settingsUserRightCol: {
+    width: 88,
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  settingsAvatarTapWrap: {
+    position: 'relative',
+  },
+  settingsAvatarTouchable: {
+    borderRadius: 44,
+    overflow: 'hidden',
+  },
+  settingsAvatarBusyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 44,
+    backgroundColor: 'rgba(247, 247, 247, 0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  settingsAvatarWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingsAvatarImage: {
     width: 88,
@@ -1375,52 +1480,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  settingsAvatarSpinner: {
-    marginBottom: 8,
-  },
-  settingsPhotoActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    marginTop: 10,
-    gap: 10,
-  },
-  settingsPhotoActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    minHeight: 44,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-  },
-  settingsPhotoActionBtnPrimary: {
-    backgroundColor: COLORS.white,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: COLORS.divider,
-  },
-  settingsPhotoActionBtnMuted: {
-    backgroundColor: COLORS.lightGrey,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: COLORS.divider,
-  },
-  settingsPhotoActionBtnDisabled: {
-    opacity: 0.45,
-  },
-  settingsPhotoActionBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.darkGrey,
-  },
-  settingsPhotoActionBtnTextMuted: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.darkGrey,
-  },
-  settingsPhotoActionBtnTextDisabled: {
-    color: COLORS.mediumGrey,
   },
   settingsScoringCard: {
     backgroundColor: COLORS.lightGrey,
@@ -1467,12 +1526,11 @@ const styles = StyleSheet.create({
     minWidth: 52,
     textAlign: 'right',
   },
-  scoringRuleHint: {
-    marginTop: 4,
+  scoringRuleDividerLight: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.divider,
+    marginTop: 12,
     marginBottom: 2,
-    fontSize: 11,
-    lineHeight: 15,
-    color: COLORS.mediumGrey,
   },
   scoringRulesDivider: {
     height: StyleSheet.hairlineWidth,

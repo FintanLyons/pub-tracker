@@ -19,6 +19,7 @@ import {
   googleSignInSecure,
 } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
+import { APP_DISPLAY_NAME } from '../constants/app';
 import { COLORS } from '../constants/theme';
 
 export default function AuthScreen({ onAuthSuccess }) {
@@ -154,7 +155,7 @@ export default function AuthScreen({ onAuthSuccess }) {
           >
             <View style={styles.header}>
               <PintGlassIcon size={56} color={COLORS.amber} />
-              <Text style={styles.title}>Pub Tracker</Text>
+              <Text style={styles.title}>{APP_DISPLAY_NAME}</Text>
               <Text style={styles.subtitle}>London's pub community</Text>
             </View>
 

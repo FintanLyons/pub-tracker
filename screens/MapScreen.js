@@ -55,12 +55,15 @@ import {
 const PUB_ICON_VISITED = require('../assets/pub_marker_visited.png');
 const PUB_ICON_UNVISITED = require('../assets/pub_marker_unvisited.png');
 
-const DEFAULT_SAFE_AREA = { top: 0, right: 0, bottom: 0, left: 0 };
-const SHEET_FLOATING_LIFT_PX = 24;
+/** Space between pub sheet top (peek) and bottom edge of location / flag FABs after lift. */
+const MAP_FLOATING_CONTROLS_PEEK_CLEARANCE = 12;
+/** Fade FABs out while the sheet is near-fullscreen; ramps in as it settles to peek. */
 const MAP_CONTROLS_HIDE_PX = 20;
+/** Map content sits above the tab bar, which already applies `insets.bottom`. Do not add full bottom inset here or controls float too high vs the SearchBar. */
+const MAP_FLOATING_BUTTON_SIZE = 48;
+const MAP_FLOATING_CONTROLS_BOTTOM_GAP = 10;
 
-export default function MapScreen({ safeAreaInsets }) {
-  const insets = safeAreaInsets ?? DEFAULT_SAFE_AREA;
+export default function MapScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const isFocused = useIsFocused();
@@ -270,16 +273,21 @@ export default function MapScreen({ safeAreaInsets }) {
   }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
 
   const floatingControlsStyle = useMemo(() => {
-    const lift = Math.max(mapSheetMetrics.peek - SHEET_FLOATING_LIFT_PX, 0);
-    const { collapsedY, hiddenY } = mapSheetMetrics;
+    const { peek, collapsedY, hiddenY } = mapSheetMetrics;
+    const bottomGap = MAP_FLOATING_CONTROLS_BOTTOM_GAP;
+    const liftPeek = Math.max(
+      0,
+      peek + MAP_FLOATING_CONTROLS_PEEK_CLEARANCE - bottomGap,
+    );
     const translateY = sheetTranslateY.interpolate({
       inputRange: [0, collapsedY, hiddenY],
-      outputRange: [-lift, -lift, 0],
+      outputRange: [-liftPeek, -liftPeek, 0],
       extrapolate: 'clamp',
     });
-    const hideThreshold = collapsedY > MAP_CONTROLS_HIDE_PX + 2
-      ? collapsedY - MAP_CONTROLS_HIDE_PX
-      : collapsedY * 0.35;
+    const hideThreshold =
+      collapsedY > MAP_CONTROLS_HIDE_PX + 2
+        ? collapsedY - MAP_CONTROLS_HIDE_PX
+        : collapsedY * 0.35;
     const opacity = sheetTranslateY.interpolate({
       inputRange: [0, hideThreshold, collapsedY, hiddenY],
       outputRange: [0, 0, 1, 1],
@@ -288,7 +296,9 @@ export default function MapScreen({ safeAreaInsets }) {
     return { opacity, transform: [{ translateY }] };
   }, [mapSheetMetrics, sheetTranslateY]);
 
-  const mapControlsBaseBottom = Math.max(insets.bottom, 8) + 4;
+  const mapControlsBaseBottom = MAP_FLOATING_CONTROLS_BOTTOM_GAP;
+  const feedbackToastBottom =
+    mapControlsBaseBottom + MAP_FLOATING_BUTTON_SIZE + 12;
 
   // ── Missing pub modal ─────────────────────────────────────────
 
@@ -569,7 +579,7 @@ export default function MapScreen({ safeAreaInsets }) {
 
       <Animated.View
         pointerEvents="box-none"
-        style={[screenStyles.floatingLeft, { bottom: mapControlsBaseBottom + 8 }, floatingControlsStyle]}
+        style={[screenStyles.floatingLeft, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
         <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={openMissingPubModal}>
           <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
@@ -578,7 +588,7 @@ export default function MapScreen({ safeAreaInsets }) {
 
       <Animated.View
         pointerEvents="box-none"
-        style={[screenStyles.floatingRight, { bottom: mapControlsBaseBottom + 8 }, floatingControlsStyle]}
+        style={[screenStyles.floatingRight, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
         <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={handleCurrentLocation}>
           <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
@@ -598,8 +608,7 @@ export default function MapScreen({ safeAreaInsets }) {
           style={[
             baseStyles.feedbackToast,
             screenStyles.feedbackToast,
-            { bottom: mapControlsBaseBottom + 124 },
-            floatingControlsStyle,
+            { bottom: feedbackToastBottom },
           ]}
         >
           <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
@@ -634,7 +643,7 @@ const screenStyles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    zIndex: 1002,
-    elevation: 7,
+    zIndex: 1200,
+    elevation: 14,
   },
 });

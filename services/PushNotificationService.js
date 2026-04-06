@@ -1,6 +1,7 @@
 import { PermissionsAndroid, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+import { APP_DISPLAY_NAME } from '../constants/app';
 import { EAS_PROJECT_ID } from '../constants/easProject';
 import { supabase } from '../config/supabase';
 
@@ -83,7 +84,7 @@ export async function registerPushNotificationsForUser(userId) {
 
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
-        name: 'Default',
+        name: APP_DISPLAY_NAME,
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 250, 250, 250],
         sound: 'default',

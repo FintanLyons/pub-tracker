@@ -9,13 +9,22 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Share,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { searchUsers } from '../services/UserService';
 import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejectFriendRequest, getFriends, removeFriend } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
+import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
 
-export default function AddFriendModal({ visible, onClose, currentUserId, onFriendAdded, initialTab = 'search' }) {
+export default function AddFriendModal({
+  visible,
+  onClose,
+  currentUserId,
+  currentUsername,
+  onFriendAdded,
+  initialTab = 'search',
+}) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -139,6 +148,16 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
     } catch (error) {
       console.error('Error rejecting friend request:', error);
       showFeedback('Could not decline', 'Failed to decline friend request. Please try again.', 'error');
+    }
+  };
+
+  const handleInviteNonUser = async () => {
+    try {
+      await Share.share({
+        message: buildFriendInviteMessage(currentUsername),
+      });
+    } catch (e) {
+      console.warn('Share invite failed', e);
     }
   };
 
@@ -289,6 +308,25 @@ export default function AddFriendModal({ visible, onClose, currentUserId, onFrie
           {/* Search Tab */}
           {activeTab === 'search' && (
             <>
+              <View style={styles.inviteOutsiderRow}>
+                <View style={styles.inviteOutsiderTextCol}>
+                  <Text style={styles.inviteOutsiderTitle}>Not on the app yet?</Text>
+                  <Text style={styles.inviteOutsiderSub}>
+                    Send an invite so they can install {APP_DISPLAY_NAME} and add you as a friend.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.inviteOutsiderButton}
+                  onPress={handleInviteNonUser}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Invite someone to the app"
+                >
+                  <MaterialCommunityIcons name="share-variant" size={20} color={COLORS.charcoal} />
+                  <Text style={styles.inviteOutsiderButtonText}>Invite</Text>
+                </TouchableOpacity>
+              </View>
+
               <View style={styles.searchContainer}>
                 <TextInput
                   style={styles.searchInput}
@@ -499,6 +537,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     color: COLORS.amber,
+  },
+  inviteOutsiderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 14,
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+    gap: 12,
+  },
+  inviteOutsiderTextCol: {
+    flex: 1,
+  },
+  inviteOutsiderTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    marginBottom: 4,
+  },
+  inviteOutsiderSub: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.mediumGrey,
+  },
+  inviteOutsiderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.amber,
+    borderRadius: 10,
+  },
+  inviteOutsiderButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.charcoal,
   },
   searchContainer: {
     flexDirection: 'row',

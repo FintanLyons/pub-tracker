@@ -19,11 +19,10 @@ const withErrorBoundary = (Screen, message) => (props) => (
   </ErrorBoundary>
 );
 
-function MapScreenWithSafeInsets(props) {
-  const insets = useSafeAreaInsets();
+function MapScreenWithBoundary() {
   return (
     <ErrorBoundary fallbackMessage="The map failed to load. Please try again.">
-      <MapScreen {...props} safeAreaInsets={insets} />
+      <MapScreen />
     </ErrorBoundary>
   );
 }
@@ -103,7 +102,7 @@ export default function TabNavigator() {
         >
           <Tab.Screen 
             name="Map" 
-            component={MapScreenWithSafeInsets}
+            component={MapScreenWithBoundary}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="map-outline" size={size} color={color} />
