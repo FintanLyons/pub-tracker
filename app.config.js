@@ -31,6 +31,13 @@ export default {
         },
       ],
       'expo-mail-composer',
+      [
+        'expo-image-picker',
+        {
+          photosPermission:
+            'Allow Pub Tracker to attach photos to pub reports.',
+        },
+      ],
       '@react-native-google-signin/google-signin',
     ],
     ios: {
@@ -42,6 +49,11 @@ export default {
         NSLocationAlwaysUsageDescription:
           'This app needs access to location to show pubs near you.',
       },
+    },
+    androidNavigationBar: {
+      // Native theme (works with edge-to-edge); avoids expo-navigation-bar setBackgroundColorAsync warning.
+      backgroundColor: '#1C1C1C',
+      barStyle: 'light-content',
     },
     android: {
       softwareKeyboardLayoutMode: 'resize',

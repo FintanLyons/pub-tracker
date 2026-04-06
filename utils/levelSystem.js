@@ -11,11 +11,14 @@ export const POINTS_PER_LEVEL = 50;
 /** When a pub has no `points` set, visits use this many points. */
 export const DEFAULT_PUB_VISIT_POINTS = 10;
 
+/** Points per drink logged (sum of `pub_drinks.count`). */
+export const POINTS_PER_DRINK = 1;
+
 /** Bonus when every pub in a postcode district is visited. */
 export const DISTRICT_COMPLETION_BONUS_POINTS = 50;
 
 /** Bonus when every pub in a letter postcode area (e.g. SW) is visited. */
-export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 500;
+export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 1000;
 
 /**
  * Calculate the level for a given score

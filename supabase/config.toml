@@ -1,0 +1,6 @@
+# Supabase CLI (https://supabase.com/docs/guides/cli)
+# Run functions locally: supabase functions serve
+# Deploy: supabase functions deploy presign-r2-upload
+
+[functions.presign-r2-upload]
+verify_jwt = true

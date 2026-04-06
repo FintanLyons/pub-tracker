@@ -19,8 +19,8 @@ const SHEET_USE_NATIVE_DRIVER = Platform.OS !== 'android';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
-import ReportModal from './ReportModal';
-import { submitReport } from '../services/ReportService';
+import PubReportFormModal from './PubReportFormModal';
+import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
@@ -119,7 +119,7 @@ export default function DraggablePubCard({
   const handleScroll = useCallback((event) => {
     const newScrollY = event.nativeEvent.contentOffset.y;
     scrollY.current = newScrollY;
-    
+
     // When at top, disable scrolling so parent can intercept downward drags
     if (isExpandedRef.current) {
       if (newScrollY <= TOP_THRESHOLD) {
@@ -383,26 +383,27 @@ export default function DraggablePubCard({
     });
   };
 
-  const handleSendReport = async (reportText) => {
-    try {
-      await submitReport(pub.id, pub.name, pub.area, reportText);
-      
-      Alert.alert(
-        'Report Submitted',
-        'Thank you! Your report has been submitted successfully.',
-        [{ text: 'OK' }]
-      );
-    } catch (error) {
-      console.error('Error submitting report:', error);
-      
-      Alert.alert(
-        'Report Failed',
-        'Failed to submit report. Please check your internet connection and try again.',
-        [{ text: 'OK' }]
-      );
-    }
-  };
-  
+  const handlePubCorrectionSubmit = useCallback(
+    async (payload) => {
+      await submitPubReport({
+        reportType: 'pub_correction',
+        pubId: pub.id,
+        pubName: payload.pubName,
+        pubArea: pub.area || 'Unknown Area',
+        chainOrIndependent: payload.chainOrIndependent,
+        founded: payload.founded,
+        address: payload.address,
+        website: payload.website,
+        phone: payload.phone,
+        closingTime: payload.closingTime,
+        history: payload.history,
+        features: payload.features,
+        imageUris: payload.imageUris,
+      });
+    },
+    [pub]
+  );
+
   // Don't render if no pub (must be after all hooks)
   if (!pub) return null;
 
@@ -548,13 +549,19 @@ export default function DraggablePubCard({
         onToggleVisited={onToggleVisited}
       />
 
-      {/* Report Modal */}
-      <ReportModal
+      <PubReportFormModal
         visible={reportModalVisible}
         onClose={() => setReportModalVisible(false)}
-        onSend={handleSendReport}
-        pubName={pub.name}
-        pubArea={pub.area}
+        mode="pub_correction"
+        initialPub={pub}
+        onSubmit={handlePubCorrectionSubmit}
+        onSuccess={() =>
+          Alert.alert(
+            'Report Submitted',
+            'Thank you! Your report has been submitted successfully.',
+            [{ text: 'OK' }]
+          )
+        }
       />
     </Animated.View>
   );

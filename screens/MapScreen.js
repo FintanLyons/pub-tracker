@@ -23,11 +23,11 @@ import {
   Map as MLRNMap,
 } from '@maplibre/maplibre-react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { submitMissingPubReport } from '../services/ReportService';
+import { submitPubReport } from '../services/ReportService';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
-import ReportMissingPubModal from '../components/ReportMissingPubModal';
+import PubReportFormModal from '../components/PubReportFormModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -84,7 +84,7 @@ export default function MapScreen({ safeAreaInsets }) {
     fitBoundsObject,
     centerOnPub,
     handleCurrentLocation,
-  } = useMapCamera({ setIsLocationLoaded });
+  } = useMapCamera({ setIsLocationLoaded, isMapFocused: isFocused });
 
   const {
     allPubs,
@@ -293,34 +293,32 @@ export default function MapScreen({ safeAreaInsets }) {
   // ── Missing pub modal ─────────────────────────────────────────
 
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
-  const [isSubmittingMissingPub, setIsSubmittingMissingPub] = useState(false);
-  const [missingPubError, setMissingPubError] = useState(null);
   const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
 
   const openMissingPubModal = useCallback(() => {
-    setMissingPubError(null);
     setIsMissingPubModalVisible(true);
   }, []);
 
   const closeMissingPubModal = useCallback(() => {
-    if (!isSubmittingMissingPub) {
-      setIsMissingPubModalVisible(false);
-      setMissingPubError(null);
-    }
-  }, [isSubmittingMissingPub]);
+    setIsMissingPubModalVisible(false);
+  }, []);
 
-  const handleSubmitMissingPub = useCallback(async ({ pubName, pubLocation }) => {
-    setIsSubmittingMissingPub(true);
-    setMissingPubError(null);
-    try {
-      await submitMissingPubReport(pubName, pubLocation);
-      setIsMissingPubModalVisible(false);
-      setIsMissingPubSuccessVisible(true);
-    } catch (error) {
-      setMissingPubError(error?.message || 'Unable to submit report right now. Please try again in a moment.');
-    } finally {
-      setIsSubmittingMissingPub(false);
-    }
+  const handleMissingPubSubmit = useCallback(async (payload) => {
+    await submitPubReport({
+      reportType: 'missing_pub',
+      pubId: null,
+      pubName: payload.pubName,
+      pubArea: payload.address || 'Unknown Area',
+      chainOrIndependent: payload.chainOrIndependent,
+      founded: payload.founded,
+      address: payload.address,
+      website: payload.website,
+      phone: payload.phone,
+      closingTime: payload.closingTime,
+      history: payload.history,
+      features: payload.features,
+      imageUris: payload.imageUris,
+    });
   }, []);
 
   // ── Loading gate ──────────────────────────────────────────────
@@ -504,7 +502,11 @@ export default function MapScreen({ safeAreaInsets }) {
         </GeoJSONSource>
 
         {currentLocationShape && (
-          <GeoJSONSource id="current-location" data={currentLocationShape}>
+          <GeoJSONSource
+            id="current-location"
+            data={currentLocationShape}
+            onPress={handleCurrentLocation}
+          >
             <Layer
               type="circle"
               id="current-location-dot"
@@ -583,12 +585,12 @@ export default function MapScreen({ safeAreaInsets }) {
         </TouchableOpacity>
       </Animated.View>
 
-      <ReportMissingPubModal
+      <PubReportFormModal
         visible={isMissingPubModalVisible}
         onClose={closeMissingPubModal}
-        onSubmit={handleSubmitMissingPub}
-        isSubmitting={isSubmittingMissingPub}
-        errorMessage={missingPubError}
+        mode="missing_pub"
+        onSubmit={handleMissingPubSubmit}
+        onSuccess={() => setIsMissingPubSuccessVisible(true)}
       />
 
       {isMissingPubSuccessVisible && (

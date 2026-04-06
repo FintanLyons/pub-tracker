@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
@@ -179,7 +180,7 @@ export default function LeaderboardScreen() {
     const isCurrentUser = user.id === currentUser?.id;
     const r = user.rank ?? 0;
     const rankColor =
-      r === 1 ? '#FFD700' : r === 2 ? '#C0C0C0' : r === 3 ? '#CD7F32' : COLORS.accentGrey;
+      r === 1 ? COLORS.gold : r === 2 ? COLORS.silver : r === 3 ? COLORS.bronze : COLORS.accentGrey;
     const showAdminLabel = activeTab === 'leagues' && selectedLeague?.created_by === user.id;
 
     return (
@@ -192,6 +193,18 @@ export default function LeaderboardScreen() {
             {user.rank}
           </Text>
         </View>
+        {user.avatar_url ? (
+          <Image
+            source={{ uri: user.avatar_url }}
+            style={styles.leaderboardAvatarImage}
+            contentFit="cover"
+            transition={120}
+          />
+        ) : (
+          <View style={styles.leaderboardAvatarPlaceholder}>
+            <MaterialCommunityIcons name="account-outline" size={22} color={COLORS.mediumGrey} />
+          </View>
+        )}
         <View style={styles.userInfo}>
           <Text style={styles.username}>
             {user.username}
@@ -320,6 +333,8 @@ export default function LeaderboardScreen() {
             <TouchableOpacity
               style={styles.addButton}
               onPress={() => setShowAddFriendModal(true)}
+              accessibilityLabel="Add friend"
+              accessibilityRole="button"
             >
               <MaterialCommunityIcons name="account-plus" size={24} color="#FFFFFF" />
             </TouchableOpacity>
@@ -631,12 +646,11 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   notificationButton: {
-    padding: 8,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.lightGrey,
     position: 'relative',
-    minWidth: 40,
-    minHeight: 40,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -983,6 +997,24 @@ const styles = StyleSheet.create({
   rankText: {
     fontSize: 21,
     fontWeight: 'bold',
+  },
+  leaderboardAvatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 10,
+    backgroundColor: COLORS.lightGrey,
+  },
+  leaderboardAvatarPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 10,
+    borderWidth: 2,
+    borderColor: COLORS.divider,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   userInfo: {
     flex: 1,

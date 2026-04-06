@@ -4,6 +4,8 @@ export const COLORS = {
   darkGrey:     '#2C2C2C', // Primary text on light backgrounds
   accentGrey:   '#424242', // Secondary dark text
   mediumGrey:   '#757575', // Supporting text and icons
+  /** Input placeholder / example copy only — lighter than typed text */
+  inputPlaceholder: '#BDBDBD',
   lightGrey:    '#F5F5F5', // Card backgrounds and surfaces
   burgundy:     '#A1183C', // Borough trophy colour
   sapphire:     '#2F4AA1', // Pub achievement colour

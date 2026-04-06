@@ -1,37 +1,39 @@
 -- ============================================================================
--- TIER 2: Security hardening (run in Supabase SQL Editor on your project)
+-- Scoring update: +1 per drink, postcode area completion +1000 (was +500).
 -- ============================================================================
--- 1) RPCs only return stats for the caller when JWT is present (blocks
---    authenticated users from passing another user's UUID).
--- 2) delete_my_account() removes app data and the auth user (GDPR / App Store).
 --
--- Maintenance: SQL editor / service-role jobs run with auth.uid() = NULL, so
--- compute_user_stats(uid) still works for backfills.
+-- Safe / non-destructive:
+--   - Replaces only RPC bodies and the pub_drinks trigger wiring.
+--   - Does NOT truncate, CASCADE-drop, or bulk-update business tables.
+--
+-- Prerequisites (typical Pub Tracker / phase6 DB):
+--   - public.pub_drinks, public.user_stats.total_drinks, public.pub_spatial_assignments
+--
+-- After run: scores refresh on next visit/drink/recompute. Optional backfill at bottom.
+--
+-- If you applied scripts/tier2_security_hardening.sql, those functions add an
+-- auth.uid() check — merge that block into compute_user_stats / get_achievements
+-- after this file, or edit tier2 copies to match this scoring logic.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. compute_user_stats — caller cannot recompute another user's stats
+-- compute_user_stats — total_score includes drink counts; area bonus 1000
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.compute_user_stats(p_user_id UUID)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
 AS $$
 DECLARE
-  v_pubs_visited         INT;
-  v_pub_points           INT;
-  v_completed_districts INT;
-  v_completed_areas      INT;
-  v_total_score          INT;
-  v_level                INT;
-  v_total_drinks         INT;
+  v_pubs_visited          INT;
+  v_pub_points            INT;
+  v_completed_districts   INT;
+  v_completed_areas       INT;
+  v_total_score           INT;
+  v_level                 INT;
+  v_total_drinks          INT;
 BEGIN
-  IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM p_user_id THEN
-    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
-  END IF;
-
   SELECT COUNT(*)
     INTO v_pubs_visited
     FROM public.visited_pubs
@@ -111,156 +113,44 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 2. get_area_stats — plpgsql + auth check + RETURN QUERY
+-- Drink changes → full recompute (keeps total_score in sync with drinks)
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.get_area_stats(p_user_id UUID)
-RETURNS TABLE (
-  district       TEXT,
-  postcode_area  TEXT,
-  total          BIGINT,
-  visited        BIGINT,
-  percentage     INT,
-  center_lat     DOUBLE PRECISION,
-  center_lon     DOUBLE PRECISION
-)
+CREATE OR REPLACE FUNCTION public.sync_user_total_drinks(p_user_id UUID)
+RETURNS void
 LANGUAGE plpgsql
-STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM p_user_id THEN
-    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
-  END IF;
-
-  RETURN QUERY
-  WITH visited_ids AS (
-    SELECT pub_id FROM public.visited_pubs WHERE user_id = p_user_id
-  ),
-  effective_pubs AS (
-    SELECT
-      pa.id,
-      pa.lat,
-      pa.lon,
-      COALESCE(NULLIF(TRIM(psa.postcode_district), ''), 'Unknown') AS effective_district,
-      COALESCE(NULLIF(TRIM(psa.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pubs_all pa
-    LEFT JOIN public.pub_spatial_assignments psa ON psa.pub_id = pa.id
-  )
-  SELECT
-    ep.effective_district AS district,
-    MAX(ep.effective_area) AS postcode_area,
-    COUNT(*)::BIGINT AS total,
-    COUNT(v.pub_id)::BIGINT AS visited,
-    CASE WHEN COUNT(*) > 0
-      THEN ROUND((COUNT(v.pub_id)::NUMERIC / COUNT(*)) * 100)::INT
-      ELSE 0
-    END AS percentage,
-    AVG(ep.lat::DOUBLE PRECISION) AS center_lat,
-    AVG(ep.lon::DOUBLE PRECISION) AS center_lon
-  FROM effective_pubs ep
-  LEFT JOIN visited_ids v ON v.pub_id = ep.id
-  GROUP BY ep.effective_district
-  ORDER BY ep.effective_district;
+  PERFORM public.compute_user_stats(p_user_id);
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_area_stats(UUID) TO authenticated;
-
--- ---------------------------------------------------------------------------
--- 3. get_borough_stats
--- ---------------------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION public.get_borough_stats(p_user_id UUID)
-RETURNS TABLE (
-  postcode_area        TEXT,
-  total_pubs           BIGINT,
-  visited_pubs         BIGINT,
-  percentage           INT,
-  total_districts      BIGINT,
-  completed_districts  BIGINT,
-  center_lat           DOUBLE PRECISION,
-  center_lon           DOUBLE PRECISION,
-  min_lat              DOUBLE PRECISION,
-  max_lat              DOUBLE PRECISION,
-  min_lon              DOUBLE PRECISION,
-  max_lon              DOUBLE PRECISION
-)
+CREATE OR REPLACE FUNCTION public.trg_pub_drinks_sync_total_drinks()
+RETURNS trigger
 LANGUAGE plpgsql
-STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM p_user_id THEN
-    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
+  IF TG_OP = 'DELETE' THEN
+    PERFORM public.sync_user_total_drinks(OLD.user_id);
+    RETURN OLD;
   END IF;
-
-  RETURN QUERY
-  WITH visited_ids AS (
-    SELECT pub_id FROM public.visited_pubs WHERE user_id = p_user_id
-  ),
-  effective_pubs AS (
-    SELECT
-      pa.id,
-      pa.lat,
-      pa.lon,
-      COALESCE(NULLIF(TRIM(psa.postcode_district), ''), 'Unknown') AS effective_district,
-      COALESCE(NULLIF(TRIM(psa.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pubs_all pa
-    LEFT JOIN public.pub_spatial_assignments psa ON psa.pub_id = pa.id
-  ),
-  district_completion AS (
-    SELECT
-      ep.effective_area AS area_name,
-      ep.effective_district AS district_name,
-      COUNT(*) AS district_total,
-      COUNT(v.pub_id) AS district_visited
-    FROM effective_pubs ep
-    LEFT JOIN visited_ids v ON v.pub_id = ep.id
-    WHERE ep.effective_district IS NOT NULL AND TRIM(ep.effective_district) <> '' AND ep.effective_district <> 'Unknown'
-    GROUP BY 1, 2
-  ),
-  area_district_agg AS (
-    SELECT
-      area_name,
-      COUNT(*)::BIGINT AS total_districts,
-      COUNT(*) FILTER (
-        WHERE district_visited = district_total AND district_total > 0
-      )::BIGINT AS completed_districts
-    FROM district_completion
-    GROUP BY area_name
-  )
-  SELECT
-    ep.effective_area AS postcode_area,
-    COUNT(*)::BIGINT AS total_pubs,
-    COUNT(v.pub_id)::BIGINT AS visited_pubs,
-    CASE WHEN COUNT(*) > 0
-      THEN ROUND((COUNT(v.pub_id)::NUMERIC / COUNT(*)) * 100)::INT
-      ELSE 0
-    END AS percentage,
-    COALESCE(ada.total_districts, 0)::BIGINT AS total_districts,
-    COALESCE(ada.completed_districts, 0)::BIGINT AS completed_districts,
-    AVG(ep.lat::DOUBLE PRECISION) AS center_lat,
-    AVG(ep.lon::DOUBLE PRECISION) AS center_lon,
-    MIN(ep.lat::DOUBLE PRECISION) AS min_lat,
-    MAX(ep.lat::DOUBLE PRECISION) AS max_lat,
-    MIN(ep.lon::DOUBLE PRECISION) AS min_lon,
-    MAX(ep.lon::DOUBLE PRECISION) AS max_lon
-  FROM effective_pubs ep
-  LEFT JOIN visited_ids v ON v.pub_id = ep.id
-  LEFT JOIN area_district_agg ada ON ada.area_name = ep.effective_area
-  WHERE ep.effective_area IS NOT NULL AND TRIM(ep.effective_area) <> '' AND ep.effective_area <> 'Unknown'
-  GROUP BY ep.effective_area, ada.total_districts, ada.completed_districts
-  ORDER BY ep.effective_area;
+  PERFORM public.sync_user_total_drinks(NEW.user_id);
+  RETURN NEW;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_borough_stats(UUID) TO authenticated;
+DROP TRIGGER IF EXISTS trg_pub_drinks_sync_total_drinks ON public.pub_drinks;
+CREATE TRIGGER trg_pub_drinks_sync_total_drinks
+  AFTER INSERT OR UPDATE OF count OR DELETE ON public.pub_drinks
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_pub_drinks_sync_total_drinks();
 
 -- ---------------------------------------------------------------------------
--- 4. get_achievements — auth check at start
+-- get_achievements — same total_score formula as compute_user_stats
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.get_achievements(p_user_id UUID)
@@ -268,7 +158,6 @@ RETURNS JSONB
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public
 AS $$
 DECLARE
   v_pub_points              INT;
@@ -280,10 +169,6 @@ DECLARE
   v_postcode_area_trophies  JSONB;
   v_pub_achievements        JSONB;
 BEGIN
-  IF auth.uid() IS NOT NULL AND auth.uid() IS DISTINCT FROM p_user_id THEN
-    RAISE EXCEPTION 'not authorized' USING ERRCODE = '42501';
-  END IF;
-
   SELECT COALESCE(SUM(COALESCE(pa.points, 10)), 0)
     INTO v_pub_points
     FROM public.visited_pubs vp
@@ -387,7 +272,7 @@ BEGIN
     'totalScore',              v_total_score,
     'level',                   FLOOR(v_total_score / 50.0)::INT + 1,
     'pubsVisited',             (SELECT COUNT(*) FROM public.visited_pubs WHERE user_id = p_user_id),
-    'districtTrophies',        v_district_trophies,
+    'districtTrophies',      v_district_trophies,
     'postcodeAreaTrophies',    v_postcode_area_trophies,
     'pubAchievements',         v_pub_achievements
   );
@@ -397,45 +282,17 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_achievements(UUID) TO authenticated;
 
 -- ---------------------------------------------------------------------------
--- 5. delete_my_account — call from app while signed in (authenticated JWT)
+-- Optional: backfill user_stats for everyone who has visits OR drinks (uncomment)
 -- ---------------------------------------------------------------------------
--- Removes social/data rows, then auth user. If DELETE FROM auth.users fails
--- (permissions), run the same cleanup via Dashboard or an Edge Function with
--- service role instead.
-
-CREATE OR REPLACE FUNCTION public.delete_my_account()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-DECLARE
-  uid UUID := auth.uid();
-BEGIN
-  IF uid IS NULL THEN
-    RAISE EXCEPTION 'not authenticated' USING ERRCODE = '28000';
-  END IF;
-
-  DELETE FROM public.pub_reviews WHERE user_id = uid;
-  DELETE FROM public.pub_drinks WHERE user_id = uid;
-  DELETE FROM public.visited_pubs WHERE user_id = uid;
-  DELETE FROM public.favorite_pubs WHERE user_id = uid;
-  DELETE FROM public.friendships WHERE user_id = uid OR friend_id = uid;
-
-  DELETE FROM public.league_members
-  WHERE league_id IN (SELECT id FROM public.leagues WHERE created_by = uid);
-
-  DELETE FROM public.leagues WHERE created_by = uid;
-
-  DELETE FROM public.league_members WHERE user_id = uid;
-
-  DELETE FROM public.user_stats WHERE user_id = uid;
-
-  DELETE FROM public.users WHERE id = uid;
-
-  DELETE FROM auth.users WHERE id = uid;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.delete_my_account() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.delete_my_account() TO authenticated;
+-- DO $$
+-- DECLARE
+--   r RECORD;
+-- BEGIN
+--   FOR r IN
+--     SELECT user_id FROM public.visited_pubs
+--     UNION
+--     SELECT user_id FROM public.pub_drinks
+--   LOOP
+--     PERFORM public.compute_user_stats(r.user_id);
+--   END LOOP;
+-- END $$;

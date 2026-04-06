@@ -55,7 +55,8 @@ function AppContent() {
 
   useEffect(() => {
     if (Platform.OS === 'android') {
-      NavigationBar.setBackgroundColorAsync(COLORS.charcoal);
+      // Edge-to-edge (default in recent Expo / RN): nav bar background is themed
+      // via app.config.js androidNavigationBar — setBackgroundColorAsync is unsupported and warns.
       NavigationBar.setButtonStyleAsync('light');
     }
   }, []);

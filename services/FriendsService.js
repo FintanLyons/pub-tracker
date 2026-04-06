@@ -1,5 +1,4 @@
 import { supabase } from '../config/supabase';
-import { getDrinkTotalsByUserIds } from './DrinkTotalsService';
 
 /**
  * Send a friend request
@@ -159,14 +158,5 @@ export const getFriendsLeaderboard = async (userId) => {
   const allUsers = [currentUser, ...friends];
   allUsers.sort((a, b) => (b.stats?.total_score || 0) - (a.stats?.total_score || 0));
 
-  const ranked = allUsers.map((user, index) => ({ ...user, rank: index + 1 }));
-  const drinkMap = await getDrinkTotalsByUserIds(ranked.map((u) => u.id));
-
-  return ranked.map((u) => ({
-    ...u,
-    stats: {
-      ...u.stats,
-      total_drinks: drinkMap[u.id] ?? 0,
-    },
-  }));
+  return allUsers.map((user, index) => ({ ...user, rank: index + 1 }));
 };
