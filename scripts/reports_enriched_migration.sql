@@ -70,31 +70,18 @@ COMMENT ON COLUMN public.reports.reporter_description IS 'Legacy: earlier app us
 -- ALTER TABLE public.reports VALIDATE CONSTRAINT reports_report_type_check;
 
 -- ============================================================================
--- Storage: report photos (run once)
+-- Image uploads (report attachments, future avatars / pub gallery)
 -- ============================================================================
--- 1. In Dashboard: Storage → New bucket → id: report-photos → Public bucket: ON
---    Or SQL:
+-- The app uploads to Cloudflare R2 via the Edge Function presign-r2-upload
+-- (see supabase/functions/presign-r2-upload/). Postgres stores public HTTPS
+-- URLs only (e.g. reports.photo_urls). Supabase Storage is not required for that flow.
 --
--- INSERT INTO storage.buckets (id, name, public)
--- VALUES ('report-photos', 'report-photos', true)
--- ON CONFLICT (id) DO NOTHING;
---
--- 2. Policies (authenticated users upload only under their user id folder):
---
--- CREATE POLICY "report_photos_insert_own"
--- ON storage.objects FOR INSERT TO authenticated
--- WITH CHECK (
---   bucket_id = 'report-photos'
---   AND (storage.foldername(name))[1] = auth.uid()::text
--- );
---
--- CREATE POLICY "report_photos_select_public"
--- ON storage.objects FOR SELECT TO public
--- USING (bucket_id = 'report-photos');
---
--- CREATE POLICY "report_photos_delete_own"
--- ON storage.objects FOR DELETE TO authenticated
--- USING (
---   bucket_id = 'report-photos'
---   AND (storage.foldername(name))[1] = auth.uid()::text
--- );
+-- Cloudflare R2 (one bucket, prefixes: reports/, avatars/, pubs/):
+--   1. Create bucket; attach a public access custom domain or R2 public URL.
+--   2. CORS: allow PUT + GET from your app; allow Header Content-Type.
+--   3. Deploy function: supabase functions deploy presign-r2-upload
+--   4. Set secrets (Dashboard → Edge Functions → Secrets, or CLI):
+--        R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+--        R2_BUCKET_NAME, R2_PUBLIC_BASE_URL (no trailing slash)
+--      Optional: R2_ALLOW_CLIENT_PUB_UPLOAD=true for client pub_gallery presigns.
+--   SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically.

@@ -1,11 +1,11 @@
 import { supabase } from '../config/supabase';
+import { presignAndPutImage } from './r2Upload';
 
 /**
- * Report photos: Supabase Storage bucket `report-photos`, object path
- * `{reporter_auth_user_id}/{timestamp}-{n}-{random}.{ext}`.
- * Public URLs are stored in `reports.photo_urls` (see scripts/reports_enriched_migration.sql).
+ * Report photos: Cloudflare R2 via Supabase Edge Function `presign-r2-upload`.
+ * Keys: `reports/{userId}/{uuid}.{ext}` in a single bucket (prefix layout).
+ * Public URLs are stored in `reports.photo_urls`.
  */
-const REPORT_PHOTOS_BUCKET = 'report-photos';
 
 async function fetchReporterUsername(userId) {
   const { data, error } = await supabase
@@ -23,37 +23,12 @@ const emptyToNull = (v) => {
   return s.length ? s : null;
 };
 
-async function uploadReportPhotoUris(imageUris, userId) {
+async function uploadReportPhotoUris(imageUris) {
   if (!imageUris?.length) return [];
   const out = [];
   for (let i = 0; i < imageUris.length; i++) {
-    const uri = imageUris[i];
-    const match = uri.match(/\.([a-zA-Z0-9]+)(?:\?|%|$)/);
-    const extRaw = match ? match[1].toLowerCase() : 'jpg';
-    const ext = extRaw === 'jpeg' ? 'jpg' : extRaw;
-    const path = `${userId}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const res = await fetch(uri);
-    if (!res.ok) {
-      throw new Error('Could not read a photo file.');
-    }
-    const buf = await res.arrayBuffer();
-    const contentType =
-      ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-    const { error } = await supabase.storage.from(REPORT_PHOTOS_BUCKET).upload(path, buf, {
-      contentType,
-      upsert: false,
-    });
-    if (error) {
-      const msg = error.message || '';
-      if (/bucket|not found/i.test(msg)) {
-        throw new Error(
-          'Photo upload is not set up yet. Remove photos and try again, or try later.'
-        );
-      }
-      throw new Error(`Photo upload failed: ${msg}`);
-    }
-    const { data: pub } = supabase.storage.from(REPORT_PHOTOS_BUCKET).getPublicUrl(path);
-    out.push(pub.publicUrl);
+    const publicUrl = await presignAndPutImage(imageUris[i], { purpose: 'report' });
+    out.push(publicUrl);
   }
   return out;
 }
@@ -99,7 +74,7 @@ export async function submitPubReport({
   const reporter_username = await fetchReporterUsername(session.user.id);
 
   const photo_urls =
-    imageUris.length > 0 ? await uploadReportPhotoUris(imageUris, session.user.id) : null;
+    imageUris.length > 0 ? await uploadReportPhotoUris(imageUris) : null;
 
   const areaFallback = emptyToNull(address) || 'Unknown Area';
 
