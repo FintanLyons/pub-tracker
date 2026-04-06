@@ -9,11 +9,20 @@ import {
   Animated,
   InteractionManager,
   RefreshControl,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useAuth } from '../contexts/AuthContext';
+import { updatePublicAvatarUrl } from '../services/SecureAuthService';
+import { presignAndPutImage } from '../services/r2Upload';
+import {
+  pickNormalizedAvatarUri,
+  AVATAR_LIBRARY_PERMISSION_ALERT,
+} from '../utils/avatarImagePrep';
 import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
@@ -42,13 +51,12 @@ const VIEW_MODES = {
 
 const DELETE_MODAL = {
   NONE: 'none',
-  WARN: 'warn',
-  FINAL: 'final',
+  CONFIRM: 'confirm',
   ERROR: 'error',
 };
 
 export default function ProfileScreen({ navigation }) {
-  const { logout, user, deleteAccount } = useAuth();
+  const { logout, user, deleteAccount, applyUserProfileRow } = useAuth();
   const {
     districtStats: baseDistrictStats,
     postcodeAreaStats: basePostcodeAreaStats,
@@ -72,6 +80,8 @@ export default function ProfileScreen({ navigation }) {
   const [deleteModal, setDeleteModal] = useState(DELETE_MODAL.NONE);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [showRemoveAvatarConfirm, setShowRemoveAvatarConfirm] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
 
@@ -269,8 +279,50 @@ export default function ProfileScreen({ navigation }) {
 
   const handleDeleteFromSettings = useCallback(() => {
     setShowSettingsModal(false);
-    setDeleteModal(DELETE_MODAL.WARN);
+    setDeleteModal(DELETE_MODAL.CONFIRM);
   }, []);
+
+  const handlePickProfilePhoto = useCallback(async () => {
+    if (!user?.id || avatarBusy) return;
+    const res = await pickNormalizedAvatarUri();
+    if (!res.ok) {
+      if (res.reason === 'denied') {
+        Alert.alert(AVATAR_LIBRARY_PERMISSION_ALERT.title, AVATAR_LIBRARY_PERMISSION_ALERT.message);
+      } else if (res.reason === 'processing') {
+        Alert.alert('Error', res.message || 'Could not process photo.');
+      }
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      const publicUrl = await presignAndPutImage(res.uri, { purpose: 'avatar' });
+      const row = await updatePublicAvatarUrl(user.id, publicUrl);
+      applyUserProfileRow(row);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Could not update profile photo.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  }, [user?.id, avatarBusy, applyUserProfileRow]);
+
+  const handleRemoveProfilePhoto = useCallback(() => {
+    if (!user?.id || !user?.avatar_url || avatarBusy) return;
+    setShowRemoveAvatarConfirm(true);
+  }, [user?.id, user?.avatar_url, avatarBusy]);
+
+  const confirmRemoveProfilePhoto = useCallback(async () => {
+    if (!user?.id) return;
+    setShowRemoveAvatarConfirm(false);
+    setAvatarBusy(true);
+    try {
+      const row = await updatePublicAvatarUrl(user.id, null);
+      applyUserProfileRow(row);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Could not remove photo.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  }, [user?.id, applyUserProfileRow]);
 
   const handleDeleteAccountConfirm = useCallback(async () => {
     try {
@@ -732,6 +784,72 @@ export default function ProfileScreen({ navigation }) {
                 >
                   {user?.username?.trim() ? user.username : 'Not set yet'}
                 </Text>
+
+                <Text style={styles.settingsPhotoLabel}>Profile photo</Text>
+                <View style={styles.settingsAvatarRow}>
+                  {user?.avatar_url ? (
+                    <Image
+                      source={{ uri: user.avatar_url }}
+                      style={styles.settingsAvatarImage}
+                      contentFit="cover"
+                      transition={120}
+                    />
+                  ) : (
+                    <View style={styles.settingsAvatarPlaceholder}>
+                      <MaterialCommunityIcons
+                        name="account-outline"
+                        size={36}
+                        color={COLORS.mediumGrey}
+                      />
+                    </View>
+                  )}
+                </View>
+                {avatarBusy ? (
+                  <ActivityIndicator style={styles.settingsAvatarSpinner} color={COLORS.amber} />
+                ) : null}
+                <View style={styles.settingsPhotoActionsRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.settingsPhotoActionBtn,
+                      styles.settingsPhotoActionBtnPrimary,
+                      (avatarBusy || !user?.id) && styles.settingsPhotoActionBtnDisabled,
+                    ]}
+                    onPress={handlePickProfilePhoto}
+                    disabled={avatarBusy || !user?.id}
+                    activeOpacity={0.75}
+                    accessibilityLabel="Change profile photo"
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons name="camera-outline" size={18} color={COLORS.darkGrey} />
+                    <Text style={styles.settingsPhotoActionBtnText}>Change photo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.settingsPhotoActionBtn,
+                      styles.settingsPhotoActionBtnMuted,
+                      (avatarBusy || !user?.avatar_url) && styles.settingsPhotoActionBtnDisabled,
+                    ]}
+                    onPress={handleRemoveProfilePhoto}
+                    disabled={avatarBusy || !user?.avatar_url}
+                    activeOpacity={0.75}
+                    accessibilityLabel="Remove profile photo"
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons
+                      name="trash-can-outline"
+                      size={18}
+                      color={user?.avatar_url && !avatarBusy ? COLORS.darkGrey : COLORS.mediumGrey}
+                    />
+                    <Text
+                      style={[
+                        styles.settingsPhotoActionBtnTextMuted,
+                        (!user?.avatar_url || avatarBusy) && styles.settingsPhotoActionBtnTextDisabled,
+                      ]}
+                    >
+                      Remove
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <View style={styles.settingsScoringCard}>
@@ -819,7 +937,66 @@ export default function ProfileScreen({ navigation }) {
       </Modal>
 
       <Modal
-        visible={deleteModal === DELETE_MODAL.WARN}
+        visible={showRemoveAvatarConfirm}
+        animationType="fade"
+        transparent
+        onRequestClose={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
+      >
+        <View style={styles.floatingModalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
+            accessibilityLabel="Dismiss"
+          />
+          <View style={styles.floatingCard}>
+            <View style={styles.floatingCardHeader}>
+              <Text style={styles.floatingCardTitle}>Remove profile photo?</Text>
+              <TouchableOpacity
+                onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
+                style={styles.floatingCardClose}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                disabled={avatarBusy}
+              >
+                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.floatingCardBody}>
+              Your profile will show the default outline on the leaderboard and in settings.
+            </Text>
+            <View style={styles.floatingCardActions}>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnSecondary,
+                ]}
+                onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
+                activeOpacity={0.75}
+                disabled={avatarBusy}
+              >
+                <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.floatingActionBtn,
+                  styles.floatingActionBtnHalf,
+                  styles.floatingActionBtnDangerOutline,
+                ]}
+                onPress={confirmRemoveProfilePhoto}
+                activeOpacity={0.75}
+                disabled={avatarBusy}
+              >
+                <Text style={styles.floatingActionBtnTextDanger}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={deleteModal === DELETE_MODAL.CONFIRM}
         animationType="fade"
         transparent
         onRequestClose={closeDeleteFlow}
@@ -845,63 +1022,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <Text style={styles.floatingCardBody}>
               Your profile, visits, favourites, friends, and league memberships will be removed
-              permanently.
-            </Text>
-            <View style={styles.floatingCardActions}>
-              <TouchableOpacity
-                style={[
-                  styles.floatingActionBtn,
-                  styles.floatingActionBtnHalf,
-                  styles.floatingActionBtnSecondary,
-                ]}
-                onPress={closeDeleteFlow}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.floatingActionBtn,
-                  styles.floatingActionBtnHalf,
-                  styles.floatingActionBtnDangerOutline,
-                ]}
-                onPress={() => setDeleteModal(DELETE_MODAL.FINAL)}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.floatingActionBtnTextDanger}>Continue</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={deleteModal === DELETE_MODAL.FINAL}
-        animationType="fade"
-        transparent
-        onRequestClose={closeDeleteFlow}
-      >
-        <View style={styles.floatingModalOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={closeDeleteFlow}
-            accessibilityLabel="Dismiss"
-          />
-          <View style={styles.floatingCard}>
-            <View style={styles.floatingCardHeader}>
-              <Text style={styles.floatingCardTitle}>Last step</Text>
-              <TouchableOpacity
-                onPress={closeDeleteFlow}
-                style={styles.floatingCardClose}
-                accessibilityLabel="Close"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.floatingCardBody}>
-              Are you sure? You will not be able to recover this account.
+              permanently. This cannot be undone.
             </Text>
             <View style={styles.floatingCardActions}>
               <TouchableOpacity
@@ -1212,6 +1333,82 @@ const styles = StyleSheet.create({
   },
   settingsUserValueMuted: {
     fontWeight: '600',
+    color: COLORS.mediumGrey,
+  },
+  settingsPhotoLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.mediumGrey,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginTop: 16,
+    marginBottom: 10,
+    textAlign: 'left',
+  },
+  settingsAvatarRow: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  settingsAvatarImage: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: COLORS.lightGrey,
+  },
+  settingsAvatarPlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 2,
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsAvatarSpinner: {
+    marginBottom: 8,
+  },
+  settingsPhotoActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginTop: 10,
+    gap: 10,
+  },
+  settingsPhotoActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  settingsPhotoActionBtnPrimary: {
+    backgroundColor: COLORS.white,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  settingsPhotoActionBtnMuted: {
+    backgroundColor: COLORS.lightGrey,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  settingsPhotoActionBtnDisabled: {
+    opacity: 0.45,
+  },
+  settingsPhotoActionBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  settingsPhotoActionBtnTextMuted: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  settingsPhotoActionBtnTextDisabled: {
     color: COLORS.mediumGrey,
   },
   settingsScoringCard: {

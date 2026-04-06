@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCurrentUserSecure } from '../services/SecureAuthService';
@@ -192,6 +193,18 @@ export default function LeaderboardScreen() {
             {user.rank}
           </Text>
         </View>
+        {user.avatar_url ? (
+          <Image
+            source={{ uri: user.avatar_url }}
+            style={styles.leaderboardAvatarImage}
+            contentFit="cover"
+            transition={120}
+          />
+        ) : (
+          <View style={styles.leaderboardAvatarPlaceholder}>
+            <MaterialCommunityIcons name="account-outline" size={22} color={COLORS.mediumGrey} />
+          </View>
+        )}
         <View style={styles.userInfo}>
           <Text style={styles.username}>
             {user.username}
@@ -984,6 +997,24 @@ const styles = StyleSheet.create({
   rankText: {
     fontSize: 21,
     fontWeight: 'bold',
+  },
+  leaderboardAvatarImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 10,
+    backgroundColor: COLORS.lightGrey,
+  },
+  leaderboardAvatarPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 10,
+    borderWidth: 2,
+    borderColor: COLORS.divider,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   userInfo: {
     flex: 1,

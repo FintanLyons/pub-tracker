@@ -1,3 +1,4 @@
+// @ts-nocheck — Deno Edge runtime; not typechecked by the Expo TS project.
 /**
  * Presigned PUT URLs for Cloudflare R2 (S3-compatible).
  * Secrets (Dashboard → Edge Functions → presign-r2-upload → Secrets, or `supabase secrets set`):
@@ -127,7 +128,7 @@ Deno.serve(async (req) => {
     const uploadUrl = await getSignedUrl(client, command, { expiresIn: 120 });
     const publicUrl = `${publicBase}/${objectKey}`;
 
-    return json({ uploadUrl, publicUrl, objectKey });
+    return json({ uploadUrl, publicUrl, objectKey }, 200);
   } catch (e) {
     console.error(e);
     const msg = e instanceof Error ? e.message : String(e);

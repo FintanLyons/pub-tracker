@@ -201,8 +201,13 @@ export const loginUserSecure = async (email, password) => {
 /**
  * Persist username to public.users only — no getSession/getUser/updateUser here.
  * Avoids Supabase auth client deadlocks during ChooseUsername submit (see AuthContext).
+ *
+ * @param {string} userId
+ * @param {string} username
+ * @param {{ avatarUrl?: string }} [options] If avatarUrl is set, stored on users.avatar_url (e.g. R2 public URL).
  */
-export const updatePublicUsername = async (userId, username) => {
+export const updatePublicUsername = async (userId, username, options = {}) => {
+  const { avatarUrl } = options;
   const trimmed = (username || '').trim();
   if (!userId) throw new Error('Not signed in');
   if (!isValidUsernameFormat(trimmed)) {
@@ -222,12 +227,17 @@ export const updatePublicUsername = async (userId, username) => {
     throw new Error('Username already taken');
   }
 
+  const patch = {
+    username: trimmed,
+    updated_at: new Date().toISOString(),
+  };
+  if (typeof avatarUrl === 'string' && avatarUrl.length > 0) {
+    patch.avatar_url = avatarUrl;
+  }
+
   const { data, error } = await supabase
     .from('users')
-    .update({
-      username: trimmed,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq('id', userId)
     .select()
     .single();
@@ -239,6 +249,34 @@ export const updatePublicUsername = async (userId, username) => {
     throw error;
   }
 
+  return data;
+};
+
+/**
+ * Update or clear public.users.avatar_url (R2 public URL, or null to use default outline).
+ */
+export const updatePublicAvatarUrl = async (userId, avatarUrl) => {
+  if (!userId) throw new Error('Not signed in');
+
+  const patch = {
+    updated_at: new Date().toISOString(),
+  };
+  if (avatarUrl === null || avatarUrl === '') {
+    patch.avatar_url = null;
+  } else if (typeof avatarUrl === 'string') {
+    patch.avatar_url = avatarUrl;
+  } else {
+    throw new Error('Invalid avatar URL');
+  }
+
+  const { data, error } = await supabase
+    .from('users')
+    .update(patch)
+    .eq('id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
   return data;
 };
 
