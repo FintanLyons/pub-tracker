@@ -90,15 +90,16 @@ BEGIN
     FROM area_counts
    WHERE visited = total AND total > 0;
 
-  v_total_score := v_pub_points
-                 + (v_completed_districts * 50)
-                 + (v_completed_areas * 500);
-  v_level := FLOOR(v_total_score / 50.0)::INT + 1;
-
   SELECT COALESCE(SUM(count), 0)::INT
     INTO v_total_drinks
     FROM public.pub_drinks
    WHERE user_id = p_user_id;
+
+  v_total_score := v_pub_points
+                 + v_total_drinks
+                 + (v_completed_districts * 50)
+                 + (v_completed_areas * 1000);
+  v_level := FLOOR(v_total_score / 50.0)::INT + 1;
 
   INSERT INTO public.user_stats (user_id, pubs_visited, total_score, level, total_drinks, last_synced_at)
   VALUES (p_user_id, v_pubs_visited, v_total_score, v_level, v_total_drinks, NOW())
@@ -117,21 +118,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-DECLARE
-  v_sum INTEGER;
 BEGIN
-  SELECT COALESCE(SUM(count), 0)::INT INTO v_sum
-    FROM public.pub_drinks
-   WHERE user_id = p_user_id;
-
-  UPDATE public.user_stats
-     SET total_drinks = v_sum,
-         last_synced_at = NOW()
-   WHERE user_id = p_user_id;
-
-  IF NOT FOUND THEN
-    PERFORM public.compute_user_stats(p_user_id);
-  END IF;
+  PERFORM public.compute_user_stats(p_user_id);
 END;
 $$;
 

@@ -20,13 +20,14 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 
 ## Scoring system
 
-- Each visited pub → `pub.points` (default 10 if not set)
+- Each visited pub → `pub.points` (default 10 if not set; higher for special pubs)
+- Each drink logged (`pub_drinks.count`) → +1
 - Complete every pub in a **postcode district** → +50 bonus
-- Complete every pub in a **postcode area** (e.g. SW) → +500 bonus
+- Complete every pub in a **postcode area** (e.g. SW) → +1000 bonus
 - Level = `floor(total_score / 50) + 1`
 
 Scoring logic lives in two places — keep them in sync if rules change:
-- Client: `utils/levelSystem.js` — level math plus **exported constants** (`DEFAULT_PUB_VISIT_POINTS`, `DISTRICT_COMPLETION_BONUS_POINTS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_PER_LEVEL`) used by Profile settings scoring copy
+- Client: `utils/levelSystem.js` — level math plus **exported constants** (`DEFAULT_PUB_VISIT_POINTS`, `POINTS_PER_DRINK`, `DISTRICT_COMPLETION_BONUS_POINTS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_PER_LEVEL`) used by Profile settings scoring copy
 - Server: `scripts/phase6_postcode_migration.sql` (and legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
 
 ## Architecture

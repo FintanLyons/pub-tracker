@@ -31,6 +31,7 @@ import {
   getLevelProgress,
   POINTS_PER_LEVEL,
   DEFAULT_PUB_VISIT_POINTS,
+  POINTS_PER_DRINK,
   DISTRICT_COMPLETION_BONUS_POINTS,
   POSTCODE_AREA_COMPLETION_BONUS_POINTS,
 } from '../utils/levelSystem';
@@ -864,7 +865,17 @@ export default function ProfileScreen({ navigation }) {
                   />
                   <Text style={styles.scoringRuleValue}>+{DEFAULT_PUB_VISIT_POINTS}</Text>
                 </View>
-                <Text style={styles.scoringRuleHint}>Excluding Rare Pubs</Text>
+                <Text style={styles.scoringRuleHint}>Default visit; some pubs award more</Text>
+                <View style={styles.scoringRuleRow}>
+                  <Text style={styles.scoringRuleLeft}>Each drink logged</Text>
+                  <MaterialCommunityIcons
+                    name="arrow-right"
+                    size={18}
+                    color={COLORS.mediumGrey}
+                    style={styles.scoringRuleArrow}
+                  />
+                  <Text style={styles.scoringRuleValue}>+{POINTS_PER_DRINK}</Text>
+                </View>
                 <View style={styles.scoringRuleRow}>
                   <Text style={styles.scoringRuleLeft}>Area finished</Text>
                   <MaterialCommunityIcons

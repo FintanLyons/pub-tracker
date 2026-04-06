@@ -6,9 +6,10 @@
 --   2. Run AFTER this file: populate postcode columns (see UPDATE below)
 --
 -- Scoring:
---   - Each visited pub: pub.points (default 10)
+--   - Each visited pub: pub.points (default 10; higher for special pubs)
+--   - Each drink logged: +1 (sum of pub_drinks.count)
 --   - Complete all pubs in a postcode district: +50
---   - Complete all pubs in a postcode area (e.g. SW, E): +500
+--   - Complete all pubs in a postcode area (e.g. SW, E): +1000
 --   - Level = floor(total_score / 50) + 1
 --
 -- Non-destructive to pubs_all.
@@ -171,15 +172,16 @@ BEGIN
     FROM area_counts
    WHERE visited = total AND total > 0;
 
-  v_total_score := v_pub_points
-                 + (v_completed_districts * 50)
-                 + (v_completed_areas * 500);
-  v_level := FLOOR(v_total_score / 50.0)::INT + 1;
-
   SELECT COALESCE(SUM(count), 0)::INT
     INTO v_total_drinks
     FROM public.pub_drinks
    WHERE user_id = p_user_id;
+
+  v_total_score := v_pub_points
+                 + v_total_drinks
+                 + (v_completed_districts * 50)
+                 + (v_completed_areas * 1000);
+  v_level := FLOOR(v_total_score / 50.0)::INT + 1;
 
   INSERT INTO public.user_stats (user_id, pubs_visited, total_score, level, total_drinks, last_synced_at)
   VALUES (p_user_id, v_pubs_visited, v_total_score, v_level, v_total_drinks, NOW())
@@ -202,21 +204,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-DECLARE
-  v_sum INTEGER;
 BEGIN
-  SELECT COALESCE(SUM(count), 0)::INT INTO v_sum
-    FROM public.pub_drinks
-   WHERE user_id = p_user_id;
-
-  UPDATE public.user_stats
-     SET total_drinks = v_sum,
-         last_synced_at = NOW()
-   WHERE user_id = p_user_id;
-
-  IF NOT FOUND THEN
-    PERFORM public.compute_user_stats(p_user_id);
-  END IF;
+  PERFORM public.compute_user_stats(p_user_id);
 END;
 $$;
 
@@ -398,6 +387,7 @@ DECLARE
   v_pub_points              INT;
   v_completed_districts     INT;
   v_completed_areas         INT;
+  v_total_drinks            INT;
   v_total_score             INT;
   v_district_trophies       JSONB;
   v_postcode_area_trophies  JSONB;
@@ -492,9 +482,15 @@ BEGIN
     ON vp.pub_id = pa.id AND vp.user_id = p_user_id
   WHERE pa.achievement IS NOT NULL AND TRIM(pa.achievement) <> '';
 
+  SELECT COALESCE(SUM(count), 0)::INT
+    INTO v_total_drinks
+    FROM public.pub_drinks
+   WHERE user_id = p_user_id;
+
   v_total_score := v_pub_points
+                 + v_total_drinks
                  + (v_completed_districts * 50)
-                 + (v_completed_areas * 500);
+                 + (v_completed_areas * 1000);
 
   RETURN jsonb_build_object(
     'totalScore',              v_total_score,
