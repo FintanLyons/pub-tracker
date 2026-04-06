@@ -40,6 +40,9 @@ scripts/.env
 credentials.json
 credentials/
 
+# Firebase Android client config (contains API keys; bundle locally / CI secret — not in git)
+google-services.json
+
 # Supabase CLI cache
 supabase/.temp/
 

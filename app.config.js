@@ -3,7 +3,8 @@ import path from 'path';
 import { EAS_PROJECT_ID } from './constants/easProject.js';
 
 // Android push (FCM): add Firebase Android app with package = android.package, download
-// google-services.json to project root. See https://docs.expo.dev/push-notifications/fcm-credentials/
+// google-services.json to project root (gitignored — do not commit). See Expo FCM doc:
+// https://docs.expo.dev/push-notifications/fcm-credentials/
 const googleServicesJsonPath = path.join(process.cwd(), 'google-services.json');
 const googleServicesFile = fs.existsSync(googleServicesJsonPath)
   ? './google-services.json'
