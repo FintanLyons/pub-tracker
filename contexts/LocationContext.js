@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
+import { registerPushNotificationsForUser } from '../services/PushNotificationService';
 
 const LocationContext = createContext(null);
 
-export function LocationProvider({ children }) {
+export function LocationProvider({ children, userId }) {
   const [location, setLocation] = useState(null);
   const hasFreshFix = useRef(false);
 
@@ -11,10 +12,24 @@ export function LocationProvider({ children }) {
     let cancelled = false;
 
     const resolve = async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted' || cancelled) return;
+      const locationPromise = Location.requestForegroundPermissionsAsync().catch((err) => {
+        console.warn('LocationContext: location permission failed', err?.message);
+        return { status: null };
+      });
 
+      const pushPromise =
+        userId && !cancelled
+          ? registerPushNotificationsForUser(userId).catch((err) => {
+              console.warn('LocationContext: push registration failed', err?.message);
+            })
+          : Promise.resolve();
+
+      const [loc] = await Promise.all([locationPromise, pushPromise]);
+      const locationStatus = loc?.status ?? null;
+
+      if (locationStatus !== 'granted' || cancelled) return;
+
+      try {
         const last = await Location.getLastKnownPositionAsync();
         if (last && !cancelled && !hasFreshFix.current) {
           setLocation({
@@ -39,8 +54,10 @@ export function LocationProvider({ children }) {
     };
 
     resolve();
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   return (
     <LocationContext.Provider value={location}>

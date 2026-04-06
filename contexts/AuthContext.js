@@ -12,6 +12,7 @@ import {
   deleteAccountSecure,
   ensureUserStub,
 } from '../services/SecureAuthService';
+import { removeAllPushTokensForUser } from '../services/PushNotificationService';
 
 const AuthContext = createContext();
 
@@ -76,7 +77,16 @@ export const AuthProvider = ({ children }) => {
   const skipAuthProfileRefreshUntilRef = useRef(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
+      if (sessionError) {
+        const msg = String(sessionError.message || '');
+        if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
+          await supabase.auth.signOut({ scope: 'local' });
+        }
+        setUser(null);
+        setLoading(false);
+        return;
+      }
       if (session?.user) {
         let authUser;
         try {
@@ -129,6 +139,13 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const uid = session?.user?.id;
+    if (uid) {
+      await removeAllPushTokensForUser(uid);
+    }
     await logoutUserSecure();
     setUser(null);
   }, []);

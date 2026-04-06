@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1067087625068",
+    "project_id": "pub-tracker-74229",
+    "storage_bucket": "pub-tracker-74229.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1067087625068:android:fc8be437fe5a2870b15149",
+        "android_client_info": {
+          "package_name": "com.fintanlyons.pubtracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCs1iOKGc4tA-nASKM2S8mE1LzKac8XRFQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

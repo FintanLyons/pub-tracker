@@ -4,3 +4,9 @@
 
 [functions.presign-r2-upload]
 verify_jwt = true
+
+[functions.process-notification-queue]
+verify_jwt = false
+
+[functions.monthly-friends-digest]
+verify_jwt = false

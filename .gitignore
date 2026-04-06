@@ -36,6 +36,13 @@ yarn-error.*
 .env
 scripts/.env
 
+# EAS / signing (never commit)
+credentials.json
+credentials/
+
+# Supabase CLI cache
+supabase/.temp/
+
 # typescript
 *.tsbuildinfo
 

@@ -226,13 +226,6 @@ export default function LeaderboardScreen() {
                 {user.stats?.total_drinks ?? 0}
               </Text>
             </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statCell}>
-              <Text style={styles.statLabel}>Level</Text>
-              <Text style={styles.statValue} numberOfLines={1}>
-                {user.stats?.level || 1}
-              </Text>
-            </View>
           </View>
         </View>
         <View style={styles.scoreContainer}>
@@ -1043,7 +1036,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingHorizontal: 2,
+    paddingHorizontal: 5,
     gap: 6,
   },
   statLabel: {
