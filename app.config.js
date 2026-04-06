@@ -1,3 +1,15 @@
+import fs from 'fs';
+import path from 'path';
+import { EAS_PROJECT_ID } from './constants/easProject.js';
+
+// Android push (FCM): add Firebase Android app with package = android.package, download
+// google-services.json to project root (gitignored — do not commit). See Expo FCM doc:
+// https://docs.expo.dev/push-notifications/fcm-credentials/
+const googleServicesJsonPath = path.join(process.cwd(), 'google-services.json');
+const googleServicesFile = fs.existsSync(googleServicesJsonPath)
+  ? './google-services.json'
+  : undefined;
+
 // App Store / Play Store identifiers — set EXPO_PUBLIC_IOS_BUNDLE_ID and
 // EXPO_PUBLIC_ANDROID_PACKAGE in .env (same value is fine for both stores).
 const iosBundleId =
@@ -39,6 +51,14 @@ export default {
         },
       ],
       '@react-native-google-signin/google-signin',
+      [
+        'expo-notifications',
+        {
+          icon: './assets/logo.png',
+          color: '#D4A017',
+          sounds: [],
+        },
+      ],
     ],
     ios: {
       supportsTablet: true,
@@ -56,6 +76,7 @@ export default {
       barStyle: 'light-content',
     },
     android: {
+      ...(googleServicesFile ? { googleServicesFile } : {}),
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
         foregroundImage: './assets/logo.png',
@@ -67,6 +88,7 @@ export default {
         'ACCESS_FINE_LOCATION',
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
+        'android.permission.POST_NOTIFICATIONS',
       ],
     },
     web: {
@@ -74,7 +96,7 @@ export default {
     },
     extra: {
       eas: {
-        projectId: 'cd970f03-6d5e-4e0d-bd04-ffc7afa5a1ed',
+        projectId: EAS_PROJECT_ID,
       },
     },
   },

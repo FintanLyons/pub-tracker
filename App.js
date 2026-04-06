@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Platform, View, ActivityIndicator, StyleSheet } from 'react-native';
+import { AppState, Platform, View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -17,6 +17,10 @@ import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
 import { COLORS } from './constants/theme';
 import { isValidUsernameFormat } from './services/SecureAuthService';
+import {
+  installNotificationPresentationHandler,
+  registerPushNotificationsForUser,
+} from './services/PushNotificationService';
 
 function onboardingKeyForUser(userId) {
   return `hasSeenOnboarding:${userId}`;
@@ -71,6 +75,21 @@ function AppContent() {
     AsyncStorage.getItem(key).then((v) => {
       setUserOnboardingDone(v === 'true');
     });
+  }, [user?.id]);
+
+  /**
+   * Register push token whenever the user is signed in — on mount and when returning active.
+   * AppState alone misses the first foreground (listener only fires on changes).
+   */
+  useEffect(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    void registerPushNotificationsForUser(user.id);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void registerPushNotificationsForUser(user.id);
+      }
+    });
+    return () => sub.remove();
   }, [user?.id]);
 
   const completeOnboarding = useCallback(async () => {
@@ -129,7 +148,7 @@ function AppContent() {
     <NavigationContainer>
       <PaperProvider>
         <View style={styles.appContainer}>
-          <LocationProvider>
+          <LocationProvider userId={user.id}>
             <UserStatsProvider userId={user.id}>
               <TabNavigator />
             </UserStatsProvider>
@@ -142,6 +161,12 @@ function AppContent() {
 }
 
 export default function App() {
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      installNotificationPresentationHandler();
+    }
+  }, []);
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
