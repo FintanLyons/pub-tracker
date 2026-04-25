@@ -11,8 +11,8 @@
     "web": "expo start --web",
     "build:android": "eas build --platform android --profile preview",
     "build:android:production": "eas build --platform android --profile production",
-    "build:ios": "eas build --platform ios --profile preview",
-    "build:ios:simulator": "eas build --platform ios --profile preview"
+    "build:ios": "eas build --platform ios --profile development",
+    "build:ios:simulator": "eas build --platform ios --profile development-simulator"
   },
   "dependencies": {
     "@maplibre/maplibre-react-native": "^11.0.0-beta.17",

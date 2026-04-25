@@ -18,6 +18,18 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 | Maps | MapLibre (bundled GeoJSON layers + markers) |
 | Build | Expo EAS |
 
+## Push notification scheduling (important)
+
+- On Supabase Free tier, scheduled invokes are handled via **`cron-job.org`** (external scheduler), not Supabase built-in scheduler.
+- Two Edge Functions are scheduled:
+  - `process-notification-queue` — every 1-2 minutes (drains `notification_outbox`)
+  - `monthly-friends-digest` — hourly (`0 * * * *`); function itself only sends on last day of month at 17:00 Europe/London
+- Scheduler requests must include header `x-cron-secret` with the same value as Edge secret `NOTIFICATION_CRON_SECRET`.
+- Function endpoints:
+  - `https://<project-ref>.supabase.co/functions/v1/process-notification-queue`
+  - `https://<project-ref>.supabase.co/functions/v1/monthly-friends-digest`
+- Required Edge secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EXPO_ACCESS_TOKEN`, `NOTIFICATION_CRON_SECRET`.
+
 ## Scoring system
 
 - Each visited pub → `pub.points` (default 10 if not set; higher for special pubs)

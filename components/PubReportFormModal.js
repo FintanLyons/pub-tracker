@@ -11,6 +11,7 @@ import {
   Dimensions,
   Alert,
   FlatList,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
@@ -386,6 +387,7 @@ export default function PubReportFormModal({
                   <MaterialCommunityIcons name={icon} size={22} color={COLORS.charcoal} />
                   <Text style={styles.switchLabel}>{name}</Text>
                   <Switch
+                    style={styles.featureSwitch}
                     value={!!features[name]}
                     onValueChange={(v) => setFeature(name, v)}
                     disabled={isSubmitting}
@@ -695,6 +697,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: COLORS.charcoal,
+  },
+  featureSwitch: {
+    ...(Platform.OS === 'ios'
+      ? {
+          transform: [{ scaleX: 0.9 }, { scaleY: 0.9 }],
+        }
+      : null),
   },
   photoRow: {
     flexDirection: 'row',

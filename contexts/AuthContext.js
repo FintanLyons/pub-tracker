@@ -78,36 +78,44 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
-      if (sessionError) {
-        const msg = String(sessionError.message || '');
-        if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
-          await supabase.auth.signOut({ scope: 'local' });
+      try {
+        if (sessionError) {
+          const msg = String(sessionError.message || '');
+          if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
+            await supabase.auth.signOut({ scope: 'local' });
+          }
+          setUser(null);
+          setLoading(false);
+          return;
         }
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-      if (session?.user) {
-        let authUser;
-        try {
-          const { data, error } = await supabase.auth.getUser();
-          if (error) {
+
+        if (session?.user) {
+          let authUser;
+          try {
+            const { data, error } = await supabase.auth.getUser();
+            if (error) {
+              await supabase.auth.signOut({ scope: 'local' });
+              setUser(null);
+              setLoading(false);
+              return;
+            }
+            authUser = data?.user;
+          } catch {
             await supabase.auth.signOut({ scope: 'local' });
             setUser(null);
             setLoading(false);
             return;
           }
-          authUser = data?.user;
-        } catch {
-          await supabase.auth.signOut({ scope: 'local' });
+          const profile = await resolveProfileForSession(session, authUser);
+          setUser(profile);
+          setLoading(false);
+        } else {
           setUser(null);
           setLoading(false);
-          return;
         }
-        const profile = await resolveProfileForSession(session, authUser);
-        setUser(profile);
-        setLoading(false);
-      } else {
+      } catch (err) {
+        // Startup should fail soft on transient network loss (common on fresh dev-build launch).
+        console.warn('AuthContext: failed to restore session/profile', err?.message ?? err);
         setUser(null);
         setLoading(false);
       }
@@ -126,12 +134,16 @@ export const AuthProvider = ({ children }) => {
         if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
           return;
         }
-        void resolveProfileForSession(session, null).then((profile) => {
-          if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
-            return;
-          }
-          setUser(profile);
-        });
+        void resolveProfileForSession(session, null)
+          .then((profile) => {
+            if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
+              return;
+            }
+            setUser(profile);
+          })
+          .catch((err) => {
+            console.warn('AuthContext: auth state profile refresh failed', err?.message ?? err);
+          });
       }, 0);
     });
 
