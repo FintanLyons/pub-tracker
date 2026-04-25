@@ -101,7 +101,16 @@ export function useMapInteraction({
 
   // ── Selection callbacks ───────────────────────────────────────
 
-  const closeCard = useCallback(() => setSelectedPub(null), []);
+  /**
+   * Ignore stale close callbacks from an older sheet animation if a new pub
+   * has already been selected.
+   */
+  const closeCard = useCallback((expectedPubId = null) => {
+    setSelectedPub((current) => {
+      if (!expectedPubId) return null;
+      return current?.id === expectedPubId ? null : current;
+    });
+  }, []);
 
   const selectPostcodeArea = useCallback((areaCode, updateSearch = true) => {
     if (!areaCode || typeof areaCode !== 'string') return;

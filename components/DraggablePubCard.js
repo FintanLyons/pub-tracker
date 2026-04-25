@@ -4,6 +4,7 @@ import {
   Text,
   Dimensions,
   Animated,
+  Easing,
   PanResponder,
   TouchableOpacity,
   StyleSheet,
@@ -294,7 +295,7 @@ export default function DraggablePubCard({
               currentPosition.current = currentCollapsedY;
             }
             if (targetY === currentHiddenY) {
-            onClose();
+              onClose(pub?.id);
             }
           }
         });
@@ -334,11 +335,10 @@ export default function DraggablePubCard({
       
       translateY.stopAnimation();
       
-      Animated.spring(translateY, {
+      Animated.timing(translateY, {
         toValue: COLLAPSED_Y,
-        velocity: 0, // No velocity to ensure exact positioning
-        tension: 120,
-        friction: 10,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: SHEET_USE_NATIVE_DRIVER,
       }).start(({ finished }) => {
         if (finished) {
@@ -363,6 +363,7 @@ export default function DraggablePubCard({
   }, [pub?.id]);
   
   const handleClose = () => {
+    const closingPubId = pub?.id;
     translateY.stopAnimation();
 
     Animated.spring(translateY, {
@@ -379,7 +380,7 @@ export default function DraggablePubCard({
       // swapped expanded → collapsed chrome immediately, unmounting the X you tapped and often
       // cancelling the press / making a second tap on the peek close feel necessary.
       updateIsExpanded(false);
-      onClose();
+      onClose(closingPubId);
     });
   };
 

@@ -25,8 +25,29 @@ import {
 } from '../services/ReviewService';
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 
-const openDirections = (lat, lon) => {
-  Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`);
+const openDirections = async (lat, lon) => {
+  const destination = `${lat},${lon}`;
+  const googleWebUrl = `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+  const appleMapsNativeUrl = `maps://?daddr=${destination}&dirflg=d`;
+  const appleMapsWebUrl = `https://maps.apple.com/?daddr=${destination}&dirflg=d`;
+
+  try {
+    if (Platform.OS === 'ios') {
+      // Always prefer Apple Maps on iOS to avoid Google web fallback.
+      await Linking.openURL(appleMapsNativeUrl);
+      return;
+    }
+
+    await Linking.openURL(googleWebUrl);
+  } catch {
+    if (Platform.OS === 'ios') {
+      // Keep iOS on Apple Maps even if maps:// fails.
+      Linking.openURL(appleMapsWebUrl).catch(() => {});
+      return;
+    }
+    // Last-resort fallback for non-iOS.
+    Linking.openURL(googleWebUrl).catch(() => {});
+  }
 };
 
 const openPhone = (phone) => {
@@ -314,7 +335,9 @@ export default function PubCardContent({
       <View style={styles.actionRow}>
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => openDirections(pub.lat, pub.lon)}
+          onPress={() => {
+            void openDirections(pub.lat, pub.lon);
+          }}
           activeOpacity={0.7}
         >
           <MaterialCommunityIcons name="directions" size={20} color="#FFFFFF" />

@@ -24,6 +24,7 @@ export default {
     slug: 'pub-tracker',
     version: '1.0.0',
     orientation: 'portrait',
+    // Keep iOS + Android launchers visually aligned by sharing the same base icon asset.
     icon: './assets/pub_icon.png',
     userInterfaceStyle: 'light',
     newArchEnabled: true,
@@ -77,8 +78,8 @@ export default {
       ...(googleServicesFile ? { googleServicesFile } : {}),
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
-        foregroundImage: './assets/logo.png',
-        backgroundColor: '#ffffff',
+        foregroundImage: './assets/pub_icon.png',
+        backgroundColor: '#F7F7F7',
       },
       package: androidPackage,
       permissions: [
