@@ -13,6 +13,7 @@ import {
   Animated,
   StyleSheet,
   Dimensions,
+  BackHandler,
 } from 'react-native';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import {
@@ -123,6 +124,7 @@ export default function MapScreen() {
     fitFeature,
     fitBoundsObject,
     centerOnPub,
+    currentLocation,
     postcodeAreaSummaries,
     refreshUserStats,
     navigation,
@@ -153,6 +155,7 @@ export default function MapScreen() {
     clearSearch,
     handleDistrictSuggestionPress,
     handlePubSuggestionPress,
+    dismissSearchSuggestions,
   } = interaction;
 
   // ── Memos (layer data + filtering) ────────────────────────────
@@ -251,6 +254,7 @@ export default function MapScreen() {
   // ── Sheet animation ───────────────────────────────────────────
 
   const [mapAreaHeight, setMapAreaHeight] = useState(Dimensions.get('window').height);
+  const [collapseSheetRequest, setCollapseSheetRequest] = useState(0);
 
   const sheetTranslateYRef = useRef(null);
   if (sheetTranslateYRef.current == null) {
@@ -271,6 +275,64 @@ export default function MapScreen() {
       sheetTranslateY.setValue(mapSheetMetrics.hiddenY);
     }
   }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
+
+  // Android back behavior on map:
+  // 1) if search suggestions are open, close them (or let system close keyboard first)
+  // 2) if pub sheet is open, step: expanded -> collapsed -> hidden
+  // 3) else if area/district/search is active, clear it and return to plain map
+  // 4) else fall through to default navigation/app behavior
+  useEffect(() => {
+    if (!isFocused) return undefined;
+    const onHardwareBackPress = () => {
+      if (showSuggestions) {
+        if (keyboardHeight > 0) {
+          return false;
+        }
+        dismissSearchSuggestions();
+        return true;
+      }
+
+      if (selectedPub) {
+        sheetTranslateY.stopAnimation((currentY) => {
+          const collapsedY = mapSheetMetrics.collapsedY;
+          const expandedThreshold = collapsedY - 24;
+          if (currentY <= expandedThreshold) {
+            setCollapseSheetRequest((current) => current + 1);
+            return;
+          }
+          closeCard(selectedPub.id);
+        });
+        return true;
+      }
+
+      const hasActiveSearchState = Boolean(
+        selectedPostcodeArea
+        || selectedDistrictName
+        || searchQuery.trim().length > 0,
+      );
+      if (hasActiveSearchState) {
+        clearSearch();
+        return true;
+      }
+
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
+    return () => sub.remove();
+  }, [
+    isFocused,
+    showSuggestions,
+    keyboardHeight,
+    dismissSearchSuggestions,
+    selectedPub,
+    mapSheetMetrics.collapsedY,
+    sheetTranslateY,
+    closeCard,
+    selectedPostcodeArea,
+    selectedDistrictName,
+    searchQuery,
+    clearSearch,
+  ]);
 
   const floatingControlsStyle = useMemo(() => {
     const { peek, collapsedY, hiddenY } = mapSheetMetrics;
@@ -548,6 +610,7 @@ export default function MapScreen() {
         pubSuggestions={pubSuggestions}
         onDistrictPress={handleDistrictSuggestionPress}
         onPubPress={handlePubSuggestionPress}
+        onDismiss={dismissSearchSuggestions}
         keyboardHeight={keyboardHeight}
         keyboardTop={keyboardTop}
       />
@@ -571,6 +634,7 @@ export default function MapScreen() {
         pub={selectedPub}
         containerHeight={mapAreaHeight}
         translateY={sheetTranslateY}
+        collapseRequest={collapseSheetRequest}
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
         onToggleFavorite={handleToggleFavorite}

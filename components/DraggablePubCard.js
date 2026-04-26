@@ -39,6 +39,7 @@ export default function DraggablePubCard({
   pub, 
   containerHeight,
   translateY,
+  collapseRequest = 0,
   onClose, 
   onToggleVisited,
   onToggleFavorite,
@@ -361,6 +362,28 @@ export default function DraggablePubCard({
       });
     }
   }, [pub?.id]);
+
+  // External request to collapse sheet should use the same internal state transition
+  // as gesture snaps (expanded chrome -> collapsed chrome + correct layout metrics).
+  useEffect(() => {
+    if (!pub || !isExpandedRef.current) return;
+    const currentCollapsedY = collapsedYRef.current;
+    translateY.stopAnimation();
+    updateIsExpanded(false);
+    updateScrollEnabled(false);
+    scrollY.current = 0;
+    Animated.timing(translateY, {
+      toValue: currentCollapsedY,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: SHEET_USE_NATIVE_DRIVER,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      translateY.setValue(currentCollapsedY);
+      dragStartY.current = currentCollapsedY;
+      currentPosition.current = currentCollapsedY;
+    });
+  }, [collapseRequest, pub, translateY, updateIsExpanded, updateScrollEnabled]);
   
   const handleClose = () => {
     const closingPubId = pub?.id;
