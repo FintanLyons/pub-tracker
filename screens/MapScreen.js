@@ -207,10 +207,16 @@ export default function MapScreen() {
   ]);
 
   // Deselect pub when it falls outside the active filter set.
+  // Use functional setState + String(id) so a strict id mismatch (e.g. map feature vs row type)
+  // cannot clear the sheet after an in-place update like toggling visited.
   useEffect(() => {
-    if (!selectedPub) return;
-    if (!filteredPubs.some((pub) => pub.id === selectedPub.id)) setSelectedPub(null);
-  }, [filteredPubs, selectedPub, setSelectedPub]);
+    setSelectedPub((current) => {
+      if (!current?.id) return current;
+      const idStr = String(current.id);
+      if (!filteredPubs.some((pub) => String(pub.id) === idStr)) return null;
+      return current;
+    });
+  }, [filteredPubs, setSelectedPub]);
 
   const pubFeatureCollection = useMemo(
     () => buildPubFeatureCollection(filteredPubs),

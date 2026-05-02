@@ -48,6 +48,7 @@ async function uploadReportPhotoUris(imageUris) {
  * @param {string} [params.history] Pub history / long narrative (card history; falls back from description in UI)
  * @param {Record<string, boolean>|null} [params.features]
  * @param {string[]} [params.imageUris] Local file URIs from image picker
+ * @param {boolean|null|undefined} [params.stillOperating] pub_correction only: still trading vs permanently closed
  */
 export async function submitPubReport({
   reportType,
@@ -63,6 +64,7 @@ export async function submitPubReport({
   history,
   features,
   imageUris = [],
+  stillOperating,
 }) {
   const {
     data: { session },
@@ -95,6 +97,10 @@ export async function submitPubReport({
     history: emptyToNull(history),
     features_snapshot: features && Object.keys(features).length ? features : null,
     photo_urls: photo_urls?.length ? photo_urls : null,
+    still_operating:
+      reportType === 'pub_correction' && typeof stillOperating === 'boolean'
+        ? stillOperating
+        : null,
   };
 
   const { data, error } = await supabase.from('reports').insert(row).select();

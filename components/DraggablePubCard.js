@@ -90,7 +90,12 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  
+  /** PanResponder is created once; keep latest pub id for onClose so we never call onClose(undefined). */
+  const pubIdRef = useRef(pub?.id);
+  useEffect(() => {
+    pubIdRef.current = pub?.id;
+  }, [pub?.id]);
+
   const updateIsExpanded = useCallback((value) => {
     if (isExpandedRef.current !== value) {
       isExpandedRef.current = value;
@@ -296,7 +301,7 @@ export default function DraggablePubCard({
               currentPosition.current = currentCollapsedY;
             }
             if (targetY === currentHiddenY) {
-              onClose(pub?.id);
+              onClose(pubIdRef.current);
             }
           }
         });
@@ -383,7 +388,10 @@ export default function DraggablePubCard({
       dragStartY.current = currentCollapsedY;
       currentPosition.current = currentCollapsedY;
     });
-  }, [collapseRequest, pub, translateY, updateIsExpanded, updateScrollEnabled]);
+  // `pub` intentionally excluded — using `pub?.id` so property-only changes (isVisited, isFavorite)
+  // do not re-trigger this collapse effect; only a different pub identity should.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseRequest, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
   
   const handleClose = () => {
     const closingPubId = pub?.id;
@@ -423,6 +431,7 @@ export default function DraggablePubCard({
         history: payload.history,
         features: payload.features,
         imageUris: payload.imageUris,
+        stillOperating: payload.stillOperating,
       });
     },
     [pub]

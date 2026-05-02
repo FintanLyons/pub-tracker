@@ -102,6 +102,8 @@ export default function PubReportFormModal({
   const [imageUris, setImageUris] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  /** pub_correction only: true = still operating, false = permanently closed (not opening hours). */
+  const [pubStillOpen, setPubStillOpen] = useState(true);
 
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const modalW = Math.min(screenW - 24, 440);
@@ -136,6 +138,7 @@ export default function PubReportFormModal({
       setHistory('');
       setFeatures(defaultFeatureSwitchState());
     }
+    setPubStillOpen(true);
     setImageUris([]);
     setErrorMessage(null);
     setFoundedPickerVisible(false);
@@ -219,6 +222,7 @@ export default function PubReportFormModal({
         history: history.trim(),
         features,
         imageUris,
+        stillOperating: mode === 'pub_correction' ? pubStillOpen : undefined,
       });
       onClose?.();
       onSuccess?.();
@@ -245,6 +249,8 @@ export default function PubReportFormModal({
     history,
     features,
     imageUris,
+    mode,
+    pubStillOpen,
   ]);
 
   const title = mode === 'missing_pub' ? 'Report missing pub' : 'Report incorrect information';
@@ -289,6 +295,53 @@ export default function PubReportFormModal({
               showsVerticalScrollIndicator
               automaticallyAdjustKeyboardInsets
             >
+              {mode === 'pub_correction' ? (
+                <View style={styles.operatingBlock}>
+                  <Text style={styles.operatingTitle}>Is this pub still operating?</Text>
+                  <Text style={styles.operatingHint}>
+                    {"Permanent closure — not today's opening hours."}
+                  </Text>
+                  <View style={styles.operatingRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.operatingButton,
+                        pubStillOpen && styles.operatingButtonSelected,
+                      ]}
+                      onPress={() => setPubStillOpen(true)}
+                      disabled={isSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.operatingButtonText,
+                          pubStillOpen && styles.operatingButtonTextSelected,
+                        ]}
+                      >
+                        Still open
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.operatingButton,
+                        !pubStillOpen && styles.operatingButtonSelected,
+                      ]}
+                      onPress={() => setPubStillOpen(false)}
+                      disabled={isSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.operatingButtonText,
+                          !pubStillOpen && styles.operatingButtonTextSelected,
+                        ]}
+                      >
+                        Permanently closed
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
               <Text style={styles.label}>Pub name *</Text>
               <TextInput
                 style={styles.textInput}
@@ -571,6 +624,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.mediumGrey,
     marginBottom: 14,
+  },
+  operatingBlock: {
+    marginBottom: 16,
+  },
+  operatingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.charcoal,
+    marginBottom: 6,
+  },
+  operatingHint: {
+    fontSize: 12,
+    color: COLORS.mediumGrey,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  operatingRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  operatingButton: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: COLORS.lightGrey,
+    backgroundColor: '#FAFAFA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  operatingButtonSelected: {
+    borderColor: COLORS.amber,
+    backgroundColor: '#FFF9E8',
+  },
+  operatingButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.charcoal,
+    textAlign: 'center',
+  },
+  operatingButtonTextSelected: {
+    color: COLORS.charcoal,
   },
   scroll: {
     flex: 1,

@@ -291,9 +291,10 @@ export function useMapInteraction({
   const handlePubPress = useCallback((event) => {
     hasUserInteractedRef.current = true;
     const features = Array.isArray(event?.nativeEvent?.features) ? event.nativeEvent.features : [];
-    const pubFeature = features.find((f) => f?.properties?.pubId);
+    const pubFeature = features.find((f) => f?.properties?.pubId != null);
     if (!pubFeature) return;
-    const pub = allPubs.find((item) => item.id === pubFeature.properties?.pubId);
+    const pressedId = String(pubFeature.properties.pubId);
+    const pub = allPubs.find((item) => String(item.id) === pressedId);
     if (pub) setSelectedPub(pub);
   }, [allPubs, hasUserInteractedRef]);
 
