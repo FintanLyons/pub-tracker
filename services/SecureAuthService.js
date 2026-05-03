@@ -1,7 +1,12 @@
+import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 import { clearVisitedFavoriteCache } from './PubService';
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
+
+/** Where the email confirmation link opens (must match Supabase Dashboard → Auth → Redirect URLs). */
+const EMAIL_CONFIRM_REDIRECT_TO =
+  process.env.EXPO_PUBLIC_EMAIL_CONFIRM_REDIRECT_URL ?? 'https://fintanlyons.com/pub';
 
 /** Auth user_metadata key — false = must complete ChooseUsernameScreen (set on new signup). */
 const META_APP_USERNAME_CHOSEN = 'app_username_chosen';
@@ -78,6 +83,9 @@ export const registerUserSecure = async (email, password) => {
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO,
+      },
     });
 
     if (signUpError) {
@@ -326,6 +334,83 @@ export const deleteAccountSecure = async () => {
   } catch {
     // Expected: JWT user no longer exists.
   }
+};
+
+/**
+ * Native Sign in with Apple (iOS only). Requires Supabase Apple provider + bundle ID in dashboard.
+ * @returns {Promise<{ user: object, session: object }>}
+ */
+export const appleSignInSecure = async () => {
+  if (Platform.OS !== 'ios') {
+    throw new Error('Sign in with Apple is only available on iOS.');
+  }
+
+  const AppleAuthentication = require('expo-apple-authentication');
+
+  const available = await AppleAuthentication.isAvailableAsync();
+  if (!available) {
+    throw new Error('Sign in with Apple is not available on this device.');
+  }
+
+  clearVisitedFavoriteCache();
+
+  let credential;
+  try {
+    credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+  } catch (e) {
+    if (e?.code === 'ERR_REQUEST_CANCELED') {
+      const err = new Error('ERR_REQUEST_CANCELED');
+      err.code = 'ERR_REQUEST_CANCELED';
+      throw err;
+    }
+    throw e;
+  }
+
+  if (!credential?.identityToken) {
+    throw new Error('Apple Sign-In failed — no identity token returned.');
+  }
+
+  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
+    provider: 'apple',
+    token: credential.identityToken,
+  });
+
+  if (signInError) throw signInError;
+
+  const authUser = authData.user;
+
+  let { data: users } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .limit(1);
+
+  if (!users || users.length === 0) {
+    await ensureUserStub(authUser.id, authUser.email);
+  }
+
+  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
+  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
+  if (isBrandNewAuthUser) {
+    await clearUsernameForInAppChoice(authUser.id);
+    await setAuthUsernamePending();
+  }
+
+  const { data: user, error: fetchError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', authUser.id)
+    .single();
+  if (fetchError || !user) {
+    throw new Error('Unable to set up your account. Please contact support.');
+  }
+
+  return { user, session: authData.session };
 };
 
 export const googleSignInSecure = async () => {

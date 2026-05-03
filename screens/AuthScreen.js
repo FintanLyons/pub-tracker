@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,16 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import {
   registerUserSecure,
   loginUserSecure,
   googleSignInSecure,
+  appleSignInSecure,
 } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
@@ -29,8 +32,26 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (Platform.OS !== 'ios') return undefined;
+    (async () => {
+      try {
+        const ok = await AppleAuthentication.isAvailableAsync();
+        if (!cancelled) setAppleAuthAvailable(ok);
+      } catch {
+        if (!cancelled) setAppleAuthAvailable(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const validateEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 
@@ -113,6 +134,27 @@ export default function AuthScreen({ onAuthSuccess }) {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    if (appleLoading || loading || googleLoading) return;
+    try {
+      setAppleLoading(true);
+      await appleSignInSecure();
+      await onAuthSuccess();
+    } catch (error) {
+      const msg = error.message || '';
+      if (
+        msg.includes('ERR_REQUEST_CANCELED') ||
+        error?.code === 'ERR_REQUEST_CANCELED'
+      ) {
+        return;
+      }
+      console.error('Apple Sign-In error:', error);
+      Alert.alert('Error', 'Sign in with Apple failed. Please try again.');
+    } finally {
+      setAppleLoading(false);
     }
   };
 
@@ -234,7 +276,7 @@ export default function AuthScreen({ onAuthSuccess }) {
               <TouchableOpacity
                 style={[styles.primaryBtn, loading && styles.btnDisabled]}
                 onPress={handleAuth}
-                disabled={loading || googleLoading}
+                disabled={loading || googleLoading || appleLoading}
               >
                 {loading
                   ? <ActivityIndicator size="small" color="#fff" />
@@ -248,20 +290,46 @@ export default function AuthScreen({ onAuthSuccess }) {
                 <View style={styles.dividerLine} />
               </View>
 
-              <TouchableOpacity
-                style={[styles.googleBtn, googleLoading && styles.btnDisabled]}
-                onPress={handleGoogleSignIn}
-                disabled={loading || googleLoading}
-              >
+              {Platform.OS === 'ios' && appleAuthAvailable ? (
+                <View style={styles.appleBtnWrap}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                    cornerRadius={10}
+                    style={styles.appleBtn}
+                    onPress={handleAppleSignIn}
+                  />
+                  {appleLoading ? (
+                    <View style={styles.appleBtnOverlay} pointerEvents="auto">
+                      <ActivityIndicator size="small" color={COLORS.darkGrey} />
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <View style={styles.googleBtnWrap}>
+                <TouchableOpacity
+                  style={[styles.googleBtn, (loading || googleLoading || appleLoading) && styles.btnDisabled]}
+                  onPress={handleGoogleSignIn}
+                  disabled={loading || googleLoading || appleLoading}
+                >
+                  <View style={styles.googleBtnContent}>
+                    <View style={styles.googleLogoWrap}>
+                      <Image
+                        source={require('../assets/google_logo.png')}
+                        style={styles.googleLogo}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <Text style={styles.googleBtnText}>Sign in with Google</Text>
+                  </View>
+                </TouchableOpacity>
                 {googleLoading ? (
-                  <ActivityIndicator size="small" color={COLORS.darkGrey} />
-                ) : (
-                  <>
-                    <GoogleIcon />
-                    <Text style={styles.googleBtnText}>Continue with Google</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                  <View style={styles.googleBtnOverlay} pointerEvents="auto">
+                    <ActivityIndicator size="small" color={COLORS.darkGrey} />
+                  </View>
+                ) : null}
+              </View>
             </View>
 
             <TouchableOpacity style={styles.switchRow} onPress={switchMode}>
@@ -274,14 +342,6 @@ export default function AuthScreen({ onAuthSuccess }) {
         </KeyboardAvoidingView>
       </SafeAreaView>
     </SafeAreaProvider>
-  );
-}
-
-function GoogleIcon() {
-  return (
-    <View style={styles.googleIconContainer}>
-      <Text style={styles.googleIconText}>G</Text>
-    </View>
   );
 }
 
@@ -412,40 +472,66 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  googleBtn: {
-    flexDirection: 'row',
+  appleBtnWrap: {
+    position: 'relative',
+    width: '100%',
+    minHeight: 50,
+  },
+  appleBtn: {
+    width: '100%',
+    height: 50,
+  },
+  appleBtnOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
     borderRadius: 10,
-    paddingVertical: 13,
+  },
+
+  googleBtnWrap: {
+    position: 'relative',
+    width: '100%',
+    minHeight: 50,
+  },
+  googleBtn: {
+    width: '100%',
+    height: 50,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#E0E0E0',
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  googleIconContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 2,
-    backgroundColor: '#4285F4',
-    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
   },
-  googleIconText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 14,
+  googleBtnContent: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  googleLogoWrap: {
+    width: 20,
+    height: 20,
+    overflow: 'hidden',
+    borderRadius: 2,
+  },
+  googleLogo: {
+    width: 28,
+    height: 28,
+    marginLeft: -4,
+    marginTop: -4,
   },
   googleBtnText: {
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.darkGrey,
+  },
+  googleBtnOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
+    borderRadius: 10,
   },
 
   switchRow: {

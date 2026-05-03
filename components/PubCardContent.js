@@ -272,6 +272,8 @@ export default function PubCardContent({
       bounces={false}
       directionalLockEnabled={true}
       nestedScrollEnabled={Platform.OS === 'android'}
+      removeClippedSubviews={Platform.OS === 'android'}
+      overScrollMode={Platform.OS === 'android' ? 'never' : undefined}
       ref={scrollRef}
     >
       {/* ── Name row ─────────────────────────────────────────────────────── */}

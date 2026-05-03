@@ -649,6 +649,7 @@ export default function MapScreen() {
 
       <Animated.View
         pointerEvents="box-none"
+        renderToHardwareTextureAndroid
         style={[screenStyles.floatingLeft, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
         <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={openMissingPubModal}>
@@ -658,6 +659,7 @@ export default function MapScreen() {
 
       <Animated.View
         pointerEvents="box-none"
+        renderToHardwareTextureAndroid
         style={[screenStyles.floatingRight, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
         <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={handleCurrentLocation}>

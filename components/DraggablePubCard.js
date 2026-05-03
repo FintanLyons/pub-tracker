@@ -447,18 +447,28 @@ export default function DraggablePubCard({
   return (
     <Animated.View
       collapsable={false}
+      // Android: cache this subtree as a GPU texture while translateY updates (cheap compositing).
+      // iOS: keep transform on this layer with minimal non-animated props for Core Animation.
+      renderToHardwareTextureAndroid
       style={[
-        styles.cardContainer,
+        styles.cardSheet,
         {
           height: fullHeight,
-          paddingTop: isExpanded ? expandedHeaderTop : 12,
-          borderTopLeftRadius: isExpanded ? 0 : 20,
-          borderTopRightRadius: isExpanded ? 0 : 20,
           transform: [{ translateY }],
         },
       ]}
       {...panResponder.panHandlers}
     >
+      <View
+        style={[
+          styles.cardChrome,
+          {
+            paddingTop: isExpanded ? expandedHeaderTop : 12,
+            borderTopLeftRadius: isExpanded ? 0 : 20,
+            borderTopRightRadius: isExpanded ? 0 : 20,
+          },
+        ]}
+      >
       {/* Report, Favorite, Visited and Close buttons - positioned differently based on state */}
       {isExpanded ? (
         <>
@@ -596,28 +606,37 @@ export default function DraggablePubCard({
           )
         }
       />
+      </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  cardContainer: {
+  /** Outer sheet: transform + size only — avoids mixing layout props with GPU translate. */
+  cardSheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 1100,
+  },
+  /** Inner chrome: shadows / elevation stay off the transform layer for better compositing. */
+  cardChrome: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 12,
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    ...Platform.select({
+      android: { elevation: 8 },
+      default: {},
+    }),
     paddingHorizontal: 16,
     paddingBottom: 16,
     overflow: 'hidden',
-    zIndex: 1100,
   },
   cardHandleContainer: {
     position: 'absolute',
@@ -646,7 +665,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   reportButtonTop: {
     position: 'absolute',
@@ -659,7 +678,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   favoriteButton: {
     position: 'absolute',
@@ -673,7 +692,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   favoriteButtonTop: {
     position: 'absolute',
@@ -686,7 +705,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   closeButton: {
     position: 'absolute',
@@ -700,7 +719,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   closeButtonTop: {
     position: 'absolute',
@@ -713,7 +732,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   draggableOverlay: {
     position: 'absolute',
@@ -768,7 +787,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
     minHeight: 40, // Ensure minimum height
     justifyContent: 'center', // Center content vertically
     alignItems: 'center', // Center content horizontally

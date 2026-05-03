@@ -34,6 +34,7 @@ export default {
       backgroundColor: '#F7F7F7',
     },
     plugins: [
+      'expo-apple-authentication',
       '@maplibre/maplibre-react-native',
       [
         'expo-location',
@@ -63,6 +64,7 @@ export default {
     ],
     ios: {
       supportsTablet: true,
+      usesAppleSignIn: true,
       bundleIdentifier: iosBundleId,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: `${APP_DISPLAY_NAME} needs your location to show pubs near you.`,
