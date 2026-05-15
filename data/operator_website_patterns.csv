@@ -1,0 +1,29 @@
+pattern_type,pattern_key,operator,labeled_count,purity,source
+domain,greeneking.co.uk,Greene King,118,0.99,learned
+host,greeneking.co.uk,Greene King,118,0.99,learned
+domain,jdwetherspoon.com,Wetherspoon,57,0.98,learned
+host,jdwetherspoon.com,Wetherspoon,57,0.98,learned
+domain,nicholsonspubs.co.uk,Nicholson's,46,1.00,learned
+host,nicholsonspubs.co.uk,Nicholson's,46,1.00,learned
+domain,craftunionpubs.com,Stonegate,41,0.98,learned
+host,craftunionpubs.com,Stonegate,40,1.00,learned
+domain,urbanpubsandbars.com,Urban Pubs & Bars,38,0.87,learned
+host,urbanpubsandbars.com,Urban Pubs & Bars,38,0.87,learned
+domain,socialpubandkitchen.co.uk,Stonegate,20,1.00,learned
+host,socialpubandkitchen.co.uk,Stonegate,20,1.00,learned
+domain,greatlocalpubs.co.uk,Stonegate,10,1.00,learned
+host,greatlocalpubs.co.uk,Stonegate,10,1.00,learned
+domain,brewdog.com,BrewDog,9,1.00,learned
+host,brewdog.com,BrewDog,9,1.00,learned
+domain,mcmullens.co.uk,McMullen's,7,0.29,known_rule
+domain,emberinns.co.uk,Ember Inns,5,1.00,learned
+host,emberinns.co.uk,Ember Inns,5,1.00,learned
+domain,oneills.co.uk,O'Neill's,4,1.00,learned
+host,oneills.co.uk,O'Neill's,4,1.00,learned
+domain,anticlondon.com,Antic London,3,1.00,learned
+domain,youngs.co.uk,Young's,3,0.67,known_rule
+host,anticlondon.com,Antic London,3,1.00,learned
+domain,davy.co.uk,Davy's,2,1.00,known_rule
+domain,thechaptercollection.co.uk,The Chapter Collection,2,0.50,known_rule
+domain,samuelsmithsbrewery.co.uk,Samuel Smith,1,1.00,known_rule
+domain,shepherdneame.co.uk,Shepherd Neame,1,1.00,known_rule

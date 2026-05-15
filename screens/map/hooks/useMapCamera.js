@@ -101,15 +101,6 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
     });
   }, []);
 
-  const centerOnPub = useCallback((pub) => {
-    if (!cameraRef.current || !Number.isFinite(pub?.lon) || !Number.isFinite(pub?.lat)) return;
-    cameraRef.current.easeTo({
-      center: [pub.lon, pub.lat],
-      zoom: 15.2,
-      duration: 700,
-    });
-  }, []);
-
   const handleCurrentLocation = useCallback(async () => {
     try {
       hasUserInteractedRef.current = true;
@@ -202,7 +193,6 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
     currentLocationShape,
     fitFeature,
     fitBoundsObject,
-    centerOnPub,
     handleCurrentLocation,
   };
 }

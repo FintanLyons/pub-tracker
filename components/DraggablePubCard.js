@@ -25,6 +25,10 @@ import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
+/** Sheet drag must be clearly vertical — avoids stealing horizontal photo swipes. */
+const SHEET_DRAG_MIN_DY = 16;
+const SHEET_DRAG_AXIS_RATIO = 2.0;
+const SHEET_CAPTURE_MIN_DY = 10;
 /** Space between safe-area inset (status bar / notch) and the expanded header row */
 const EXPANDED_TOP_GAP = 8;
 /** Approx. height of expanded visited + icon row (minHeight + vertical padding) */
@@ -39,7 +43,9 @@ export default function DraggablePubCard({
   pub, 
   containerHeight,
   translateY,
-  onClose, 
+  collapseRequest = 0,
+  onCloseStart,
+  onClose,
   onToggleVisited,
   onToggleFavorite,
   getImageSource
@@ -89,7 +95,16 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  
+  /** PanResponder is created once; keep latest pub id for close callbacks. */
+  const pubIdRef = useRef(pub?.id);
+  const onCloseStartRef = useRef(onCloseStart);
+  useEffect(() => {
+    pubIdRef.current = pub?.id;
+  }, [pub?.id]);
+  useEffect(() => {
+    onCloseStartRef.current = onCloseStart;
+  }, [onCloseStart]);
+
   const updateIsExpanded = useCallback((value) => {
     if (isExpandedRef.current !== value) {
       isExpandedRef.current = value;
@@ -141,10 +156,15 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        // When expanded, at top, and dragging down - intercept before ScrollView claims it
-        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
-        const isDraggingDown = gestureState.dy > 5;
-        const isDraggingUp = gestureState.dy < -5;
+        const ax = Math.abs(gestureState.dx);
+        const ay = Math.abs(gestureState.dy);
+        const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
+
+        if (isHorizontalDominant) return false;
+
+        const isDraggingVertically = ay > SHEET_CAPTURE_MIN_DY;
+        const isDraggingDown = gestureState.dy > SHEET_CAPTURE_MIN_DY;
+        const isDraggingUp = gestureState.dy < -SHEET_CAPTURE_MIN_DY;
         const isAtTop = scrollY.current <= TOP_THRESHOLD;
 
         if (
@@ -171,16 +191,22 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        const isDraggingVertically = Math.abs(gestureState.dy) > 10;
+        const ax = Math.abs(gestureState.dx);
+        const ay = Math.abs(gestureState.dy);
+        const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
+
+        if (isHorizontalDominant) return false;
+
+        const isDraggingVertically = ay > SHEET_DRAG_MIN_DY;
         if (isExpandedRef.current) {
           const isAtTop = scrollY.current <= TOP_THRESHOLD;
-          const isDraggingDown = gestureState.dy > 10;
+          const isDraggingDown = gestureState.dy > SHEET_DRAG_MIN_DY;
           if (isDraggingVertically && isDraggingDown && isAtTop) {
             updateScrollEnabled(false);
             return true;
           }
 
-          const isDraggingUp = gestureState.dy < -6;
+          const isDraggingUp = gestureState.dy < -SHEET_DRAG_MIN_DY;
           if (isDraggingVertically && isDraggingUp && !scrollEnabledRef.current) {
             updateScrollEnabled(true);
           }
@@ -188,7 +214,7 @@ export default function DraggablePubCard({
         }
 
         // Handle drags when collapsed
-        const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        const isMoreVerticalThanHorizontal = ay > ax * SHEET_DRAG_AXIS_RATIO;
         return isDraggingVertically && isMoreVerticalThanHorizontal;
       },
       
@@ -277,6 +303,10 @@ export default function DraggablePubCard({
           scrollY.current = 0;
         }
         
+        if (targetY === currentHiddenY) {
+          onCloseStartRef.current?.(pubIdRef.current);
+        }
+
         // Smoother, faster animation
         // When snapping to COLLAPSED_Y, don't use velocity to ensure exact positioning
         const useVelocity = targetY !== currentCollapsedY;
@@ -295,7 +325,7 @@ export default function DraggablePubCard({
               currentPosition.current = currentCollapsedY;
             }
             if (targetY === currentHiddenY) {
-              onClose(pub?.id);
+              onClose(pubIdRef.current);
             }
           }
         });
@@ -361,9 +391,35 @@ export default function DraggablePubCard({
       });
     }
   }, [pub?.id]);
+
+  // External request to collapse sheet should use the same internal state transition
+  // as gesture snaps (expanded chrome -> collapsed chrome + correct layout metrics).
+  useEffect(() => {
+    if (!pub || !isExpandedRef.current) return;
+    const currentCollapsedY = collapsedYRef.current;
+    translateY.stopAnimation();
+    updateIsExpanded(false);
+    updateScrollEnabled(false);
+    scrollY.current = 0;
+    Animated.timing(translateY, {
+      toValue: currentCollapsedY,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: SHEET_USE_NATIVE_DRIVER,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      translateY.setValue(currentCollapsedY);
+      dragStartY.current = currentCollapsedY;
+      currentPosition.current = currentCollapsedY;
+    });
+  // `pub` intentionally excluded — using `pub?.id` so property-only changes (isVisited, isFavorite)
+  // do not re-trigger this collapse effect; only a different pub identity should.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapseRequest, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
   
   const handleClose = () => {
     const closingPubId = pub?.id;
+    onCloseStartRef.current?.(closingPubId);
     translateY.stopAnimation();
 
     Animated.spring(translateY, {
@@ -400,6 +456,7 @@ export default function DraggablePubCard({
         history: payload.history,
         features: payload.features,
         imageUris: payload.imageUris,
+        stillOperating: payload.stillOperating,
       });
     },
     [pub]
@@ -415,18 +472,28 @@ export default function DraggablePubCard({
   return (
     <Animated.View
       collapsable={false}
+      // Android: cache this subtree as a GPU texture while translateY updates (cheap compositing).
+      // iOS: keep transform on this layer with minimal non-animated props for Core Animation.
+      renderToHardwareTextureAndroid
       style={[
-        styles.cardContainer,
+        styles.cardSheet,
         {
           height: fullHeight,
-          paddingTop: isExpanded ? expandedHeaderTop : 12,
-          borderTopLeftRadius: isExpanded ? 0 : 20,
-          borderTopRightRadius: isExpanded ? 0 : 20,
           transform: [{ translateY }],
         },
       ]}
       {...panResponder.panHandlers}
     >
+      <View
+        style={[
+          styles.cardChrome,
+          {
+            paddingTop: isExpanded ? expandedHeaderTop : 12,
+            borderTopLeftRadius: isExpanded ? 0 : 20,
+            borderTopRightRadius: isExpanded ? 0 : 20,
+          },
+        ]}
+      >
       {/* Report, Favorite, Visited and Close buttons - positioned differently based on state */}
       {isExpanded ? (
         <>
@@ -564,28 +631,37 @@ export default function DraggablePubCard({
           )
         }
       />
+      </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  cardContainer: {
+  /** Outer sheet: transform + size only — avoids mixing layout props with GPU translate. */
+  cardSheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 1100,
+  },
+  /** Inner chrome: shadows / elevation stay off the transform layer for better compositing. */
+  cardChrome: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    elevation: 12,
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    ...Platform.select({
+      android: { elevation: 8 },
+      default: {},
+    }),
     paddingHorizontal: 16,
     paddingBottom: 16,
     overflow: 'hidden',
-    zIndex: 1100,
   },
   cardHandleContainer: {
     position: 'absolute',
@@ -614,7 +690,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   reportButtonTop: {
     position: 'absolute',
@@ -627,7 +703,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   favoriteButton: {
     position: 'absolute',
@@ -641,7 +717,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   favoriteButtonTop: {
     position: 'absolute',
@@ -654,7 +730,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   closeButton: {
     position: 'absolute',
@@ -668,7 +744,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   closeButtonTop: {
     position: 'absolute',
@@ -681,7 +757,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
   },
   draggableOverlay: {
     position: 'absolute',
@@ -736,7 +812,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: Platform.OS === 'android' ? 3 : 0,
     minHeight: 40, // Ensure minimum height
     justifyContent: 'center', // Center content vertically
     alignItems: 'center', // Center content horizontally

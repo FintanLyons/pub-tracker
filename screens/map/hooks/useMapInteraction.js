@@ -4,6 +4,7 @@ import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { searchPubsByName, togglePubFavorite, togglePubVisited } from '../../../services/PubService';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../../utils/postcodeDistrictDisplayNames';
+import { distanceMeters } from '../../../utils/geo';
 import { getFeatureBounds } from '../layerUtils';
 import {
   boundsContain,
@@ -33,13 +34,15 @@ export function useMapInteraction({
   hasUserInteractedRef,
   fitFeature,
   fitBoundsObject,
-  centerOnPub,
   postcodeAreaSummaries,
+  currentLocation,
   refreshUserStats,
   navigation,
   route,
 }) {
   const [selectedPub, setSelectedPub] = useState(null);
+  /** Map marker highlight; cleared as soon as dismiss starts (before sheet animation ends). */
+  const [mapHighlightedPubId, setMapHighlightedPubId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPostcodeArea, setSelectedPostcodeArea] = useState(null);
   const [selectedDistrictName, setSelectedDistrictName] = useState(null);
@@ -53,6 +56,47 @@ export function useMapInteraction({
   const processedDistrictRef = useRef(null);
   const processedPostcodeAreaRef = useRef(null);
   const pubSearchTimeoutRef = useRef(null);
+  const normalizeSearchText = useCallback((value) => String(value || '').trim().toLowerCase(), []);
+  const removeLeadingThe = useCallback((value) => value.replace(/^the\s+/i, '').trim(), []);
+  const getQueryVariants = useCallback((value) => {
+    const normalized = normalizeSearchText(value);
+    const withoutLeadingThe = removeLeadingThe(normalized);
+    return { normalized, withoutLeadingThe };
+  }, [normalizeSearchText, removeLeadingThe]);
+  const getPubMatchRank = useCallback((pubName, rawQuery) => {
+    const { normalized: query, withoutLeadingThe: queryNoThe } = getQueryVariants(rawQuery);
+    if (!query) return null;
+    const { normalized: name, withoutLeadingThe: nameNoThe } = getQueryVariants(pubName);
+    const pairs = [
+      [query, name],
+      [queryNoThe, name],
+      [query, nameNoThe],
+      [queryNoThe, nameNoThe],
+    ].filter(([q, n]) => q.length > 0 && n.length > 0);
+
+    for (const [q, n] of pairs) {
+      if (n === q) return 0; // exact
+    }
+    for (const [q, n] of pairs) {
+      if (n.startsWith(q)) return 1; // prefix
+    }
+    for (const [q, n] of pairs) {
+      if (n.includes(q)) return 2; // contains
+    }
+    return null;
+  }, [getQueryVariants]);
+  const rankPubsForQuery = useCallback((pubs, rawQuery, limit = 8) => {
+    const ranked = (Array.isArray(pubs) ? pubs : [])
+      .map((pub) => ({ pub, rank: getPubMatchRank(pub?.name, rawQuery) }))
+      .filter((item) => item.rank !== null)
+      .sort((a, b) => {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        return String(a.pub?.name || '').localeCompare(String(b.pub?.name || ''));
+      })
+      .slice(0, limit)
+      .map((item) => item.pub);
+    return ranked;
+  }, [getPubMatchRank]);
 
   // ── Derived data ──────────────────────────────────────────────
 
@@ -62,9 +106,10 @@ export function useMapInteraction({
   );
 
   const allDistrictNames = useMemo(
-    () => (postcodeDistrictGeojson.features || [])
+    () => Array.from(new Set((postcodeDistrictGeojson.features || [])
       .map((feature) => feature?.properties?.name)
       .filter(Boolean)
+      .map((name) => String(name).trim())))
       .sort((a, b) => a.localeCompare(b)),
     [],
   );
@@ -81,7 +126,29 @@ export function useMapInteraction({
   const districtSuggestions = useMemo(() => {
     const toItems = (codes) =>
       codes.map((code) => ({ code, label: formatDistrictWithCode(code) }));
-    if (!searchQuery.trim()) return toItems(allDistrictNames.slice(0, 4));
+    const hasLocation =
+      Number.isFinite(currentLocation?.latitude) && Number.isFinite(currentLocation?.longitude);
+    if (!searchQuery.trim()) {
+      if (!hasLocation) return toItems(allDistrictNames.slice(0, 4));
+      const nearest = allDistrictNames
+        .map((code) => {
+          const feature = findFeatureByName(postcodeDistrictGeojson, code);
+          const bounds = feature ? getFeatureBounds(feature) : null;
+          if (!bounds) return null;
+          const [west, south, east, north] = bounds;
+          const center = { latitude: (north + south) / 2, longitude: (east + west) / 2 };
+          return {
+            code,
+            distance: distanceMeters(currentLocation, center),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 4)
+        .map((item) => item.code);
+      if (nearest.length > 0) return toItems(nearest);
+      return toItems(allDistrictNames.slice(0, 4));
+    }
     const query = searchQuery.trim().toLowerCase();
     const matched = allDistrictNames.filter((name) => {
       const codeHit = name.toLowerCase().includes(query);
@@ -89,7 +156,7 @@ export function useMapInteraction({
       return codeHit || labelHit;
     });
     return toItems(matched.slice(0, 4));
-  }, [allDistrictNames, searchQuery]);
+  }, [allDistrictNames, currentLocation, searchQuery]);
 
   const getSummaryBoundsForPostcodeArea = useCallback((areaCode) => {
     if (!areaCode || !Array.isArray(postcodeAreaSummaries)) return null;
@@ -105,6 +172,13 @@ export function useMapInteraction({
    * Ignore stale close callbacks from an older sheet animation if a new pub
    * has already been selected.
    */
+  const clearMapHighlight = useCallback((expectedPubId = null) => {
+    setMapHighlightedPubId((current) => {
+      if (!expectedPubId) return null;
+      return current != null && String(current) === String(expectedPubId) ? null : current;
+    });
+  }, []);
+
   const closeCard = useCallback((expectedPubId = null) => {
     setSelectedPub((current) => {
       if (!expectedPubId) return null;
@@ -120,6 +194,7 @@ export function useMapInteraction({
     setSelectedPostcodeArea(trimmed);
     setSelectedDistrictName(null);
     setSelectedPub(null);
+    setMapHighlightedPubId(null);
     if (updateSearch) setSearchQuery(trimmed);
     const b = getSummaryBoundsForPostcodeArea(trimmed);
     if (b) {
@@ -138,6 +213,7 @@ export function useMapInteraction({
     const parent = feature?.properties?.postcode_area;
     setSelectedPostcodeArea(typeof parent === 'string' && parent.trim() ? parent.trim() : null);
     setSelectedPub(null);
+    setMapHighlightedPubId(null);
     if (updateSearch) setSearchQuery(formatDistrictWithCode(districtName));
     fitFeature(feature);
   }, [fitFeature, hasUserInteractedRef]);
@@ -148,15 +224,16 @@ export function useMapInteraction({
     setSelectedDistrictName(null);
     setSelectedPostcodeArea(null);
     setSelectedPub(pub);
-    if (updateSearch) setSearchQuery(pub.name || '');
-    centerOnPub(pub);
+    setMapHighlightedPubId(pub.id);
+    // Selecting a pub should focus the map/card state, not leave a sticky query.
+    if (updateSearch) setSearchQuery('');
     // Server/typeahead suggestions can reference a pub not yet in viewport `allPubs`. Toggles use
     // `allPubs.find` for baseline state and map updates — without this, visited/favourite can look
     // broken until a viewport fetch adds the row (feels like "wait for load").
     if (pub.id != null) {
       setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
     }
-  }, [centerOnPub, hasUserInteractedRef, setAllPubs]);
+  }, [hasUserInteractedRef, setAllPubs]);
 
   // ── Toggle callbacks (optimistic) ────────────────────────────
 
@@ -224,11 +301,12 @@ export function useMapInteraction({
   const handlePubPress = useCallback((event) => {
     hasUserInteractedRef.current = true;
     const features = Array.isArray(event?.nativeEvent?.features) ? event.nativeEvent.features : [];
-    const pubFeature = features.find((f) => f?.properties?.pubId);
+    const pubFeature = features.find((f) => f?.properties?.pubId != null);
     if (!pubFeature) return;
-    const pub = allPubs.find((item) => item.id === pubFeature.properties?.pubId);
-    if (pub) setSelectedPub(pub);
-  }, [allPubs, hasUserInteractedRef]);
+    const pressedId = String(pubFeature.properties.pubId);
+    const pub = allPubs.find((item) => String(item.id) === pressedId);
+    if (pub) selectPub(pub, false);
+  }, [allPubs, selectPub, hasUserInteractedRef]);
 
   // ── Search callbacks ──────────────────────────────────────────
 
@@ -251,8 +329,7 @@ export function useMapInteraction({
       );
     if (districtMatch) { selectDistrict(districtMatch, true); return; }
 
-    const localPubMatch = allPubs.find((pub) => pub?.name?.toLowerCase?.() === query)
-      || allPubs.find((pub) => pub?.name?.toLowerCase?.().includes?.(query));
+    const localPubMatch = rankPubsForQuery(allPubs, rawQuery, 1)[0];
     if (localPubMatch) { selectPub(localPubMatch, true); return; }
 
     try {
@@ -261,7 +338,7 @@ export function useMapInteraction({
     } catch {
       // server search unavailable
     }
-  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub]);
+  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub, rankPubsForQuery]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
@@ -301,6 +378,11 @@ export function useMapInteraction({
     selectPub(pub, true);
   }, [selectPub]);
 
+  const dismissSearchSuggestions = useCallback(() => {
+    setShowSuggestions(false);
+    Keyboard.dismiss();
+  }, []);
+
   // ── Effects ───────────────────────────────────────────────────
 
   // Keyboard tracking
@@ -327,9 +409,7 @@ export function useMapInteraction({
       if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current);
       return;
     }
-    const localResults = allPubs
-      .filter((pub) => typeof pub?.name === 'string' && pub.name.toLowerCase().includes(trimmed))
-      .slice(0, 5);
+    const localResults = rankPubsForQuery(allPubs, searchQuery, 8);
     setPubSuggestions(localResults);
 
     if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current);
@@ -341,7 +421,7 @@ export function useMapInteraction({
           const existingIds = new Set(current.map((p) => p.id));
           const merged = [...current];
           serverResults.forEach((pub) => { if (!existingIds.has(pub.id)) merged.push(pub); });
-          return merged.slice(0, 8);
+          return rankPubsForQuery(merged, searchQuery, 8);
         });
       } catch {
         // keep local results on server failure
@@ -349,7 +429,7 @@ export function useMapInteraction({
     }, 300);
 
     return () => { if (pubSearchTimeoutRef.current) clearTimeout(pubSearchTimeoutRef.current); };
-  }, [allPubs, searchQuery, showSuggestions]);
+  }, [allPubs, searchQuery, showSuggestions, rankPubsForQuery]);
 
   // Eager-fetch pubs when area/district selected
   useEffect(() => {
@@ -395,6 +475,7 @@ export function useMapInteraction({
           clearedDistrictRef.current = null;
           hasUserInteractedRef.current = true;
           setSelectedPub(null);
+          setMapHighlightedPubId(null);
           setSelectedDistrictName(districtToSearch);
           setSelectedPostcodeArea(route.params?.districtPostcodeArea || null);
           setSearchQuery(formatDistrictWithCode(districtToSearch));
@@ -426,6 +507,8 @@ export function useMapInteraction({
   return {
     selectedPub,
     setSelectedPub,
+    mapHighlightedPubId,
+    clearMapHighlight,
     searchQuery,
     setSearchQuery,
     selectedPostcodeArea,
@@ -450,5 +533,6 @@ export function useMapInteraction({
     clearSearch,
     handleDistrictSuggestionPress,
     handlePubSuggestionPress,
+    dismissSearchSuggestions,
   };
 }

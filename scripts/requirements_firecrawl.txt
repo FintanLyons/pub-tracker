@@ -1,0 +1,6 @@
+# scripts/enrich_pub_data_firecrawl.py
+firecrawl-py>=1.0.0
+# scripts/enrich_search_pubs.py
+tavily-python>=0.3.0
+openai>=1.0.0
+python-dotenv>=1.0.0

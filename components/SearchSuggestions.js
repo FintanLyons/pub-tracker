@@ -1,16 +1,18 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, StyleSheet, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 
 function SearchSuggestions({
   visible,
   searchQuery,
   districtSuggestions = [],
-  pubSuggestions,
+  pubSuggestions = [],
   onDistrictPress,
   onPubPress,
+  onDismiss,
   keyboardHeight,
   keyboardTop,
 }) {
@@ -32,7 +34,13 @@ function SearchSuggestions({
 
   return (
     <View style={[styles.container, { height: availableHeight }]}>
-      <View style={[styles.content, { paddingTop: searchBarHeight }]}>
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={onDismiss}
+        accessibilityLabel="Dismiss search"
+        accessibilityRole="button"
+      />
+      <View style={[styles.content, { paddingTop: searchBarHeight }]} pointerEvents="box-none">
         {districtSuggestions.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Postcode districts</Text>
@@ -70,7 +78,16 @@ function SearchSuggestions({
                   onPress={() => onPubPress(pub)}
                 >
                   <MaterialCommunityIcons name="glass-pint-outline" size={18} color={COLORS.amber} />
-                  <Text style={styles.suggestionText}>{pub.name}</Text>
+                  <View style={styles.pubSuggestionContent}>
+                    <Text style={styles.suggestionText} numberOfLines={1}>
+                      {pub.name}
+                    </Text>
+                    {!!(pub?.postcodeDistrict || pub?.area) && (
+                      <Text style={styles.pubDistrictText} numberOfLines={1}>
+                        {formatDistrictWithCode(pub.postcodeDistrict || pub.area)}
+                      </Text>
+                    )}
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
@@ -132,7 +149,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.charcoal,
     marginLeft: 12,
+    flexShrink: 1,
+  },
+  pubSuggestionContent: {
+    marginLeft: 12,
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  pubDistrictText: {
+    fontSize: 13,
+    color: COLORS.mediumGrey,
+    marginLeft: 8,
+    flexShrink: 0,
   },
   noResults: {
     flex: 1,

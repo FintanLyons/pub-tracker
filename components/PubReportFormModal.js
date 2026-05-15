@@ -102,6 +102,8 @@ export default function PubReportFormModal({
   const [imageUris, setImageUris] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  /** pub_correction only: true = still operating, false = permanently closed (not opening hours). */
+  const [pubStillOpen, setPubStillOpen] = useState(true);
 
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const modalW = Math.min(screenW - 24, 440);
@@ -136,6 +138,7 @@ export default function PubReportFormModal({
       setHistory('');
       setFeatures(defaultFeatureSwitchState());
     }
+    setPubStillOpen(true);
     setImageUris([]);
     setErrorMessage(null);
     setFoundedPickerVisible(false);
@@ -219,6 +222,7 @@ export default function PubReportFormModal({
         history: history.trim(),
         features,
         imageUris,
+        stillOperating: mode === 'pub_correction' ? pubStillOpen : undefined,
       });
       onClose?.();
       onSuccess?.();
@@ -245,13 +249,11 @@ export default function PubReportFormModal({
     history,
     features,
     imageUris,
+    mode,
+    pubStillOpen,
   ]);
 
   const title = mode === 'missing_pub' ? 'Report missing pub' : 'Report incorrect information';
-  const subtitle =
-    mode === 'missing_pub'
-      ? 'Share what you know so we can review and add the pub.'
-      : 'Fields match this card. Update history or any other details that are wrong.';
 
   return (
     <>
@@ -279,7 +281,6 @@ export default function PubReportFormModal({
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.subtitle}>{subtitle}</Text>
 
             <ScrollView
               style={styles.scroll}
@@ -289,10 +290,54 @@ export default function PubReportFormModal({
               showsVerticalScrollIndicator
               automaticallyAdjustKeyboardInsets
             >
+              {mode === 'pub_correction' ? (
+                <View style={styles.operatingBlock}>
+                  <Text style={styles.operatingTitle}>Is this pub still operating?</Text>
+                  <View style={styles.operatingRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.operatingButton,
+                        pubStillOpen && styles.operatingButtonSelected,
+                      ]}
+                      onPress={() => setPubStillOpen(true)}
+                      disabled={isSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.operatingButtonText,
+                          pubStillOpen && styles.operatingButtonTextSelected,
+                        ]}
+                      >
+                        Still Open
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.operatingButton,
+                        !pubStillOpen && styles.operatingButtonSelected,
+                      ]}
+                      onPress={() => setPubStillOpen(false)}
+                      disabled={isSubmitting}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.operatingButtonText,
+                          !pubStillOpen && styles.operatingButtonTextSelected,
+                        ]}
+                      >
+                        {'Permanently Closed\n/ Not a Pub'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
               <Text style={styles.label}>Pub name *</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Pub name"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={pubName}
                 onChangeText={setPubName}
@@ -303,7 +348,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Chain / independent</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="e.g. Young's, Stonegate, or Independent"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={chainOrIndependent}
                 onChangeText={setChainOrIndependent}
@@ -324,7 +369,7 @@ export default function PubReportFormModal({
                   }
                   numberOfLines={1}
                 >
-                  {foundedYear != null ? String(foundedYear) : 'Tap to choose year (optional)'}
+                  {foundedYear != null ? String(foundedYear) : ''}
                 </Text>
                 <MaterialCommunityIcons name="calendar-month-outline" size={22} color={COLORS.mediumGrey} />
               </TouchableOpacity>
@@ -332,7 +377,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Pub address {mode === 'missing_pub' ? '*' : ''}</Text>
               <TextInput
                 style={[styles.textInput, styles.textInputMultiline]}
-                placeholder="Street, area, postcode"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={address}
                 onChangeText={setAddress}
@@ -345,7 +390,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Website</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="pubwebsite.com"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={website}
                 onChangeText={setWebsite}
@@ -358,7 +403,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Phone number</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="e.g. 02079460123"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={phone}
                 onChangeText={handlePhoneChange}
@@ -370,7 +415,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Typical closing time</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="e.g. 22:30"
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={closingTime}
                 onChangeText={handleClosingTimeChange}
@@ -381,7 +426,6 @@ export default function PubReportFormModal({
               />
 
               <Text style={styles.sectionTitle}>Features</Text>
-              <Text style={styles.sectionHint}>On = the pub has this. Off = it does not.</Text>
               {PUB_FEATURES_DISPLAY.map(({ name, icon }) => (
                 <View key={name} style={styles.switchRow}>
                   <MaterialCommunityIcons name={icon} size={22} color={COLORS.charcoal} />
@@ -400,18 +444,9 @@ export default function PubReportFormModal({
               <Text style={styles.label}>
                 History {mode === 'pub_correction' ? '*' : ''}
               </Text>
-              <Text style={styles.sectionHint}>
-                {mode === 'pub_correction'
-                  ? 'Same idea as the long text on the pub card. Edit it to the correct version.'
-                  : 'Optional background or character of the pub.'}
-              </Text>
               <TextInput
                 style={[styles.textInput, styles.textInputTall]}
-                placeholder={
-                  mode === 'pub_correction'
-                    ? 'Correct or replace the history…'
-                    : 'Pub history (optional)'
-                }
+                placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={history}
                 onChangeText={setHistory}
@@ -421,9 +456,6 @@ export default function PubReportFormModal({
               />
 
               <Text style={styles.sectionTitle}>Pub photos</Text>
-              <Text style={styles.sectionHint}>
-                Up to {MAX_PHOTOS} images (optional).
-              </Text>
               <View style={styles.photoRow}>
                 <TouchableOpacity
                   style={styles.addPhotoButton}
@@ -571,6 +603,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.mediumGrey,
     marginBottom: 14,
+  },
+  operatingBlock: {
+    marginBottom: 16,
+  },
+  operatingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.charcoal,
+    marginBottom: 6,
+  },
+  operatingHint: {
+    fontSize: 12,
+    color: COLORS.mediumGrey,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  operatingRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  operatingButton: {
+    flex: 1,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: COLORS.lightGrey,
+    backgroundColor: '#FAFAFA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  operatingButtonSelected: {
+    borderColor: COLORS.amber,
+    backgroundColor: '#FFF9E8',
+  },
+  operatingButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.charcoal,
+    textAlign: 'center',
+  },
+  operatingButtonTextSelected: {
+    color: COLORS.charcoal,
   },
   scroll: {
     flex: 1,

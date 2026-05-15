@@ -105,16 +105,16 @@ export const getDrinkStats = async (userId) => {
 
   const pubIds = drinks.map((d) => d.pub_id);
 
-  const { data: spatial, error: spatialError } = await supabase
-    .from('pub_spatial_assignments')
-    .select('pub_id, postcode_district, postcode_area')
-    .in('pub_id', pubIds);
+  const { data: pubs, error: pubsError } = await supabase
+    .from('Pubs_List')
+    .select('id, postcode_district, postcode_area')
+    .in('id', pubIds);
 
-  if (spatialError) throw spatialError;
+  if (pubsError) throw pubsError;
 
   const spatialMap = {};
-  for (const s of spatial || []) {
-    spatialMap[s.pub_id] = s;
+  for (const s of pubs || []) {
+    spatialMap[s.id] = s;
   }
 
   let total = 0;

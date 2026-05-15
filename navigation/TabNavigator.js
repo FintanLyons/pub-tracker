@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,7 @@ import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchPostcodeAreaSummaries } from '../services/PubService';
 import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
+import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
 
 const withErrorBoundary = (Screen, message) => (props) => (
@@ -35,10 +36,37 @@ const Tab = createBottomTabNavigator();
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { achievements, totalVisited, drinkStats } = useUserStats();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
   const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
+  const [mapReturnToProfile, setMapReturnToProfile] = useState({
+    key: 0,
+    baselineScore: 0,
+    baselineVisited: 0,
+    baselineDrinks: 0,
+  });
+  const lastFocusedRouteNameRef = useRef(null);
+  const hasVisitedMapSinceLastProfileRef = useRef(false);
+  const latestAchievementScoreRef = useRef(0);
+  const latestTotalVisitedRef = useRef(0);
+  const latestDrinksTotalRef = useRef(0);
+  const mapTabFocusedScoreBaselineRef = useRef(0);
+  const mapTabFocusedVisitedBaselineRef = useRef(0);
+  const mapTabFocusedDrinksBaselineRef = useRef(0);
+
+  useEffect(() => {
+    latestAchievementScoreRef.current = achievements?.totalScore ?? 0;
+  }, [achievements?.totalScore]);
+
+  useEffect(() => {
+    latestTotalVisitedRef.current = totalVisited;
+  }, [totalVisited]);
+
+  useEffect(() => {
+    latestDrinksTotalRef.current = drinkStats?.total ?? 0;
+  }, [drinkStats?.total]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -80,6 +108,43 @@ export default function TabNavigator() {
     }}>
       <View style={styles.container}>
         <Tab.Navigator
+          screenListeners={{
+            state: (event) => {
+              const state = event?.data?.state;
+              if (!state?.routes || typeof state.index !== 'number') return;
+              const currentRouteName = state.routes[state.index]?.name;
+              if (!currentRouteName) return;
+
+              const previousRouteName = lastFocusedRouteNameRef.current;
+
+              if (currentRouteName === 'Map' && previousRouteName !== 'Map') {
+                mapTabFocusedScoreBaselineRef.current = latestAchievementScoreRef.current;
+                mapTabFocusedVisitedBaselineRef.current = latestTotalVisitedRef.current;
+                mapTabFocusedDrinksBaselineRef.current = latestDrinksTotalRef.current;
+                hasVisitedMapSinceLastProfileRef.current = true;
+              }
+
+              if (
+                currentRouteName === 'Profile' &&
+                hasVisitedMapSinceLastProfileRef.current &&
+                previousRouteName !== 'Profile'
+              ) {
+                setMapReturnToProfile((prev) => ({
+                  key: prev.key + 1,
+                  baselineScore: mapTabFocusedScoreBaselineRef.current,
+                  baselineVisited: mapTabFocusedVisitedBaselineRef.current,
+                  baselineDrinks: mapTabFocusedDrinksBaselineRef.current,
+                }));
+                hasVisitedMapSinceLastProfileRef.current = false;
+              }
+
+              if (currentRouteName === 'Profile') {
+                hasVisitedMapSinceLastProfileRef.current = false;
+              }
+
+              lastFocusedRouteNameRef.current = currentRouteName;
+            },
+          }}
           screenOptions={{
             headerShown: false,
             freezeOnBlur: true,
@@ -111,13 +176,22 @@ export default function TabNavigator() {
           />
           <Tab.Screen 
             name="Profile" 
-            component={SafeProfileScreen}
             options={{
               tabBarIcon: ({ color, size }) => (
                 <MaterialCommunityIcons name="account-circle-outline" size={size} color={color} />
               ),
             }}
-          />
+          >
+            {(props) => (
+              <SafeProfileScreen
+                {...props}
+                mapReturnAnimationKey={mapReturnToProfile.key}
+                mapReturnBaselineScore={mapReturnToProfile.baselineScore}
+                mapReturnBaselineVisited={mapReturnToProfile.baselineVisited}
+                mapReturnBaselineDrinks={mapReturnToProfile.baselineDrinks}
+              />
+            )}
+          </Tab.Screen>
           <Tab.Screen 
             name="Leaderboard" 
             component={SafeLeaderboardScreen}

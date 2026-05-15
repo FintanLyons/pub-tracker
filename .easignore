@@ -1,0 +1,62 @@
+# Dependencies / local tooling
+node_modules/
+.venv/
+
+# Expo local state
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native / build artifacts
+.kotlin/
+*.orig.*
+/ios
+/android
+
+# Debug logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS noise
+.DS_Store
+
+# Local env files
+.env*.local
+.env
+scripts/.env
+
+# EAS / signing secrets
+credentials.json
+credentials/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Keep Firebase Android config in EAS upload context
+!google-services.json
+
+# Supabase CLI cache
+supabase/.temp/
+
+# TS incremental cache
+*.tsbuildinfo
+
+# Pipeline only (SQL, Python, CSV enrichment) — not imported by the app
+scripts/
+
+# Data pipeline (~70MB+ CSV/JSON). App only needs these four files (Metro bundles them):
+#   data/geo/london_postcode_districts.min.json
+#   data/geo/london_postcode_areas.min.json
+#   data/geo/london_postcode_area_label_points.min.json
+#   data/postcode_district_display_names.json
+data/**
+!data/postcode_district_display_names.json
+!data/geo/
+!data/geo/london_postcode_districts.min.json
+!data/geo/london_postcode_areas.min.json
+!data/geo/london_postcode_area_label_points.min.json
