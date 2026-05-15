@@ -142,7 +142,7 @@ export const fetchLondonPubs = async (options = {}) => {
 		let hasMore = true;
 
 		while (hasMore) {
-			let query = supabase.from('pub_list').select('*');
+			let query = supabase.from('Pubs_List').select('*');
 
 			if (hasBounds) {
 				query = query

@@ -22,11 +22,11 @@
 -- A. Row Level Security for pub_list
 -- ============================================================================
 
-ALTER TABLE public.pub_list ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."Pubs_List" ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "pub_list_public_read" ON public.pub_list;
+DROP POLICY IF EXISTS "pub_list_public_read" ON public."Pubs_List";
 CREATE POLICY "pub_list_public_read"
-  ON public.pub_list
+  ON public."Pubs_List"
   FOR SELECT
   TO anon, authenticated
   USING (true);
@@ -45,7 +45,7 @@ TRUNCATE public.visited_pubs;
 ALTER TABLE public.visited_pubs ALTER COLUMN pub_id TYPE TEXT USING pub_id::TEXT;
 ALTER TABLE public.visited_pubs
   ADD CONSTRAINT visited_pubs_pub_id_fkey
-  FOREIGN KEY (pub_id) REFERENCES public.pub_list(id) ON DELETE CASCADE;
+  FOREIGN KEY (pub_id) REFERENCES public."Pubs_List"(id) ON DELETE CASCADE;
 
 -- favorite_pubs
 ALTER TABLE public.favorite_pubs DROP CONSTRAINT IF EXISTS favorite_pubs_pub_id_fkey;
@@ -53,7 +53,7 @@ TRUNCATE public.favorite_pubs;
 ALTER TABLE public.favorite_pubs ALTER COLUMN pub_id TYPE TEXT USING pub_id::TEXT;
 ALTER TABLE public.favorite_pubs
   ADD CONSTRAINT favorite_pubs_pub_id_fkey
-  FOREIGN KEY (pub_id) REFERENCES public.pub_list(id) ON DELETE CASCADE;
+  FOREIGN KEY (pub_id) REFERENCES public."Pubs_List"(id) ON DELETE CASCADE;
 
 -- pub_drinks (if exists)
 DO $$
@@ -64,7 +64,7 @@ BEGIN
     ALTER TABLE public.pub_drinks ALTER COLUMN pub_id TYPE TEXT USING pub_id::TEXT;
     ALTER TABLE public.pub_drinks
       ADD CONSTRAINT pub_drinks_pub_id_fkey
-      FOREIGN KEY (pub_id) REFERENCES public.pub_list(id) ON DELETE CASCADE;
+      FOREIGN KEY (pub_id) REFERENCES public."Pubs_List"(id) ON DELETE CASCADE;
   END IF;
 END $$;
 
@@ -77,7 +77,7 @@ BEGIN
     ALTER TABLE public.pub_reviews ALTER COLUMN pub_id TYPE TEXT USING pub_id::TEXT;
     ALTER TABLE public.pub_reviews
       ADD CONSTRAINT pub_reviews_pub_id_fkey
-      FOREIGN KEY (pub_id) REFERENCES public.pub_list(id) ON DELETE CASCADE;
+      FOREIGN KEY (pub_id) REFERENCES public."Pubs_List"(id) ON DELETE CASCADE;
   END IF;
 END $$;
 
@@ -118,7 +118,7 @@ AS $$
     pl.postcode_area     AS borough,
     pl.postcode_district,
     pl.postcode_area
-  FROM public.pub_list pl
+  FROM public."Pubs_List" pl
   WHERE pl.name ILIKE '%' || p_query || '%'
   ORDER BY
     CASE
@@ -162,7 +162,7 @@ BEGIN
   SELECT COALESCE(COUNT(*) * 10, 0)::INT
     INTO v_pub_points
     FROM public.visited_pubs vp
-    JOIN public.pub_list pl ON pl.id = vp.pub_id
+    JOIN public."Pubs_List" pl ON pl.id = vp.pub_id
    WHERE vp.user_id = p_user_id;
 
   WITH effective_pubs AS (
@@ -170,7 +170,7 @@ BEGIN
       pl.id,
       COALESCE(NULLIF(TRIM(pl.postcode_district), ''), 'Unknown') AS effective_district,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   ),
   district_counts AS (
     SELECT ep.effective_district AS district_name,
@@ -191,7 +191,7 @@ BEGIN
     SELECT
       pl.id,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   ),
   area_counts AS (
     SELECT ep.effective_area AS area_name,
@@ -276,7 +276,7 @@ AS $$
       pl.lon,
       COALESCE(NULLIF(TRIM(pl.postcode_district), ''), 'Unknown') AS effective_district,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   )
   SELECT
     ep.effective_district AS district,
@@ -333,7 +333,7 @@ AS $$
       pl.lon,
       COALESCE(NULLIF(TRIM(pl.postcode_district), ''), 'Unknown') AS effective_district,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   ),
   district_completion AS (
     SELECT
@@ -423,7 +423,7 @@ BEGIN
     SELECT
       pl.id,
       COALESCE(NULLIF(TRIM(pl.postcode_district), ''), 'Unknown') AS effective_district
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   ),
   district_counts AS (
     SELECT
@@ -454,7 +454,7 @@ BEGIN
     SELECT
       pl.id,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
-    FROM public.pub_list pl
+    FROM public."Pubs_List" pl
   ),
   area_counts AS (
     SELECT

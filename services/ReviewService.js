@@ -106,7 +106,7 @@ export const getDrinkStats = async (userId) => {
   const pubIds = drinks.map((d) => d.pub_id);
 
   const { data: pubs, error: pubsError } = await supabase
-    .from('pub_list')
+    .from('Pubs_List')
     .select('id, postcode_district, postcode_area')
     .in('id', pubIds);
 
