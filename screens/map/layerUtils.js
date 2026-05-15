@@ -220,7 +220,41 @@ export const buildPostcodeDistrictLayerCollection = (
   };
 };
 
-export const buildPubFeatureCollection = (pubs) => ({
+/** One tap target per district label (bbox centre of first polygon per district key). */
+export const buildPostcodeDistrictLabelPointCollection = (geojson) => {
+  const labeledDistricts = new Set();
+
+  const features = [];
+  for (const feature of geojson?.features || []) {
+    const districtName = feature?.properties?.name || '';
+    const districtKey = districtName.toLowerCase();
+    const districtLabel = districtName ? formatDistrictWithCode(districtName) : '';
+    if (!districtLabel || labeledDistricts.has(districtKey)) continue;
+    labeledDistricts.add(districtKey);
+
+    const [minX, minY, maxX, maxY] = bbox(feature);
+    features.push({
+      type: 'Feature',
+      properties: {
+        name: districtName,
+        postcode_area: feature?.properties?.postcode_area,
+        districtLabel,
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: [(minX + maxX) / 2, (minY + maxY) / 2],
+      },
+    });
+  }
+
+  return { type: 'FeatureCollection', features };
+};
+
+export const buildPubFeatureCollection = (pubs, selectedPubId = null) => {
+  const selectedId =
+    selectedPubId != null && selectedPubId !== '' ? String(selectedPubId) : null;
+
+  return {
   type: 'FeatureCollection',
   features: (Array.isArray(pubs) ? pubs : [])
     .filter((pub) => Number.isFinite(pub?.lon) && Number.isFinite(pub?.lat))
@@ -228,16 +262,17 @@ export const buildPubFeatureCollection = (pubs) => ({
       type: 'Feature',
       id: pub.id,
       properties: {
-        ...pub,
-        pubId: pub.id,
+        pubId: String(pub.id),
         isVisited: pub.isVisited === true,
+        isSelected: selectedId != null && String(pub.id) === selectedId,
       },
       geometry: {
         type: 'Point',
         coordinates: [pub.lon, pub.lat],
       },
     })),
-});
+};
+};
 
 export const getFeatureBounds = (feature) => {
   if (!feature) return null;

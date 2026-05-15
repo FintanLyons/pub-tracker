@@ -34,7 +34,6 @@ export function useMapInteraction({
   hasUserInteractedRef,
   fitFeature,
   fitBoundsObject,
-  centerOnPub,
   postcodeAreaSummaries,
   currentLocation,
   refreshUserStats,
@@ -42,6 +41,8 @@ export function useMapInteraction({
   route,
 }) {
   const [selectedPub, setSelectedPub] = useState(null);
+  /** Map marker highlight; cleared as soon as dismiss starts (before sheet animation ends). */
+  const [mapHighlightedPubId, setMapHighlightedPubId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPostcodeArea, setSelectedPostcodeArea] = useState(null);
   const [selectedDistrictName, setSelectedDistrictName] = useState(null);
@@ -171,6 +172,13 @@ export function useMapInteraction({
    * Ignore stale close callbacks from an older sheet animation if a new pub
    * has already been selected.
    */
+  const clearMapHighlight = useCallback((expectedPubId = null) => {
+    setMapHighlightedPubId((current) => {
+      if (!expectedPubId) return null;
+      return current != null && String(current) === String(expectedPubId) ? null : current;
+    });
+  }, []);
+
   const closeCard = useCallback((expectedPubId = null) => {
     setSelectedPub((current) => {
       if (!expectedPubId) return null;
@@ -186,6 +194,7 @@ export function useMapInteraction({
     setSelectedPostcodeArea(trimmed);
     setSelectedDistrictName(null);
     setSelectedPub(null);
+    setMapHighlightedPubId(null);
     if (updateSearch) setSearchQuery(trimmed);
     const b = getSummaryBoundsForPostcodeArea(trimmed);
     if (b) {
@@ -204,6 +213,7 @@ export function useMapInteraction({
     const parent = feature?.properties?.postcode_area;
     setSelectedPostcodeArea(typeof parent === 'string' && parent.trim() ? parent.trim() : null);
     setSelectedPub(null);
+    setMapHighlightedPubId(null);
     if (updateSearch) setSearchQuery(formatDistrictWithCode(districtName));
     fitFeature(feature);
   }, [fitFeature, hasUserInteractedRef]);
@@ -214,16 +224,16 @@ export function useMapInteraction({
     setSelectedDistrictName(null);
     setSelectedPostcodeArea(null);
     setSelectedPub(pub);
+    setMapHighlightedPubId(pub.id);
     // Selecting a pub should focus the map/card state, not leave a sticky query.
     if (updateSearch) setSearchQuery('');
-    centerOnPub(pub);
     // Server/typeahead suggestions can reference a pub not yet in viewport `allPubs`. Toggles use
     // `allPubs.find` for baseline state and map updates — without this, visited/favourite can look
     // broken until a viewport fetch adds the row (feels like "wait for load").
     if (pub.id != null) {
       setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
     }
-  }, [centerOnPub, hasUserInteractedRef, setAllPubs]);
+  }, [hasUserInteractedRef, setAllPubs]);
 
   // ── Toggle callbacks (optimistic) ────────────────────────────
 
@@ -295,8 +305,8 @@ export function useMapInteraction({
     if (!pubFeature) return;
     const pressedId = String(pubFeature.properties.pubId);
     const pub = allPubs.find((item) => String(item.id) === pressedId);
-    if (pub) setSelectedPub(pub);
-  }, [allPubs, hasUserInteractedRef]);
+    if (pub) selectPub(pub, false);
+  }, [allPubs, selectPub, hasUserInteractedRef]);
 
   // ── Search callbacks ──────────────────────────────────────────
 
@@ -465,6 +475,7 @@ export function useMapInteraction({
           clearedDistrictRef.current = null;
           hasUserInteractedRef.current = true;
           setSelectedPub(null);
+          setMapHighlightedPubId(null);
           setSelectedDistrictName(districtToSearch);
           setSelectedPostcodeArea(route.params?.districtPostcodeArea || null);
           setSearchQuery(formatDistrictWithCode(districtToSearch));
@@ -496,6 +507,8 @@ export function useMapInteraction({
   return {
     selectedPub,
     setSelectedPub,
+    mapHighlightedPubId,
+    clearMapHighlight,
     searchQuery,
     setSearchQuery,
     selectedPostcodeArea,

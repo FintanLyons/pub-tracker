@@ -24,14 +24,14 @@ export default {
     slug: 'pub-tracker',
     version: '1.0.0',
     orientation: 'portrait',
-    // Keep iOS + Android launchers visually aligned by sharing the same base icon asset.
-    icon: './assets/pub_icon.png',
+    // Charcoal + amber visited pub pin (1024); Android uses adaptive layers below.
+    icon: './assets/app-icon.png',
     userInterfaceStyle: 'light',
     newArchEnabled: true,
     splash: {
-      image: './assets/pub_icon.png',
+      image: './assets/adaptive-icon-foreground.png',
       resizeMode: 'contain',
-      backgroundColor: '#F7F7F7',
+      backgroundColor: '#1C1C1C',
     },
     plugins: [
       'expo-apple-authentication',
@@ -80,9 +80,10 @@ export default {
       ...(googleServicesFile ? { googleServicesFile } : {}),
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
-        foregroundImage: './assets/pub_icon.png',
-        backgroundColor: '#F7F7F7',
+        foregroundImage: './assets/adaptive-icon-foreground.png',
+        backgroundColor: '#1C1C1C',
       },
+      icon: './assets/app-icon.png',
       package: androidPackage,
       permissions: [
         'ACCESS_COARSE_LOCATION',

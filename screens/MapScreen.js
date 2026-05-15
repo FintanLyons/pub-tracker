@@ -43,8 +43,10 @@ import postcodeDistrictGeojson from '../data/geo/london_postcode_districts.min.j
 import postcodeAreaOutlinesGeojson from '../data/geo/london_postcode_areas.min.json';
 import postcodeAreaLabelPointsGeojson from '../data/geo/london_postcode_area_label_points.min.json';
 import { styles as baseStyles } from './map/mapStyles';
+import { getOpeningStatus, isOpenPastMidnight } from '../utils/openingHours';
 import {
   buildPostcodeAreaLayerCollection,
+  buildPostcodeDistrictLabelPointCollection,
   buildPostcodeDistrictLayerCollection,
   buildPubFeatureCollection,
   DEFAULT_CAMERA,
@@ -55,6 +57,7 @@ import {
 
 const PUB_ICON_VISITED = require('../assets/pub_marker_visited.png');
 const PUB_ICON_UNVISITED = require('../assets/pub_marker_unvisited.png');
+const PUB_ICON_SELECTED = require('../assets/pub_marker_selected.png');
 
 /** Space between pub sheet top (peek) and bottom edge of location / flag FABs after lift. */
 const MAP_FLOATING_CONTROLS_PEEK_CLEARANCE = 12;
@@ -63,6 +66,8 @@ const MAP_CONTROLS_HIDE_PX = 20;
 /** Map content sits above the tab bar, which already applies `insets.bottom`. Do not add full bottom inset here or controls float too high vs the SearchBar. */
 const MAP_FLOATING_BUTTON_SIZE = 48;
 const MAP_FLOATING_CONTROLS_BOTTOM_GAP = 10;
+/** Expanded tap target around postcode area/district text labels. */
+const POSTCODE_LABEL_HITBOX = { top: 22, right: 28, bottom: 22, left: 28 };
 
 export default function MapScreen() {
   const navigation = useNavigation();
@@ -86,7 +91,6 @@ export default function MapScreen() {
     currentLocationShape,
     fitFeature,
     fitBoundsObject,
-    centerOnPub,
     handleCurrentLocation,
   } = useMapCamera({ setIsLocationLoaded, isMapFocused: isFocused });
 
@@ -123,7 +127,6 @@ export default function MapScreen() {
     hasUserInteractedRef,
     fitFeature,
     fitBoundsObject,
-    centerOnPub,
     currentLocation,
     postcodeAreaSummaries,
     refreshUserStats,
@@ -145,6 +148,8 @@ export default function MapScreen() {
     districtSuggestions,
     keyboardHeight,
     keyboardTop,
+    mapHighlightedPubId,
+    clearMapHighlight,
     closeCard,
     handleToggleVisited,
     handleToggleFavorite,
@@ -185,11 +190,10 @@ export default function MapScreen() {
       if (hasFavorites && pub.isFavorite !== true) return false;
       if (hasAchievements && (!pub.achievements || pub.achievements.length === 0)) return false;
       if (hasClosingTime) {
-        const closingHour = pub.closing_time ?? 23;
         if (closingTimeMin === 'open_now') {
-          if (closingHour <= new Date().getHours()) return false;
+          if (!getOpeningStatus(pub.opening_hours).isOpen) return false;
         } else if (closingTimeMin === 'past_midnight') {
-          if (closingHour < 24) return false;
+          if (!isOpenPastMidnight(pub.opening_hours)) return false;
         }
       }
       return true;
@@ -219,8 +223,8 @@ export default function MapScreen() {
   }, [filteredPubs, setSelectedPub]);
 
   const pubFeatureCollection = useMemo(
-    () => buildPubFeatureCollection(filteredPubs),
-    [filteredPubs],
+    () => buildPubFeatureCollection(filteredPubs, mapHighlightedPubId),
+    [filteredPubs, mapHighlightedPubId],
   );
 
   const districtStatsMap = useMemo(() => {
@@ -255,6 +259,11 @@ export default function MapScreen() {
       districtStatsMap,
     ),
     [selectedPostcodeArea, selectedDistrictName, districtStatsMap],
+  );
+
+  const postcodeDistrictLabelFeatures = useMemo(
+    () => buildPostcodeDistrictLabelPointCollection(postcodeDistrictGeojson),
+    [],
   );
 
   // ── Sheet animation ───────────────────────────────────────────
@@ -306,6 +315,7 @@ export default function MapScreen() {
             setCollapseSheetRequest((current) => current + 1);
             return;
           }
+          clearMapHighlight(selectedPub.id);
           closeCard(selectedPub.id);
         });
         return true;
@@ -333,6 +343,8 @@ export default function MapScreen() {
     selectedPub,
     mapSheetMetrics.collapsedY,
     sheetTranslateY,
+    mapHighlightedPubId,
+    clearMapHighlight,
     closeCard,
     selectedPostcodeArea,
     selectedDistrictName,
@@ -422,9 +434,15 @@ export default function MapScreen() {
         onDidFailLoadingMap={() => console.warn('MapLibre: map failed to load')}
       >
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
-        <Images images={{ pubVisited: PUB_ICON_VISITED, pubUnvisited: PUB_ICON_UNVISITED }} />
+        <Images
+          images={{
+            pubVisited: PUB_ICON_VISITED,
+            pubUnvisited: PUB_ICON_UNVISITED,
+            pubSelected: PUB_ICON_SELECTED,
+          }}
+        />
 
-        <GeoJSONSource id="postcode-areas" data={postcodeAreaLayerFeatures} onPress={handlePostcodeAreaLayerPress}>
+        <GeoJSONSource id="postcode-areas" data={postcodeAreaLayerFeatures}>
           <Layer
             type="fill"
             id="postcode-area-fill"
@@ -445,7 +463,7 @@ export default function MapScreen() {
           />
         </GeoJSONSource>
 
-        <GeoJSONSource id="postcode-districts" data={postcodeDistrictLayerFeatures} onPress={handlePostcodeDistrictLayerPress}>
+        <GeoJSONSource id="postcode-districts" data={postcodeDistrictLayerFeatures}>
           <Layer
             type="fill"
             id="postcode-district-fill"
@@ -497,29 +515,14 @@ export default function MapScreen() {
               ],
             }}
           />
-          <Layer
-            type="symbol"
-            id="postcode-district-labels"
-            minzoom={ZOOM_LEVELS.DISTRICT_LABELS_MIN}
-            layout={{
-              'text-field': ['get', 'districtLabel'],
-              'text-size': 10,
-              'text-font': ['Open Sans Regular'],
-              'text-allow-overlap': false,
-              'text-ignore-placement': false,
-              'text-anchor': 'center',
-              'text-max-width': 14,
-            }}
-            paint={{
-              'text-color': COLORS.charcoal,
-              'text-halo-color': '#FFFFFF',
-              'text-halo-width': 1.2,
-              'text-opacity': 0.85,
-            }}
-          />
         </GeoJSONSource>
 
-        <GeoJSONSource id="postcode-area-label-points" data={postcodeAreaLabelFeatures}>
+        <GeoJSONSource
+          id="postcode-area-label-points"
+          data={postcodeAreaLabelFeatures}
+          onPress={handlePostcodeAreaLayerPress}
+          hitbox={POSTCODE_LABEL_HITBOX}
+        >
           <Layer
             type="symbol"
             id="postcode-area-labels"
@@ -550,6 +553,34 @@ export default function MapScreen() {
         </GeoJSONSource>
 
         <GeoJSONSource
+          id="postcode-district-label-points"
+          data={postcodeDistrictLabelFeatures}
+          onPress={handlePostcodeDistrictLayerPress}
+          hitbox={POSTCODE_LABEL_HITBOX}
+        >
+          <Layer
+            type="symbol"
+            id="postcode-district-labels"
+            minzoom={ZOOM_LEVELS.DISTRICT_LABELS_MIN}
+            layout={{
+              'text-field': ['get', 'districtLabel'],
+              'text-size': 10,
+              'text-font': ['Open Sans Regular'],
+              'text-allow-overlap': false,
+              'text-ignore-placement': false,
+              'text-anchor': 'center',
+              'text-max-width': 14,
+            }}
+            paint={{
+              'text-color': COLORS.charcoal,
+              'text-halo-color': '#FFFFFF',
+              'text-halo-width': 1.2,
+              'text-opacity': 0.85,
+            }}
+          />
+        </GeoJSONSource>
+
+        <GeoJSONSource
           id="pubs"
           data={pubFeatureCollection}
           cluster={false}
@@ -565,12 +596,24 @@ export default function MapScreen() {
                 : ZOOM_LEVELS.PUBS_MIN
             }
             layout={{
-              'icon-image': ['case', ['boolean', ['get', 'isVisited'], false], 'pubVisited', 'pubUnvisited'],
+              'icon-image': [
+                'case',
+                ['boolean', ['get', 'isSelected'], false],
+                'pubSelected',
+                ['boolean', ['get', 'isVisited'], false],
+                'pubVisited',
+                'pubUnvisited',
+              ],
               'icon-size': [
-                'interpolate', ['linear'], ['zoom'],
-                ZOOM_LEVELS.DISTRICTS_MIN, 0.06,
-                ZOOM_LEVELS.PUBS_MIN,      0.10,
-                17.5,                      0.12,
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                ZOOM_LEVELS.DISTRICTS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.075, 0.06],
+                ZOOM_LEVELS.PUBS_MIN,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.13, 0.10],
+                17.5,
+                ['case', ['boolean', ['get', 'isSelected'], false], 0.15, 0.12],
               ],
               'icon-allow-overlap': true,
               'icon-ignore-placement': true,
@@ -641,6 +684,7 @@ export default function MapScreen() {
         containerHeight={mapAreaHeight}
         translateY={sheetTranslateY}
         collapseRequest={collapseSheetRequest}
+        onCloseStart={clearMapHighlight}
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
         onToggleFavorite={handleToggleFavorite}

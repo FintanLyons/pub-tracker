@@ -25,6 +25,10 @@ import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
+/** Sheet drag must be clearly vertical — avoids stealing horizontal photo swipes. */
+const SHEET_DRAG_MIN_DY = 16;
+const SHEET_DRAG_AXIS_RATIO = 2.0;
+const SHEET_CAPTURE_MIN_DY = 10;
 /** Space between safe-area inset (status bar / notch) and the expanded header row */
 const EXPANDED_TOP_GAP = 8;
 /** Approx. height of expanded visited + icon row (minHeight + vertical padding) */
@@ -40,7 +44,8 @@ export default function DraggablePubCard({
   containerHeight,
   translateY,
   collapseRequest = 0,
-  onClose, 
+  onCloseStart,
+  onClose,
   onToggleVisited,
   onToggleFavorite,
   getImageSource
@@ -90,11 +95,15 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  /** PanResponder is created once; keep latest pub id for onClose so we never call onClose(undefined). */
+  /** PanResponder is created once; keep latest pub id for close callbacks. */
   const pubIdRef = useRef(pub?.id);
+  const onCloseStartRef = useRef(onCloseStart);
   useEffect(() => {
     pubIdRef.current = pub?.id;
   }, [pub?.id]);
+  useEffect(() => {
+    onCloseStartRef.current = onCloseStart;
+  }, [onCloseStart]);
 
   const updateIsExpanded = useCallback((value) => {
     if (isExpandedRef.current !== value) {
@@ -147,10 +156,15 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        // When expanded, at top, and dragging down - intercept before ScrollView claims it
-        const isDraggingVertically = Math.abs(gestureState.dy) > 5;
-        const isDraggingDown = gestureState.dy > 5;
-        const isDraggingUp = gestureState.dy < -5;
+        const ax = Math.abs(gestureState.dx);
+        const ay = Math.abs(gestureState.dy);
+        const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
+
+        if (isHorizontalDominant) return false;
+
+        const isDraggingVertically = ay > SHEET_CAPTURE_MIN_DY;
+        const isDraggingDown = gestureState.dy > SHEET_CAPTURE_MIN_DY;
+        const isDraggingUp = gestureState.dy < -SHEET_CAPTURE_MIN_DY;
         const isAtTop = scrollY.current <= TOP_THRESHOLD;
 
         if (
@@ -177,16 +191,22 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        const isDraggingVertically = Math.abs(gestureState.dy) > 10;
+        const ax = Math.abs(gestureState.dx);
+        const ay = Math.abs(gestureState.dy);
+        const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
+
+        if (isHorizontalDominant) return false;
+
+        const isDraggingVertically = ay > SHEET_DRAG_MIN_DY;
         if (isExpandedRef.current) {
           const isAtTop = scrollY.current <= TOP_THRESHOLD;
-          const isDraggingDown = gestureState.dy > 10;
+          const isDraggingDown = gestureState.dy > SHEET_DRAG_MIN_DY;
           if (isDraggingVertically && isDraggingDown && isAtTop) {
             updateScrollEnabled(false);
             return true;
           }
 
-          const isDraggingUp = gestureState.dy < -6;
+          const isDraggingUp = gestureState.dy < -SHEET_DRAG_MIN_DY;
           if (isDraggingVertically && isDraggingUp && !scrollEnabledRef.current) {
             updateScrollEnabled(true);
           }
@@ -194,7 +214,7 @@ export default function DraggablePubCard({
         }
 
         // Handle drags when collapsed
-        const isMoreVerticalThanHorizontal = Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
+        const isMoreVerticalThanHorizontal = ay > ax * SHEET_DRAG_AXIS_RATIO;
         return isDraggingVertically && isMoreVerticalThanHorizontal;
       },
       
@@ -283,6 +303,10 @@ export default function DraggablePubCard({
           scrollY.current = 0;
         }
         
+        if (targetY === currentHiddenY) {
+          onCloseStartRef.current?.(pubIdRef.current);
+        }
+
         // Smoother, faster animation
         // When snapping to COLLAPSED_Y, don't use velocity to ensure exact positioning
         const useVelocity = targetY !== currentCollapsedY;
@@ -395,6 +419,7 @@ export default function DraggablePubCard({
   
   const handleClose = () => {
     const closingPubId = pub?.id;
+    onCloseStartRef.current?.(closingPubId);
     translateY.stopAnimation();
 
     Animated.spring(translateY, {

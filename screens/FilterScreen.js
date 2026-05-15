@@ -70,6 +70,9 @@ export default function FilterScreen({
     setLocalClosingTimeMin(closingTimeMin || null);
   }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, closingTimeMin, visible]);
 
+  const allFeatureNames = PUB_FEATURE_CHIPS.map((f) => f.name);
+  const allFeaturesSelected = allFeatureNames.every((n) => localSelectedFeatures.has(n));
+
   const toggleFeature = (feature) => {
     const newSet = new Set(localSelectedFeatures);
     if (newSet.has(feature)) {
@@ -78,6 +81,14 @@ export default function FilterScreen({
       newSet.add(feature);
     }
     setLocalSelectedFeatures(newSet);
+  };
+
+  const toggleAllFeatures = () => {
+    if (allFeaturesSelected) {
+      setLocalSelectedFeatures(new Set());
+    } else {
+      setLocalSelectedFeatures(new Set(allFeatureNames));
+    }
   };
 
   const toggleOwnership = (ownership) => {
@@ -222,6 +233,27 @@ export default function FilterScreen({
                   </TouchableOpacity>
                 );
               })}
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  { width: filterChipWidth },
+                  allFeaturesSelected && styles.featureBoxSelected,
+                ]}
+                onPress={toggleAllFeatures}
+              >
+                <MaterialCommunityIcons
+                  name="check-all"
+                  size={18}
+                  color={allFeaturesSelected ? COLORS.amber : COLORS.mediumGrey}
+                  style={styles.filterIconInline}
+                />
+                <Text style={[
+                  styles.featureBoxText,
+                  allFeaturesSelected && styles.featureBoxTextSelected,
+                ]}>
+                  All
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <Text style={styles.sectionTitle}>Closing Time</Text>

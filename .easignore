@@ -45,3 +45,18 @@ supabase/.temp/
 
 # TS incremental cache
 *.tsbuildinfo
+
+# Pipeline only (SQL, Python, CSV enrichment) — not imported by the app
+scripts/
+
+# Data pipeline (~70MB+ CSV/JSON). App only needs these four files (Metro bundles them):
+#   data/geo/london_postcode_districts.min.json
+#   data/geo/london_postcode_areas.min.json
+#   data/geo/london_postcode_area_label_points.min.json
+#   data/postcode_district_display_names.json
+data/**
+!data/postcode_district_display_names.json
+!data/geo/
+!data/geo/london_postcode_districts.min.json
+!data/geo/london_postcode_areas.min.json
+!data/geo/london_postcode_area_label_points.min.json

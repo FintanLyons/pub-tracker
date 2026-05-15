@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Linking,
   ActivityIndicator,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
@@ -24,6 +25,7 @@ import {
   deleteReview,
 } from '../services/ReviewService';
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
+import { getOpeningStatus } from '../utils/openingHours';
 
 const openDirections = async (lat, lon) => {
   const destination = `${lat},${lon}`;
@@ -98,6 +100,10 @@ const starRowStyles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 2 },
 });
 
+/** Horizontal gallery must win over the card's vertical scroll. */
+const GALLERY_LOCK_MIN_DX = 14;
+const GALLERY_LOCK_AXIS_RATIO = 1.85;
+
 // ---------------------------------------------------------------------------
 
 export default function PubCardContent({
@@ -113,11 +119,8 @@ export default function PubCardContent({
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
-  // ── Opening status ─────────────────────────────────────────────────────────
-  // TODO: replace closingHour with real pub.closing_time fetched from Google Places API
-  const closingHour = 23; // 11 PM placeholder
-  const now = new Date();
-  const isOpen = now.getHours() < closingHour;
+  // ── Opening status (OSM opening_hours; empty → until 11 PM daily) ───────────
+  const { isOpen, statusText: openStatusText } = getOpeningStatus(pub?.opening_hours);
 
   // ── Area row segments ──────────────────────────────────────────────────────
   const areaSegments = [
@@ -139,6 +142,12 @@ export default function PubCardContent({
   const [draftBody, setDraftBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const [galleryWidth, setGalleryWidth] = useState(Dimensions.get('window').width);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [galleryScrollLock, setGalleryScrollLock] = useState(false);
+  const galleryRef = useRef(null);
+  const galleryTouchStart = useRef({ x: 0, y: 0 });
+
   // Reset and re-fetch when the pub changes
   useEffect(() => {
     setDrinkCount(0);
@@ -147,6 +156,9 @@ export default function PubCardContent({
     setShowForm(false);
     setDraftRating(0);
     setDraftBody('');
+    setPhotoIndex(0);
+    setGalleryScrollLock(false);
+    galleryRef.current?.scrollTo({ x: 0, animated: false });
 
     if (!pub?.id) return;
 
@@ -257,6 +269,55 @@ export default function PubCardContent({
   const hasPhone   = !!pub.phone;
   const hasWebsite = !!pub.website;
 
+  const photoUrls = pub.photoUrls?.length ? pub.photoUrls : pub.photoUrl ? [pub.photoUrl] : [];
+  const photoCount = photoUrls.length;
+  const hasMultiplePhotos = photoCount > 1;
+
+  const goToPhoto = useCallback(
+    (index) => {
+      const next = Math.max(0, Math.min(index, photoCount - 1));
+      setPhotoIndex(next);
+      galleryRef.current?.scrollTo({ x: next * galleryWidth, animated: true });
+    },
+    [galleryWidth, photoCount],
+  );
+
+  const handleGalleryScroll = useCallback(
+    (e) => {
+      if (galleryWidth <= 0) return;
+      const idx = Math.round(e.nativeEvent.contentOffset.x / galleryWidth);
+      if (idx !== photoIndex) setPhotoIndex(idx);
+    },
+    [galleryWidth, photoIndex],
+  );
+
+  const verticalScrollEnabled = galleryScrollLock
+    ? false
+    : (scrollEnabled !== undefined ? scrollEnabled : isExpanded);
+
+  const handleGalleryTouchStart = useCallback((e) => {
+    galleryTouchStart.current = {
+      x: e.nativeEvent.pageX,
+      y: e.nativeEvent.pageY,
+    };
+  }, []);
+
+  const handleGalleryTouchMove = useCallback(
+    (e) => {
+      if (!hasMultiplePhotos) return;
+      const dx = Math.abs(e.nativeEvent.pageX - galleryTouchStart.current.x);
+      const dy = Math.abs(e.nativeEvent.pageY - galleryTouchStart.current.y);
+      if (dx >= GALLERY_LOCK_MIN_DX && dx > dy * GALLERY_LOCK_AXIS_RATIO) {
+        setGalleryScrollLock(true);
+      }
+    },
+    [hasMultiplePhotos],
+  );
+
+  const handleGalleryTouchEnd = useCallback(() => {
+    setGalleryScrollLock(false);
+  }, []);
+
   return (
     <ScrollView
       style={styles.cardContent}
@@ -265,7 +326,7 @@ export default function PubCardContent({
         isExpanded && styles.contentContainerExpanded,
       ]}
       showsVerticalScrollIndicator={false}
-      scrollEnabled={scrollEnabled !== undefined ? scrollEnabled : isExpanded}
+      scrollEnabled={verticalScrollEnabled}
       pointerEvents={pointerEvents}
       onScroll={onScroll}
       scrollEventThrottle={16}
@@ -279,9 +340,8 @@ export default function PubCardContent({
       {/* ── Name row ─────────────────────────────────────────────────────── */}
       <View style={styles.nameRow}>
         <Text style={styles.pubName} numberOfLines={2}>{pub.name}</Text>
-        {/* TODO: replace with real closing_time from Google Places API */}
         <Text style={[styles.openStatus, isOpen ? styles.openStatusOpen : styles.openStatusClosed]}>
-          {isOpen ? 'Open until 11 PM' : 'Closed'}
+          {openStatusText}
         </Text>
       </View>
 
@@ -297,23 +357,73 @@ export default function PubCardContent({
         </View>
       )}
 
-      {/* ── Photos ───────────────────────────────────────────────────────── */}
-      {pub.photoUrls && pub.photoUrls.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.photoGallery}
-          contentContainerStyle={styles.photoGalleryContent}
+      {/* ── Photos (full-width pages; swipe or tap arrow for more) ───────── */}
+      {photoCount > 0 && (
+        <View
+          style={styles.photoGalleryWrap}
+          onLayout={(e) => {
+            const w = e.nativeEvent.layout.width;
+            if (w > 0) setGalleryWidth(w);
+          }}
         >
-          {pub.photoUrls.map((url, i) => (
-            <Image
-              key={i}
-              source={getImageSource(url)}
-              style={[styles.galleryPhoto, i === pub.photoUrls.length - 1 && styles.galleryPhotoLast]}
-              resizeMode="cover"
-            />
-          ))}
-        </ScrollView>
+          <ScrollView
+            ref={galleryRef}
+            horizontal
+            pagingEnabled
+            directionalLockEnabled
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            style={styles.photoGallery}
+            onTouchStart={handleGalleryTouchStart}
+            onTouchMove={handleGalleryTouchMove}
+            onTouchEnd={handleGalleryTouchEnd}
+            onTouchCancel={handleGalleryTouchEnd}
+            onMomentumScrollEnd={handleGalleryScroll}
+            onScrollEndDrag={handleGalleryScroll}
+          >
+            {photoUrls.map((url, i) => (
+              <Image
+                key={i}
+                source={getImageSource(url)}
+                style={[styles.galleryPhoto, { width: galleryWidth }]}
+                resizeMode="cover"
+              />
+            ))}
+          </ScrollView>
+
+          {isExpanded && hasMultiplePhotos && photoIndex > 0 && (
+            <TouchableOpacity
+              style={[styles.photoGalleryArrow, styles.photoGalleryArrowLeft]}
+              onPress={() => goToPhoto(photoIndex - 1)}
+              activeOpacity={0.85}
+              accessibilityLabel="Show previous photo"
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons name="chevron-left" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+
+          {isExpanded && hasMultiplePhotos && photoIndex < photoCount - 1 && (
+            <TouchableOpacity
+              style={[styles.photoGalleryArrow, styles.photoGalleryArrowRight]}
+              onPress={() => goToPhoto(photoIndex + 1)}
+              activeOpacity={0.85}
+              accessibilityLabel="Show next photo"
+              accessibilityRole="button"
+            >
+              <MaterialCommunityIcons name="chevron-right" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+
+          {hasMultiplePhotos && (
+            <View style={styles.photoGalleryBadge} pointerEvents="none">
+              <Text style={styles.photoGalleryBadgeText}>
+                {photoIndex + 1} / {photoCount}
+              </Text>
+            </View>
+          )}
+        </View>
       )}
 
       {/* ── Feature icons ────────────────────────────────────────────────── */}
@@ -546,11 +656,11 @@ export default function PubCardContent({
         )}
       </View>
 
-      {/* ── History ──────────────────────────────────────────────────────── */}
-      {pub.history && (
+      {/* ── History / description ───────────────────────────────────────── */}
+      {(pub.history || pub.description) && (
         <View style={styles.historyContainer}>
           <View style={styles.divider} />
-          <Text style={styles.history}>{pub.history}</Text>
+          <Text style={styles.history}>{pub.history || pub.description}</Text>
         </View>
       )}
     </ScrollView>
@@ -617,22 +727,51 @@ const styles = StyleSheet.create({
   },
 
   // ── Photos ────────────────────────────────────────────────────────────────
-  photoGallery: {
+  photoGalleryWrap: {
+    position: 'relative',
     marginBottom: 12,
-    marginHorizontal: -16,
-  },
-  photoGalleryContent: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  galleryPhoto: {
-    width: 260,
-    height: 180,
     borderRadius: 12,
+    overflow: 'hidden',
     backgroundColor: COLORS.lightGrey,
   },
-  galleryPhotoLast: {
-    marginRight: 0,
+  photoGallery: {
+    width: '100%',
+    borderRadius: 12,
+  },
+  galleryPhoto: {
+    height: 200,
+    backgroundColor: COLORS.lightGrey,
+  },
+  photoGalleryArrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -22,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(28, 28, 28, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoGalleryArrowLeft: {
+    left: 14,
+  },
+  photoGalleryArrowRight: {
+    right: 14,
+  },
+  photoGalleryBadge: {
+    position: 'absolute',
+    right: 14,
+    bottom: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(28, 28, 28, 0.55)',
+  },
+  photoGalleryBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 
   // ── Features ──────────────────────────────────────────────────────────────

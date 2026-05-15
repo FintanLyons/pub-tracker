@@ -104,6 +104,11 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		lon: parseFloat(pub.lon),
 		phone: pub.phone,
 		description: pub.description,
+		// Card UI reads `history`; Pubs_List stores enriched copy in `description`.
+		history:
+			(typeof pub.description === 'string' && pub.description.trim()) ||
+			(typeof pub.history === 'string' && pub.history.trim()) ||
+			null,
 		founded: pub.founded,
 		area,
 		borough,
@@ -114,7 +119,10 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		website: pub.website || null,
 		photoUrl: photoUrls[0] || null,
 		photoUrls,
-		closing_time: null,
+		opening_hours:
+			(typeof pub.opening_hours === 'string' && pub.opening_hours.trim()) ||
+			(typeof pub.openning_hours === 'string' && pub.openning_hours.trim()) ||
+			null,
 		points: 10,
 		features: convertFeaturesToArray(pub),
 		achievements: [],
