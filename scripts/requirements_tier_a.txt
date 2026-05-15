@@ -1,0 +1,2 @@
+# Tier A: HTTP fetch + main-text extraction (scripts/fetch_pub_websites_tier_a.py)
+trafilatura>=1.6.0

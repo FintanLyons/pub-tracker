@@ -1,0 +1,43 @@
+calc_postcode_district,calc_postcode_area,osm_type,osm_id,id,lat,lon,name,operator,photo_url1,photo_url2,photo_url3,photo_url4,photo_url5,founded,description,has_pub_garden,has_live_music,has_food_available,has_dog_friendly,has_pool_darts,has_accommodation,addr_housenumber,addr_street,phone,website,wikidata,opening_hours,opening_hours_a,opening_hours_b,opening_hours_c,opening_hours_d,opening_hours_e,opening_hours_f,tier_fetch_tier,tier_a_success,tier_a_http_status,tier_a_final_url,tier_a_error,tier_a_text_chars,tier_a_text_relpath,tier_a_excerpt
+E11,E,supabase,,9ba74653-4cf8-475d-8ab8-ac4bd90998c8,51.5767,0.011682,Sir Alfred Hitchcock Hotel,Independent,,,,,,,,,,,,,,,,(020) 8530 3724,https://www.thehitchcockhotel.com/,,,,,,,,,A,1,200,https://www.thehitchcockhotel.com/,,1298,,"What's On
+Sunday Roast
+Every Sunday - 12:00 to 17:00Join Us For Our Delicious Sunday Roasts Set in a Cosy Atmosphere
+Crackling Berkshire Rolled Pork Belly £19.50
+Grilled Chicken Paillard £17.50
+Free Range New Zealand Lamb £21.75
+All served with seasonal veg & yorkshire puds.
+Come and Experience Our New Menu
+Available from Friday 17th January -Thursday Steak Nights
+Every Thursday - EveningThe Legendary Steak Nights Are Back!
+Set Christmas Menu
+Available from 20th November -Indulge in the magic of the holidays with our beautifully curated Set Christmas Menu. Whether you're gathering with family, friends, or colleagues, our seasonal dishes showcase the finest ingredients of the winter season, prepared with care and creativity by our chefs.
+Enjoy a selection of classic Christmas favourites and contemporary winter creations.
+Available for lunch and dinner throughout the holiday period. Early booking is recommended.
+2 Courses - £45 3 Courses - £55
+Kids Menu
+-Tasty, Fun and Made Just for Little Foodies!
+CHRISTMAS DAY MENU
+25/12/25 -Join us for a festive Christmas Day feast featuring seasonal dishes, traditional favourites, and a warm pub atmosphere. Sit back, relax anbd enjoy Christmas done properly.
+5 Courses
+£100 per person
+Children Under 10 - £70
+Please email to make a reservation."
+E11,E,way,930391987,way/930391987,51.5579215,0.0173255,The Rookwood Village,,,,,,,,,,,,,,,314,Cann Hall Road,,https://therookwoodvillage.com/,,,,,,,,,A,0,200,https://therookwoodvillage.com/,short_extract,0,,
+E13,E,way,1027522305,way/1027522305,51.5302424,0.0229144,The Black Lion,,,,,,,,,,,,,,,59-61,High Street,,https://blacklionplaistow.co.uk/,,,,,,,,,A,0,200,https://blacklionplaistow.co.uk/,short_extract,0,,
+E6,E,supabase,,3d49e7a8-7b6f-40da-9779-995212d8f8cf,51.5304,0.038098,Boleyn Tavern,Remarkable Pubs,,,,,,,,,,,,,,,,(020) 8472 2182,https://boleyntavern.co.uk/,,,,,,,,,A,0,200,https://boleyntavern.co.uk/,below_min_chars,73,,
+E8,E,way,372808122,way/372808122,51.5495175,-0.054525,The Crown,,,,,,,,,,,,,,,418,Mare Street,,https://www.thecrownhackney.co.uk/,,,,,,,,,A,0,200,https://www.thecrownhackney.co.uk/,short_extract,0,,
+E9,E,way,600916017,way/600916017,51.5369808,-0.04491,The Empress,,,,,,,,,,,,,,,130a,Lauriston Road,+44 20 8533 5123,https://empresse9.co.uk/,,Mo 16:00-23:00, Tu-Sa 12:00-23:00, Su 12:00-10:30,,,,,A,0,200,https://empresse9.co.uk/,short_extract,0,,
+EC1M,EC,way,569138325,way/569138325,51.5198291,-0.105994,The Sir John Oldcastle,Wetherspoon,,,,,,,,,,,,,,29-35,Farringdon Road,+44 20 7242 1013,https://www.jdwetherspoon.com/pubs/the-sir-john-oldcastle-farringdon,Q88973876,Su-We 08:00-23:30, Th-Sa 08:00-24:00,,,,,,A,0,200,https://www.jdwetherspoon.com/pubs/the-sir-john-oldcastle-farringdon,short_extract,0,,
+EC2M,EC,way,160163216,way/160163216,51.5188007,-0.086027,Red Lion,Greene King,,,,,,,,,,,,,,1,Eldon Street,,https://www.greeneking.co.uk/pubs/greater-london/red-lion,,,,,,,,,A,0,403,https://www.greeneking.co.uk/pubs/greater-london/red-lion,HTTPError:403,0,,
+N16,N,node,262637210,node/262637210,51.5617228,-0.0735286,Coach & Horses,,,,,,,,,,,,,,,178,Stoke Newington High Street,,https://www.thecoachandhorsesn16.co.uk/,Q26647406,,,,,,,,A,0,200,https://www.thecoachandhorsesn16.co.uk/,short_extract,0,,
+N16,N,way,957099697,way/957099697,51.557632,-0.0806089,The Londesborough,,,,,,,,,,,,,,,36,Barbauld Road,,https://www.thelondesborough.com/,,,,,,,,,A,0,200,https://www.thelondesborough.com/,short_extract,0,,
+N4,N,way,224432174,way/224432174,51.5811385,-0.0997163,Brouhaha Bar,,,,,,,,,,,,,,,499-501,Green Lanes,+44 20 8348 8553,https://www.brouhahabar.com,,Mo-Tu 16:00-22:30, We-Th 16:00-23:00, Fr-Sa 16:00-00:00,,,,,A,0,200,https://www.brouhahabar.com,short_extract,0,,
+NW1,NW,way,337127150,way/337127150,51.5268807,-0.1370264,Crown & Anchor,,,,,,,,,,,,,,,137,Drummond Street,+44 20 7383 2681,https://www.thecrownandanchornw1.co.uk/,Q18207855,Mo-We 12:00-23:00, Th-Fr 12:00-00:00, Sa 10:00-00:00, Su 10:00-22:30,,,,A,0,200,https://www.thecrownandanchornw1.co.uk/,short_extract,0,,
+SE18,SE,node,3932136290,node/3932136290,51.4923617,0.0717588,SALT Woolwich,,,,,,,,,,,,,,,15,Major Draper Street,+44 20 8316 4413,https://www.saltbeerfactory.co.uk/,,Mo-Th 16:00-23:00, Fr-Sa 12:00-23:00, Su 12:00-22:00,,,,,A,0,200,https://www.saltbeerfactory.co.uk/,short_extract,0,,
+SW1H,SW,way,321967936,way/321967936,51.4999401,-0.1337243,The Old Star,Greene King,,,,,,,,,,,,,,66,Broadway,,https://www.greeneking.co.uk/pubs/greater-london/old-star,,,,,,,,,A,0,403,https://www.greeneking.co.uk/pubs/greater-london/old-star,HTTPError:403,0,,
+SW6,SW,way,151171737,way/151171737,51.4799074,-0.1960165,Bootsy Brogan's,,,,,,,,,,,,,,,1,Fulham Broadway,,https://www.allinlondon.co.uk/clubs-bars/pubs/1639-bootsy-brogans,,,,,,,,,A,0,200,https://www.allinlondon.co.uk/clubs-bars/pubs/1639-bootsy-brogans,short_extract,0,,
+W1C,W,node,452240939,node/452240939,51.5143279,-0.1474367,Spread Eagle,Greene King,,,,,,,,,,,,,,8,Woodstock Street,+44 20 7629 4695,https://www.greeneking.co.uk/pubs/greater-london/spread-eagle,,,,,,,,,A,0,403,https://www.greeneking.co.uk/pubs/greater-london/spread-eagle,HTTPError:403,0,,
+W1T,W,way,750447445,way/750447445,51.5225133,-0.1357722,Fitzrovia Belle,,,,,,,,,,,,,,,174,Tottenham Court Road,,https://www.bellepubsandrestaurants.co.uk/fitzroviabelle,,,,,,,,,A,0,200,https://www.bellepubsandrestaurants.co.uk/fitzroviabelle,short_extract,0,,
+W8,W,way,128292693,way/128292693,51.5020851,-0.1877493,Goat Tavern,Greene King,,,,,,,,,,,,,,3,Kensington High Street,,https://www.greeneking.co.uk/pubs/greater-london/goat-tavern,Q23301475,"Mo-Th 12:00-23:00; Fr,Sa 12:00-24:00; Su 12:00-22:00",,,,,,,A,0,403,https://www.greeneking.co.uk/pubs/greater-london/goat-tavern,HTTPError:403,0,,
+W8,W,way,829086948,way/829086948,51.49646,-0.1972511,The Hansom Cab,,,,,,,,,,,,,,,84-86,Earl's Court Road,,https://thehansomcab.com/,Q18160134,,,,,,,,A,0,200,https://thehansomcab.com/,short_extract,0,,
+W8,W,way,112673208,way/112673208,51.5089768,-0.1949996,The Old Swan,Greene King,,,,,,,,,,,,,,206,Kensington Church Street,,https://www.greeneking.co.uk/pubs/greater-london/old-swan,,"Su-We 12:00-23:00, Th 12:00-24:00, Fr,Sa 12:00-01:00",,,,,,,A,0,403,https://www.greeneking.co.uk/pubs/greater-london/old-swan,HTTPError:403,0,,

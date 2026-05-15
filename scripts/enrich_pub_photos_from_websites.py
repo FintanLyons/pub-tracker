@@ -98,23 +98,38 @@ METADATA_COLUMNS = ["photos_status", "photos_error", "photos_source", "photos_co
 # Compact batch prompt - sends ALL candidate images in one AI call.
 # We just need to know which image is the best exterior shot.
 VISION_BATCH_PROMPT = """
-You are picking the best exterior photo for a London pub from a set of candidate images.
+You are classifying photos for a London pub app.
 
 Pub: "{pub_name}" at {address}.
 
-You will be shown {n_images} numbered images (1 through {n_images}). Pick the ONE image that best shows the pub's exterior (building facade, entrance, signage, or outdoor seating).
+You will be shown {n_images} numbered images (1 through {n_images}).
 
 Return JSON only:
-{{"best_exterior_index": <1-{n_images} or 0 if none qualify>, "exterior_quality": <0.0-1.0>}}
+{{
+  "best_exterior_index": <1-{n_images} or 0 if none qualify>,
+  "exterior_quality": <0.0-1.0>,
+  "relevant_indices": [<list of 1-based indices that are relevant pub photos>]
+}}
 
-Rules:
-- "best_exterior_index": 1-based index of the best exterior image, or 0 if none of the images show the pub exterior
-- "exterior_quality": 0.0-1.0 (sharpness, composition, how clearly it shows the building)
-- Reject pure stock photos, logos, or generic graphics
-- Prefer a **clean photograph** of the building: facade, entrance, or street view
-- **Strongly avoid** website hero banners: large overlaid typography, "Book now" / menu buttons, marketing straplines, or other UI baked into the image. Those are not good app photos even if they show the pub.
-- Physical pub signage on the building is fine; digital text layers and CTAs are not
-- All else equal, prefer normal photo aspect ratios over extremely wide strips (typical hero banners)
+Definitions:
+- "best_exterior_index": the ONE image that best shows the pub exterior (building facade, entrance, signage, outdoor seating). 0 if none qualify.
+- "exterior_quality": 0.0-1.0 sharpness and composition of that exterior shot.
+- "relevant_indices": ALL images that are genuinely useful pub photos — exterior, interior, food/drinks, events. Include the exterior index here too if set.
+
+What to INCLUDE in relevant_indices:
+- Pub exterior / building facade / street view
+- Pub interior / bar area / seating
+- Food or drinks served at this pub
+- Events or atmosphere shots clearly inside/outside this venue
+
+What to EXCLUDE from relevant_indices (set to empty list [] if all images fall into these):
+- Pure stock photos or generic graphics unrelated to this specific pub
+- Logos, icons, maps, text-only graphics
+- Website hero banners with large overlaid UI text, "Book now" buttons, straplines
+- Photos that are clearly a different venue or unrelated subject
+- Social media profile pictures or avatars
+
+Physical signage on the building is fine. Digital text/CTA layers baked into the image are not.
 """.strip()
 
 
@@ -363,17 +378,18 @@ def pick_best_exterior_batch(
     address: str,
 ) -> Optional[Dict]:
     """
-    Send ALL candidate images in one AI call. Returns the index of the best
-    exterior image and its quality score.
+    Send ALL candidate images in one AI call.
 
-    Returns dict with: best_exterior_index (1-based, 0 = none), exterior_quality (0.0-1.0)
+    Returns dict with:
+      best_exterior_index  (1-based, 0 = none)
+      exterior_quality     (0.0-1.0)
+      relevant_indices     (list of 1-based indices that are useful pub photos)
     Returns None on error.
     """
     if not image_bytes_list:
         return None
 
     try:
-        # Build user content: text instruction + all numbered images
         n_images = len(image_bytes_list)
         prompt = VISION_BATCH_PROMPT.format(
             pub_name=pub_name,
@@ -383,7 +399,6 @@ def pick_best_exterior_batch(
 
         content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
         for i, img_bytes in enumerate(image_bytes_list, start=1):
-            # Resize to thumbnail for AI (cheap)
             thumb_bytes = make_ai_thumbnail(img_bytes)
             base64_image = base64.b64encode(thumb_bytes).decode("utf-8")
             content.append({"type": "text", "text": f"Image {i}:"})
@@ -391,31 +406,38 @@ def pick_best_exterior_batch(
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:image/jpeg;base64,{base64_image}",
-                    "detail": "low",  # Low detail = ~85 tokens fixed cost per image
+                    "detail": "low",
                 },
             })
 
-        # Single AI call for all images
         response = client.chat.completions.create(
             model=VISION_MODEL,
             response_format={"type": "json_object"},
-            messages=[
-                {"role": "user", "content": content},
-            ],
+            messages=[{"role": "user", "content": content}],
         )
 
         raw = response.choices[0].message.content or ""
         data = json.loads(raw)
 
-        # Validate response shape
         idx = data.get("best_exterior_index")
         quality = data.get("exterior_quality", 0)
+        relevant = data.get("relevant_indices", [])
+
         if idx is None:
             return None
+
+        # Sanitise relevant_indices — must be ints in valid range
+        if not isinstance(relevant, list):
+            relevant = []
+        relevant = [
+            int(x) for x in relevant
+            if isinstance(x, (int, float)) and 1 <= int(x) <= n_images
+        ]
 
         return {
             "best_exterior_index": int(idx),
             "exterior_quality": float(quality),
+            "relevant_indices": relevant,
         }
 
     except Exception as exc:
@@ -579,15 +601,19 @@ def process_pub(
 
     exterior_idx = 0
     exterior_quality = 0.0
+    relevant_set: set = set()
     if ai_result:
         exterior_idx = ai_result.get("best_exterior_index", 0) or 0
         exterior_quality = ai_result.get("exterior_quality", 0.0) or 0.0
+        relevant_set = set(ai_result.get("relevant_indices") or [])
 
-    # Validate index is in range
     if exterior_idx < 1 or exterior_idx > len(valid_images):
         exterior_idx = 0
 
-    # Build selected photos: exterior first (if found), then others in original order
+    # If AI returned no relevant_indices, fall back to all images (old behaviour)
+    if not relevant_set:
+        relevant_set = set(range(1, len(valid_images) + 1))
+
     selected: List[Tuple[str, bytes, Dict]] = []
     used_indices = set()
 
@@ -602,9 +628,13 @@ def process_pub(
     else:
         print(f"    → No exterior identified, skipping exterior slot")
 
-    # Fill remaining 4 slots in original order, skipping the one we already used
+    # Fill remaining slots with AI-approved relevant images only
     for i, (url, img_bytes, _, _) in enumerate(valid_images):
+        one_based = i + 1
         if i in used_indices:
+            continue
+        if one_based not in relevant_set:
+            print(f"    Skip (AI: not relevant): image #{one_based}")
             continue
         if len(selected) >= 5:
             break

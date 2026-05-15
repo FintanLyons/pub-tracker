@@ -88,21 +88,32 @@ def parse_filename(filename: str) -> Tuple[Optional[int], str, float]:
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Recover photo URLs from R2 into CSV.")
+    parser.add_argument("--input", "-i", type=Path,
+        default=repo_root() / "data" / "data_list_photos_enriched.csv")
+    parser.add_argument("--output", "-o", type=Path,
+        default=None,
+        help="Output path (defaults to same as input)")
+    args = parser.parse_args()
+
+    in_path  = args.input
+    out_path = args.output or in_path
+
     load_dotenv(repo_root() / ".env")
 
-    account_id = os.getenv("R2_ACCOUNT_ID")
-    key_id     = os.getenv("R2_ACCESS_KEY_ID")
-    secret     = os.getenv("R2_SECRET_ACCESS_KEY")
-    bucket     = os.getenv("R2_BUCKET_NAME", "pub-tracker")
+    account_id  = os.getenv("R2_ACCOUNT_ID")
+    key_id      = os.getenv("R2_ACCESS_KEY_ID")
+    secret      = os.getenv("R2_SECRET_ACCESS_KEY")
+    bucket      = os.getenv("R2_BUCKET_NAME", "pub-tracker")
     public_base = os.getenv("R2_PUBLIC_BASE_URL", "").rstrip("/")
 
     if not all([account_id, key_id, secret, public_base]):
         print("R2 env vars incomplete", file=sys.stderr)
         sys.exit(1)
 
-    csv_path = repo_root() / "data" / "data_list_photos_enriched.csv"
-    if not csv_path.is_file():
-        print(f"CSV not found: {csv_path}", file=sys.stderr)
+    if not in_path.is_file():
+        print(f"CSV not found: {in_path}", file=sys.stderr)
         sys.exit(1)
 
     print("Listing R2 bucket…")
@@ -113,8 +124,8 @@ def main() -> None:
         print("No pub_photos/ objects found in bucket — nothing to recover.")
         return
 
-    print(f"\nLoading CSV: {csv_path}")
-    with csv_path.open(encoding="utf-8", errors="replace") as f:
+    print(f"\nLoading CSV: {in_path}")
+    with in_path.open(encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
         rows = [dict(r) for r in reader]
@@ -189,12 +200,12 @@ def main() -> None:
     print(f"  Recovered from R2 : {recovered}")
     print(f"  Not in R2         : {not_in_r2}")
 
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
+    with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nSaved → {csv_path}")
+    print(f"\nSaved → {out_path}")
     print(f"Now run Firecrawl retry for the remaining {not_in_r2} unrecovered pubs.")
 
 

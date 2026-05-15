@@ -302,12 +302,17 @@ def process_pub_firecrawl(
 
     exterior_idx = 0
     exterior_quality = 0.0
+    relevant_set: set = set()
     if ai_result:
         exterior_idx = ai_result.get("best_exterior_index", 0) or 0
         exterior_quality = ai_result.get("exterior_quality", 0.0) or 0.0
+        relevant_set = set(ai_result.get("relevant_indices") or [])
 
     if exterior_idx < 1 or exterior_idx > len(valid_images):
         exterior_idx = 0
+
+    if not relevant_set:
+        relevant_set = set(range(1, len(valid_images) + 1))
 
     selected: List[Tuple[str, bytes, Dict[str, Any]]] = []
     used = set()
@@ -321,7 +326,13 @@ def process_pub_firecrawl(
         print("    → No exterior identified, skipping exterior slot")
 
     for i, (url, ib, _, _) in enumerate(valid_images):
-        if i in used or len(selected) >= 5:
+        one_based = i + 1
+        if i in used:
+            continue
+        if one_based not in relevant_set:
+            print(f"    Skip (AI: not relevant): image #{one_based}")
+            continue
+        if len(selected) >= 5:
             break
         selected.append((url, ib, {"category": "other", "quality_score": 0.5}))
 
