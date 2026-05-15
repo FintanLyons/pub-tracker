@@ -19,7 +19,42 @@
 
 
 -- ============================================================================
--- A. Row Level Security for pub_list
+-- A0. Ensure Pubs_List.id is the primary key
+--     (Supabase dashboard CSV imports often create a separate auto-id column
+--      and leave the imported id column without a constraint.)
+-- ============================================================================
+
+-- If Supabase added its own integer/uuid PK column (commonly named "id" or
+-- left unnamed), drop it and promote our text id column instead.
+-- This block is safe to run even if id is already the PK.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+     AND tc.table_schema = kcu.table_schema
+    WHERE tc.table_schema = 'public'
+      AND tc.table_name   = 'Pubs_List'
+      AND tc.constraint_type = 'PRIMARY KEY'
+      AND kcu.column_name = 'id'
+  ) THEN
+    -- Remove any existing PK first (e.g. a Supabase-generated one)
+    EXECUTE (
+      SELECT 'ALTER TABLE public."Pubs_List" DROP CONSTRAINT ' || quote_ident(tc.constraint_name)
+      FROM information_schema.table_constraints tc
+      WHERE tc.table_schema = 'public'
+        AND tc.table_name   = 'Pubs_List'
+        AND tc.constraint_type = 'PRIMARY KEY'
+      LIMIT 1
+    );
+    ALTER TABLE public."Pubs_List" ADD PRIMARY KEY (id);
+  END IF;
+END $$;
+
+
+-- ============================================================================
+-- A. Row Level Security for Pubs_List
 -- ============================================================================
 
 ALTER TABLE public."Pubs_List" ENABLE ROW LEVEL SECURITY;
