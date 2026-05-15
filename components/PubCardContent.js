@@ -297,15 +297,23 @@ export default function PubCardContent({
         </View>
       )}
 
-      {/* ── Photo ────────────────────────────────────────────────────────── */}
-      {pub.photoUrl && (
-        <View style={styles.photoContainer}>
-          <Image
-            source={getImageSource(pub.photoUrl)}
-            style={styles.pubPhoto}
-            resizeMode="cover"
-          />
-        </View>
+      {/* ── Photos ───────────────────────────────────────────────────────── */}
+      {pub.photoUrls && pub.photoUrls.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.photoGallery}
+          contentContainerStyle={styles.photoGalleryContent}
+        >
+          {pub.photoUrls.map((url, i) => (
+            <Image
+              key={i}
+              source={getImageSource(url)}
+              style={[styles.galleryPhoto, i === pub.photoUrls.length - 1 && styles.galleryPhotoLast]}
+              resizeMode="cover"
+            />
+          ))}
+        </ScrollView>
       )}
 
       {/* ── Feature icons ────────────────────────────────────────────────── */}
@@ -608,18 +616,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  // ── Photo ─────────────────────────────────────────────────────────────────
-  photoContainer: {
-    width: '100%',
-    height: 200,
+  // ── Photos ────────────────────────────────────────────────────────────────
+  photoGallery: {
     marginBottom: 12,
+    marginHorizontal: -16,
+  },
+  photoGalleryContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  galleryPhoto: {
+    width: 260,
+    height: 180,
     borderRadius: 12,
-    overflow: 'hidden',
     backgroundColor: COLORS.lightGrey,
   },
-  pubPhoto: {
-    width: '100%',
-    height: '100%',
+  galleryPhotoLast: {
+    marginRight: 0,
   },
 
   // ── Features ──────────────────────────────────────────────────────────────

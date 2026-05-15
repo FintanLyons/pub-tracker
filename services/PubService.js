@@ -75,41 +75,36 @@ const PAGE_SIZE = 500;
 const SAFETY_LIMIT = 5000;
 
 const convertFeaturesToArray = (pub) =>
-	PUB_FEATURE_CHIPS.filter((f) => pub[f.flag]).map((f) => f.name);
-
-const getSpatialAssignment = (pub) => {
-	const embedded = pub?.pub_spatial_assignments;
-	if (Array.isArray(embedded)) return embedded[0] || null;
-	if (embedded && typeof embedded === 'object') return embedded;
-	return null;
-};
+	PUB_FEATURE_CHIPS.filter((f) => pub[f.flag] === true).map((f) => f.name);
 
 const formatPub = (pub, visitedSet, favoritesSet) => {
-	const spatial = getSpatialAssignment(pub);
+	// postcode_district / postcode_area live directly on pub_list rows
 	const postcodeDistrict =
-		typeof spatial?.postcode_district === 'string' && spatial.postcode_district.trim().length > 0
-			? spatial.postcode_district.trim()
+		typeof pub.postcode_district === 'string' && pub.postcode_district.trim().length > 0
+			? pub.postcode_district.trim()
 			: null;
 	const postcodeArea =
-		typeof spatial?.postcode_area === 'string' && spatial.postcode_area.trim().length > 0
-			? spatial.postcode_area.trim()
+		typeof pub.postcode_area === 'string' && pub.postcode_area.trim().length > 0
+			? pub.postcode_area.trim()
 			: null;
-	// `area` on pub = postcode district (map filters, profile "district")
-	// `borough` on pub = postcode area letters (parent grouping)
-	const area = postcodeDistrict || (typeof pub.area === 'string' ? pub.area.trim() : '') || null;
-	const borough = postcodeArea
-		|| (typeof pub.borough === 'string' && pub.borough.trim().length > 0 ? pub.borough.trim() : null);
+	// `area` = postcode district (map filters, district trophies)
+	// `borough` = postcode area letters (parent grouping, area trophies)
+	const area = postcodeDistrict;
+	const borough = postcodeArea;
 	const districtDisplayName = area ? getPostcodeDistrictDisplayName(area) : null;
+
+	const photoUrls = [1, 2, 3, 4, 5]
+		.map((i) => pub[`photo_url${i}`])
+		.filter(Boolean);
+
 	return {
 		id: pub.id,
 		name: pub.name,
 		lat: parseFloat(pub.lat),
 		lon: parseFloat(pub.lon),
-		address: pub.address,
 		phone: pub.phone,
 		description: pub.description,
 		founded: pub.founded,
-		history: pub.history,
 		area,
 		borough,
 		postcodeDistrict,
@@ -117,26 +112,16 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		districtDisplayName,
 		ownership: pub.ownership,
 		website: pub.website || null,
-		photoUrl: pub.photo_url,
-		closing_time: (() => {
-			const raw = pub.closing_time;
-			if (raw == null || raw === '') return null;
-			const n = Number(raw);
-			return Number.isFinite(n) ? n : null;
-		})(),
-		points: pub.points || 10,
+		photoUrl: photoUrls[0] || null,
+		photoUrls,
+		closing_time: null,
+		points: 10,
 		features: convertFeaturesToArray(pub),
-		achievements: pub.achievement ? [pub.achievement] : [],
+		achievements: [],
 		isVisited: visitedSet.has(pub.id),
 		isFavorite: favoritesSet.has(pub.id),
 	};
 };
-
-const SPATIAL_SELECT = [
-	'postcode_district',
-	'postcode_area',
-	'assignment_status',
-].join(', ');
 
 export const fetchLondonPubs = async (options = {}) => {
 	try {
@@ -157,7 +142,7 @@ export const fetchLondonPubs = async (options = {}) => {
 		let hasMore = true;
 
 		while (hasMore) {
-			let query = supabase.from('pubs_all').select(`*, pub_spatial_assignments(${SPATIAL_SELECT})`);
+			let query = supabase.from('pub_list').select('*');
 
 			if (hasBounds) {
 				query = query
