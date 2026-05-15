@@ -193,17 +193,20 @@ export default function PubCardContent({
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {
     if (!userId) return;
-    setDrinkCount(prev => {
+    let shouldMarkVisited = false;
+    setDrinkCount((prev) => {
       const next = Math.max(0, prev + delta);
-      // Auto-mark as visited when the user logs their first drink
-      if (delta > 0 && prev === 0 && !pub.isVisited && onToggleVisited) {
-        onToggleVisited(pub.id);
-      }
+      shouldMarkVisited = delta > 0 && prev === 0 && !pub.isVisited;
       upsertDrinkCount(userId, pub.id, next).catch(() => {
-        setDrinkCount(prev); // rollback on error
+        setDrinkCount(prev);
       });
       return next;
     });
+    // Never call onToggleVisited inside the setDrinkCount updater — that updates MapScreen
+    // during PubCardContent's state flush ("Cannot update MapScreen while rendering").
+    if (shouldMarkVisited && onToggleVisited) {
+      queueMicrotask(() => onToggleVisited(pub.id));
+    }
   }, [userId, pub?.id, pub?.isVisited, onToggleVisited]);
 
   // ── Review handlers ────────────────────────────────────────────────────────

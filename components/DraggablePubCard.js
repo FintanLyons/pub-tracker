@@ -6,23 +6,45 @@ import {
   Animated,
   Easing,
   PanResponder,
-  TouchableOpacity,
   StyleSheet,
   Alert,
   Platform,
 } from 'react-native';
-
-/**
- * Android: sheet `translateY` with useNativeDriver + children Touchables often desyncs hit-testing
- * from the drawn frame (first tap misses, second works). iOS keeps native driver for smoothness.
- */
-const SHEET_USE_NATIVE_DRIVER = Platform.OS !== 'android';
+import { Pressable } from 'react-native-gesture-handler';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
 import PubReportFormModal from './PubReportFormModal';
 import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
+
+/** Native driver for sheet translateY; header actions use RNGH Pressable for Android hit-testing. */
+const SHEET_USE_NATIVE_DRIVER = true;
+
+/**
+ * Header chrome buttons — RNGH Pressable aligns touches with native-driver translateY on Android.
+ * @param {'icon' | 'pill'} variant — icon: ripple on Android; pill (Visited): scale only.
+ */
+function SheetActionPressable({ style, onPress, children, variant = 'icon' }) {
+  const androidRipple =
+    variant === 'icon' && Platform.OS === 'android'
+      ? { color: 'rgba(28, 28, 28, 0.1)' }
+      : undefined;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      android_ripple={androidRipple}
+      style={({ pressed }) => [
+        style,
+        pressed && variant === 'pill' && styles.sheetPillPressed,
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
+}
 const TOP_THRESHOLD = 2;
 const POSITION_EPSILON = 0.5;
 /** Sheet drag must be clearly vertical — avoids stealing horizontal photo swipes. */
@@ -497,14 +519,14 @@ export default function DraggablePubCard({
       {/* Report, Favorite, Visited and Close buttons - positioned differently based on state */}
       {isExpanded ? (
         <>
-          <TouchableOpacity
+          <SheetActionPressable
+            variant="pill"
             style={[
               styles.visitedButtonTop,
               { top: expandedHeaderTop },
               pub.isVisited && styles.visitedButtonTopActive
             ]}
             onPress={() => onToggleVisited(pub.id)}
-            activeOpacity={0.7}
           >
             <Text style={[
               styles.visitedButtonTopText,
@@ -512,46 +534,43 @@ export default function DraggablePubCard({
             ]}>
               {pub.isVisited ? 'Visited' : 'Not Visited'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={[styles.reportButtonTop, { top: expandedHeaderTop }]}
             onPress={() => setReportModalVisible(true)}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons 
               name="flag-outline" 
               size={24} 
               color={COLORS.mediumGrey} 
             />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={[styles.favoriteButtonTop, { top: expandedHeaderTop }]}
             onPress={() => onToggleFavorite(pub.id)}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons 
               name={pub.isFavorite ? "star" : "star-outline"} 
               size={24} 
               color={pub.isFavorite ? COLORS.amber : COLORS.mediumGrey} 
             />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={[styles.closeButtonTop, { top: expandedHeaderTop }]}
             onPress={handleClose}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons name="close" size={24} color={COLORS.mediumGrey} />
-          </TouchableOpacity>
+          </SheetActionPressable>
         </>
       ) : (
         <>
-          <TouchableOpacity
+          <SheetActionPressable
+            variant="pill"
             style={[
               styles.visitedButton,
               pub.isVisited && styles.visitedButtonActive
             ]}
             onPress={() => onToggleVisited(pub.id)}
-            activeOpacity={0.7}
           >
             <Text style={[
               styles.visitedButtonText,
@@ -559,36 +578,33 @@ export default function DraggablePubCard({
             ]}>
               {pub.isVisited ? 'Visited' : 'Not Visited'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={styles.reportButton}
             onPress={() => setReportModalVisible(true)}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons 
               name="flag-outline" 
               size={24} 
               color={COLORS.mediumGrey} 
             />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={styles.favoriteButton}
             onPress={() => onToggleFavorite(pub.id)}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons 
               name={pub.isFavorite ? "star" : "star-outline"} 
               size={24} 
               color={pub.isFavorite ? COLORS.amber : COLORS.mediumGrey} 
             />
-          </TouchableOpacity>
-          <TouchableOpacity
+          </SheetActionPressable>
+          <SheetActionPressable
             style={styles.closeButton}
             onPress={handleClose}
-            activeOpacity={0.7}
           >
             <MaterialCommunityIcons name="close" size={24} color={COLORS.mediumGrey} />
-          </TouchableOpacity>
+          </SheetActionPressable>
         </>
       )}
       
@@ -637,6 +653,9 @@ export default function DraggablePubCard({
 }
 
 const styles = StyleSheet.create({
+  sheetPillPressed: {
+    transform: [{ scale: 0.98 }],
+  },
   /** Outer sheet: transform + size only — avoids mixing layout props with GPU translate. */
   cardSheet: {
     position: 'absolute',

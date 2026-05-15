@@ -161,10 +161,12 @@ export const getLeagueLeaderboard = async (leagueId) => {
 
   const memberIds = members.map(m => m.user_id);
 
-  // Batch fetch users and stats
   const [{ data: users }, { data: stats }] = await Promise.all([
-    supabase.from('users').select('*').in('id', memberIds),
-    supabase.from('user_stats').select('*').in('user_id', memberIds),
+    supabase.from('users').select('id, username, avatar_url').in('id', memberIds),
+    supabase
+      .from('user_stats')
+      .select('user_id, pubs_visited, total_score, level, total_drinks')
+      .in('user_id', memberIds),
   ]);
 
   const statsMap = {};

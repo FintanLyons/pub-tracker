@@ -13,10 +13,13 @@ import {
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getCurrentUserSecure } from '../services/SecureAuthService';
-import { getFriendsLeaderboard, getPendingFriendRequests } from '../services/FriendsService';
-import { getUserLeagues, getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
-import { getCachedLeaderboardData } from '../services/LeaderboardCache';
+import { useAuth } from '../contexts/AuthContext';
+import { getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
+import {
+  fetchLeaderboardBundle,
+  getCachedLeaderboardData,
+  cacheLeaderboardData,
+} from '../services/leaderboardData';
 import AddFriendModal from '../components/AddFriendModal';
 import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
@@ -25,6 +28,7 @@ import ShareLeagueModal from '../components/ShareLeagueModal';
 import { COLORS } from '../constants/theme';
 
 export default function LeaderboardScreen() {
+  const { user: authUser } = useAuth();
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('friends'); // 'friends' or 'leagues'
   const [friendsLeaderboard, setFriendsLeaderboard] = useState([]);
@@ -49,82 +53,54 @@ export default function LeaderboardScreen() {
     selectedLeagueIdRef.current = selectedLeague?.id ?? null;
   }, [selectedLeague?.id]);
 
+  const applyBundle = useCallback((bundle) => {
+    if (!bundle) return;
+    setFriendsLeaderboard(bundle.friendsLeaderboard || []);
+    setPendingRequestsCount(bundle.pendingRequestsCount || 0);
+    const leagues = bundle.leagues || [];
+    setLeagues(leagues);
+    const league =
+      bundle.selectedLeague
+      ?? (bundle.selectedLeagueId
+        ? leagues.find((l) => l.id === bundle.selectedLeagueId)
+        : null);
+    setSelectedLeague(league ?? null);
+    setLeagueLeaderboard(league ? (bundle.leagueLeaderboard || []) : []);
+  }, []);
+
   const loadData = useCallback(async () => {
+    if (!authUser?.id) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    setCurrentUser(authUser);
+
+    const cachedData = getCachedLeaderboardData();
+    if (cachedData) {
+      applyBundle(cachedData);
+      setLoading(false);
+      setRefreshing(false);
+    }
+
     try {
-      const user = await getCurrentUserSecure();
-      if (!user) {
-        Alert.alert('Not Logged In', 'Please log in to view the leaderboard');
-        return;
-      }
-
-      setCurrentUser(user);
-
-      // Try to use cached leaderboard data first (loaded at app startup)
-      const cachedData = getCachedLeaderboardData();
-      if (cachedData) {
-        // Use cached data for instant display
-        setFriendsLeaderboard(cachedData.friendsLeaderboard || []);
-        setPendingRequestsCount(cachedData.pendingRequestsCount || 0);
-        setLeagues(cachedData.leagues || []);
-        
-        if (cachedData.selectedLeagueId && cachedData.leagues) {
-          const cachedLeague = cachedData.leagues.find(l => l.id === cachedData.selectedLeagueId);
-          if (cachedLeague) {
-            setSelectedLeague(cachedLeague);
-            setLeagueLeaderboard(cachedData.leagueLeaderboard || []);
-          }
-        } else {
-          setSelectedLeague(null);
-          setLeagueLeaderboard([]);
-        }
-        
-        setLoading(false);
-        setRefreshing(false);
-      }
-
-      // Refresh data in background (non-blocking)
-      try {
-        const [friends, pendingRequests, userLeagues] = await Promise.all([
-          getFriendsLeaderboard(user.id),
-          getPendingFriendRequests(user.id),
-          getUserLeagues(user.id),
-        ]);
-
-        setFriendsLeaderboard(friends);
-        setPendingRequestsCount(pendingRequests.length);
-        setLeagues(userLeagues);
-
-        const preferId = selectedLeagueIdRef.current;
-        let nextLeague = null;
-        if (userLeagues.length > 0) {
-          if (preferId && userLeagues.some((l) => l.id === preferId)) {
-            nextLeague = userLeagues.find((l) => l.id === preferId);
-          } else {
-            nextLeague = userLeagues[0];
-          }
-          setSelectedLeague(nextLeague);
-          const leagueBoard = await getLeagueLeaderboard(nextLeague.id);
-          setLeagueLeaderboard(leagueBoard);
-        } else {
-          setSelectedLeague(null);
-          setLeagueLeaderboard([]);
-        }
-      } catch (refreshError) {
-        console.error('Error refreshing leaderboard data:', refreshError);
-        // Don't show alert if we have cached data - just log the error
-        const hasCachedData = !!getCachedLeaderboardData();
-        if (!hasCachedData) {
-          Alert.alert('Error', 'Failed to load leaderboard data');
-        }
-      }
+      const bundle = await fetchLeaderboardBundle(
+        authUser.id,
+        selectedLeagueIdRef.current,
+      );
+      cacheLeaderboardData(bundle);
+      applyBundle(bundle);
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
-      Alert.alert('Error', 'Failed to load leaderboard data');
+      if (!getCachedLeaderboardData()) {
+        Alert.alert('Error', 'Failed to load leaderboard data');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [authUser, applyBundle]);
 
   useFocusEffect(
     useCallback(() => {

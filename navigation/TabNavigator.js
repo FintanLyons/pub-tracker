@@ -9,6 +9,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchPostcodeAreaSummaries } from '../services/PubService';
+import { prefetchLeaderboardCache } from '../services/leaderboardData';
 import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -93,6 +94,11 @@ export default function TabNavigator() {
     loadPostcodeAreaSummaries();
 
     return () => { isCancelled = true; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    prefetchLeaderboardCache(user.id);
   }, [user?.id]);
 
   const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
