@@ -27,6 +27,21 @@
 -- If Supabase added its own integer/uuid PK column (commonly named "id" or
 -- left unnamed), drop it and promote our text id column instead.
 -- This block is safe to run even if id is already the PK.
+-- Rename calc_postcode_* columns to plain names so the rest of the script matches.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='Pubs_List'
+                AND column_name='calc_postcode_district') THEN
+    ALTER TABLE public."Pubs_List" RENAME COLUMN calc_postcode_district TO postcode_district;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='Pubs_List'
+                AND column_name='calc_postcode_area') THEN
+    ALTER TABLE public."Pubs_List" RENAME COLUMN calc_postcode_area TO postcode_area;
+  END IF;
+END $$;
+
 DO $$
 DECLARE
   v_pk_col  TEXT;
