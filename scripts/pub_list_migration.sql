@@ -28,27 +28,32 @@
 -- left unnamed), drop it and promote our text id column instead.
 -- This block is safe to run even if id is already the PK.
 DO $$
+DECLARE
+  v_pk_col  TEXT;
+  v_pk_name TEXT;
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints tc
+  -- Find current PK column name (if any)
+  SELECT kcu.column_name, tc.constraint_name
+    INTO v_pk_col, v_pk_name
+    FROM information_schema.table_constraints tc
     JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name
-     AND tc.table_schema = kcu.table_schema
-    WHERE tc.table_schema = 'public'
-      AND tc.table_name   = 'Pubs_List'
-      AND tc.constraint_type = 'PRIMARY KEY'
-      AND kcu.column_name = 'id'
-  ) THEN
-    -- Remove any existing PK first (e.g. a Supabase-generated one)
-    EXECUTE (
-      SELECT 'ALTER TABLE public."Pubs_List" DROP CONSTRAINT ' || quote_ident(tc.constraint_name)
-      FROM information_schema.table_constraints tc
-      WHERE tc.table_schema = 'public'
-        AND tc.table_name   = 'Pubs_List'
-        AND tc.constraint_type = 'PRIMARY KEY'
-      LIMIT 1
-    );
+     AND tc.table_schema    = kcu.table_schema
+   WHERE tc.table_schema   = 'public'
+     AND tc.table_name     = 'Pubs_List'
+     AND tc.constraint_type = 'PRIMARY KEY'
+   LIMIT 1;
+
+  -- If no PK at all, just add one on id
+  IF v_pk_col IS NULL THEN
     ALTER TABLE public."Pubs_List" ADD PRIMARY KEY (id);
+
+  -- If PK exists but is NOT on id, drop it and add on id
+  ELSIF v_pk_col <> 'id' THEN
+    EXECUTE format('ALTER TABLE public."Pubs_List" DROP CONSTRAINT %I', v_pk_name);
+    ALTER TABLE public."Pubs_List" ADD PRIMARY KEY (id);
+
+  -- Else id is already the PK — nothing to do
   END IF;
 END $$;
 
