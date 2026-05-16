@@ -92,6 +92,7 @@ export default function MapScreen() {
     fitFeature,
     fitBoundsObject,
     handleCurrentLocation,
+    handleMapLoaded,
   } = useMapCamera({ setIsLocationLoaded, isMapFocused: isFocused });
 
   const {
@@ -109,6 +110,7 @@ export default function MapScreen() {
     showOnlyFavorites,
     showOnlyAchievements,
     closingTimeMin,
+    minRating,
     showFilterScreen,
     allOwnerships,
     availableYearRange,
@@ -172,6 +174,7 @@ export default function MapScreen() {
     const hasFavorites = showOnlyFavorites === true;
     const hasAchievements = showOnlyAchievements === true;
     const hasClosingTime = closingTimeMin != null;
+    const hasMinRating = minRating != null;
 
     return allPubs.filter((pub) => {
       if (selectedDistrictFeature && !pubInsideFeature(pub, selectedDistrictFeature)) return false;
@@ -196,6 +199,10 @@ export default function MapScreen() {
           if (!isOpenPastMidnight(pub.opening_hours)) return false;
         }
       }
+      if (hasMinRating) {
+        const avg = pub.avgRating;
+        if (avg == null || avg < minRating) return false;
+      }
       return true;
     });
   }, [
@@ -208,6 +215,7 @@ export default function MapScreen() {
     showOnlyFavorites,
     showOnlyAchievements,
     closingTimeMin,
+    minRating,
   ]);
 
   // Deselect pub when it falls outside the active filter set.
@@ -276,6 +284,18 @@ export default function MapScreen() {
     sheetTranslateYRef.current = new Animated.Value(Dimensions.get('window').height);
   }
   const sheetTranslateY = sheetTranslateYRef.current;
+  const mapLoadSignaledRef = useRef(false);
+
+  const onMapRegionDidChange = useCallback(
+    (event) => {
+      if (!mapLoadSignaledRef.current) {
+        mapLoadSignaledRef.current = true;
+        handleMapLoaded();
+      }
+      handleRegionChange(event);
+    },
+    [handleMapLoaded, handleRegionChange],
+  );
 
   const mapSheetMetrics = useMemo(() => {
     const height = mapAreaHeight > 0 ? mapAreaHeight : Dimensions.get('window').height;
@@ -430,7 +450,8 @@ export default function MapScreen() {
         androidView="surface"
         touchPitch={false}
         touchRotate={false}
-        onRegionDidChange={handleRegionChange}
+        onRegionDidChange={onMapRegionDidChange}
+        onDidFinishLoadingMap={handleMapLoaded}
         onDidFailLoadingMap={() => console.warn('MapLibre: map failed to load')}
       >
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
@@ -676,6 +697,7 @@ export default function MapScreen() {
         showOnlyFavorites={showOnlyFavorites}
         showOnlyAchievements={showOnlyAchievements}
         closingTimeMin={closingTimeMin}
+        minRating={minRating}
         onApply={handleFilterApply}
       />
 

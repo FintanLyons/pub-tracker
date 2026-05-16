@@ -34,12 +34,16 @@ const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderbo
 
 const Tab = createBottomTabNavigator();
 
+/** Minimum splash duration so the map can centre on GPS before first reveal. */
+const MIN_SPLASH_MS = 850;
+
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { achievements, totalVisited, drinkStats } = useUserStats();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
+  const [minSplashElapsed, setMinSplashElapsed] = useState(false);
   const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
   const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
   const [mapReturnToProfile, setMapReturnToProfile] = useState({
@@ -101,7 +105,12 @@ export default function TabNavigator() {
     prefetchLeaderboardCache(user.id);
   }, [user?.id]);
 
-  const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
+  useEffect(() => {
+    const timer = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded && minSplashElapsed;
   
   return (
     <LoadingContext.Provider value={{

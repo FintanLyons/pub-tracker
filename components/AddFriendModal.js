@@ -16,6 +16,7 @@ import { searchUsers } from '../services/UserService';
 import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejectFriendRequest, getFriends, removeFriend } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
 import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
+import UserAvatar from './UserAvatar';
 
 export default function AddFriendModal({
   visible,
@@ -188,9 +189,7 @@ export default function AddFriendModal({
 
   const renderSearchResult = ({ item }) => (
     <View style={styles.resultItem}>
-      <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
-      </View>
+      <UserAvatar avatarUrl={item.avatar_url} size={48} style={styles.userIcon} />
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.username}</Text>
         <Text style={styles.userDate}>
@@ -208,9 +207,7 @@ export default function AddFriendModal({
 
   const renderPendingRequest = ({ item }) => (
     <View style={styles.requestItem}>
-      <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
-      </View>
+      <UserAvatar avatarUrl={item.requester?.avatar_url} size={48} style={styles.userIcon} />
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.requester.username}</Text>
         <Text style={styles.userDate}>
@@ -236,9 +233,7 @@ export default function AddFriendModal({
 
   const renderFriend = ({ item }) => (
     <View style={styles.friendItem}>
-      <View style={styles.userIcon}>
-        <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
-      </View>
+      <UserAvatar avatarUrl={item.avatar_url} size={48} style={styles.userIcon} />
       <View style={styles.userInfo}>
         <Text style={styles.username}>{item.username}</Text>
         <Text style={styles.userDate}>
@@ -634,12 +629,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   userIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E0E0E0',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   userInfo: {

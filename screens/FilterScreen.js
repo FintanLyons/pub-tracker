@@ -19,6 +19,13 @@ const CLOSING_TIME_OPTIONS = [
   { label: 'Open past midnight', value: 'past_midnight', icon: 'weather-night' },
 ];
 
+const RATING_FILTER_OPTIONS = [
+  { label: '3.0', value: 3 },
+  { label: '3.5', value: 3.5 },
+  { label: '4.0', value: 4.0 },
+  { label: '4.5', value: 4.5 },
+];
+
 /** Horizontal padding for filter chip sections; gap between chips in a row. */
 const FILTER_SECTION_PAD = 12;
 const FILTER_CHIP_GAP = 8;
@@ -47,6 +54,7 @@ export default function FilterScreen({
   showOnlyFavorites,
   showOnlyAchievements,
   closingTimeMin,
+  minRating,
   onApply 
 }) {
   const insets = useSafeAreaInsets();
@@ -60,6 +68,7 @@ export default function FilterScreen({
   const [localShowOnlyFavorites, setLocalShowOnlyFavorites] = useState(showOnlyFavorites || false);
   const [localShowOnlyAchievements, setLocalShowOnlyAchievements] = useState(showOnlyAchievements || false);
   const [localClosingTimeMin, setLocalClosingTimeMin] = useState(closingTimeMin || null);
+  const [localMinRating, setLocalMinRating] = useState(minRating ?? null);
 
   useEffect(() => {
     setLocalSelectedFeatures(new Set(selectedFeatures));
@@ -68,7 +77,8 @@ export default function FilterScreen({
     setLocalShowOnlyFavorites(showOnlyFavorites || false);
     setLocalShowOnlyAchievements(showOnlyAchievements || false);
     setLocalClosingTimeMin(closingTimeMin || null);
-  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, closingTimeMin, visible]);
+    setLocalMinRating(minRating ?? null);
+  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, closingTimeMin, minRating, visible]);
 
   const allFeatureNames = PUB_FEATURE_CHIPS.map((f) => f.name);
   const allFeaturesSelected = allFeatureNames.every((n) => localSelectedFeatures.has(n));
@@ -108,6 +118,7 @@ export default function FilterScreen({
     setLocalShowOnlyFavorites(false);
     setLocalShowOnlyAchievements(false);
     setLocalClosingTimeMin(null);
+    setLocalMinRating(null);
   };
 
   const handleYearRangeChange = (range) => {
@@ -132,6 +143,7 @@ export default function FilterScreen({
       showOnlyFavorites: localShowOnlyFavorites,
       showOnlyAchievements: localShowOnlyAchievements,
       closingTimeMin: localClosingTimeMin,
+      minRating: localMinRating,
     });
     onClose();
   };
@@ -202,6 +214,42 @@ export default function FilterScreen({
                   Achievements
                 </Text>
               </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionTitle}>Rating</Text>
+            <View style={styles.ratingFilterRow}>
+              {RATING_FILTER_OPTIONS.map((opt) => {
+                const isActive = localMinRating === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[
+                      styles.ratingFilterChip,
+                      isActive && styles.featureBoxSelected,
+                    ]}
+                    onPress={() => setLocalMinRating(isActive ? null : opt.value)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`At least ${opt.label} stars`}
+                  >
+                    <View style={styles.ratingFilterValueRow}>
+                      <Text
+                        style={[
+                          styles.ratingFilterText,
+                          isActive && styles.featureBoxTextSelected,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                      <MaterialCommunityIcons
+                        name="star"
+                        size={14}
+                        color={isActive ? COLORS.amber : COLORS.mediumGrey}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <Text style={styles.sectionTitle}>Features</Text>
@@ -430,6 +478,36 @@ const styles = StyleSheet.create({
   },
   filterSectionFirst: {
     paddingTop: 16,
+  },
+  ratingFilterRow: {
+    flexDirection: 'row',
+    paddingHorizontal: FILTER_SECTION_PAD,
+    gap: FILTER_CHIP_GAP,
+    marginBottom: FILTER_CHIP_GAP,
+  },
+  ratingFilterChip: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: FILTER_CHIP_MIN_H,
+    flexDirection: 'row',
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  ratingFilterValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  ratingFilterText: {
+    fontSize: 13,
+    color: COLORS.charcoal,
+    fontWeight: '600',
   },
   filterChip: {
     minHeight: FILTER_CHIP_MIN_H,

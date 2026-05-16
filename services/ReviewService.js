@@ -34,7 +34,7 @@ export const upsertDrinkCount = async (userId, pubId, count) => {
 export const getReviews = async (pubId) => {
   const { data, error } = await supabase
     .from('pub_reviews')
-    .select('id, user_id, rating, body, created_at, users(username)')
+    .select('id, user_id, rating, body, created_at, users(username, avatar_url)')
     .eq('pub_id', pubId)
     .order('created_at', { ascending: false });
 
@@ -44,6 +44,7 @@ export const getReviews = async (pubId) => {
     id: r.id,
     userId: r.user_id,
     username: r.users?.username ?? 'Anonymous',
+    avatarUrl: r.users?.avatar_url ?? null,
     rating: r.rating,
     body: r.body || null,
     createdAt: r.created_at,
@@ -77,6 +78,7 @@ export const upsertReview = async (userId, pubId, rating, body) => {
     );
 
   if (error) throw error;
+  clearPubRatingSummariesCache();
 };
 
 export const deleteReview = async (userId, pubId) => {
@@ -87,6 +89,68 @@ export const deleteReview = async (userId, pubId) => {
     .eq('pub_id', pubId);
 
   if (error) throw error;
+  clearPubRatingSummariesCache();
+};
+
+const RATING_SUMMARY_PAGE_SIZE = 1000;
+
+let _ratingSummariesCache = null;
+let _ratingSummariesPromise = null;
+
+export const clearPubRatingSummariesCache = () => {
+  _ratingSummariesCache = null;
+  _ratingSummariesPromise = null;
+};
+
+/** pub_id → { avgRating, reviewCount } for map filtering (cached per session) */
+export const getPubRatingSummariesCached = async () => {
+  if (_ratingSummariesCache) return _ratingSummariesCache;
+  if (!_ratingSummariesPromise) {
+    _ratingSummariesPromise = getPubRatingSummaries()
+      .then((summaries) => {
+        _ratingSummariesCache = summaries;
+        return summaries;
+      })
+      .catch((err) => {
+        _ratingSummariesPromise = null;
+        console.warn('Failed to load pub rating summaries:', err?.message || err);
+        return {};
+      });
+  }
+  return _ratingSummariesPromise;
+};
+
+/** pub_id → { avgRating, reviewCount } for map filtering */
+export const getPubRatingSummaries = async () => {
+  const byPub = {};
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('pub_reviews')
+      .select('pub_id, rating')
+      .range(from, from + RATING_SUMMARY_PAGE_SIZE - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+
+    for (const row of data) {
+      const pubId = row.pub_id;
+      if (!pubId) continue;
+      if (!byPub[pubId]) byPub[pubId] = { sum: 0, count: 0 };
+      byPub[pubId].sum += Number(row.rating) || 0;
+      byPub[pubId].count += 1;
+    }
+
+    if (data.length < RATING_SUMMARY_PAGE_SIZE) break;
+    from += data.length;
+  }
+
+  const summaries = {};
+  for (const [pubId, { sum, count }] of Object.entries(byPub)) {
+    summaries[pubId] = { avgRating: sum / count, reviewCount: count };
+  }
+  return summaries;
 };
 
 // ---------------------------------------------------------------------------

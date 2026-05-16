@@ -5,7 +5,6 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  TextInput,
   StyleSheet,
   Linking,
   ActivityIndicator,
@@ -26,6 +25,7 @@ import {
 } from '../services/ReviewService';
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 import { getOpeningStatus } from '../utils/openingHours';
+import PubReviewsModal from './PubReviewsModal';
 
 const openDirections = async (lat, lon) => {
   const destination = `${lat},${lon}`;
@@ -61,45 +61,6 @@ const openWebsite = (url) => {
   Linking.openURL(prefixed);
 };
 
-const formatRelativeDate = (isoString) => {
-  if (!isoString) return '';
-  const diff = Date.now() - new Date(isoString).getTime();
-  const days = Math.floor(diff / 86400000);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(months / 12)}y ago`;
-};
-
-// Star row — read-only or interactive
-function StarRow({ rating, size = 18, onSelect, style }) {
-  return (
-    <View style={[starRowStyles.row, style]}>
-      {[1, 2, 3, 4, 5].map(n => (
-        <TouchableOpacity
-          key={n}
-          onPress={onSelect ? () => onSelect(n) : undefined}
-          disabled={!onSelect}
-          activeOpacity={onSelect ? 0.7 : 1}
-          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-        >
-          <MaterialCommunityIcons
-            name={n <= rating ? 'star' : 'star-outline'}
-            size={size}
-            color={n <= rating ? COLORS.amber : COLORS.mediumGrey}
-          />
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-}
-
-const starRowStyles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 2 },
-});
-
 /** Horizontal gallery must win over the card's vertical scroll. */
 const GALLERY_LOCK_MIN_DX = 14;
 const GALLERY_LOCK_AXIS_RATIO = 1.85;
@@ -115,6 +76,7 @@ export default function PubCardContent({
   scrollEnabled,
   scrollRef,
   onToggleVisited,
+  onReviewsModalVisibleChange,
 }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -137,10 +99,7 @@ export default function PubCardContent({
   const [reviews, setReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [userReview, setUserReview] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [draftRating, setDraftRating] = useState(0);
-  const [draftBody, setDraftBody] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [showReviewsModal, setShowReviewsModal] = useState(false);
 
   const [galleryWidth, setGalleryWidth] = useState(Dimensions.get('window').width);
   const [photoIndex, setPhotoIndex] = useState(0);
@@ -153,9 +112,7 @@ export default function PubCardContent({
     setDrinkCount(0);
     setReviews([]);
     setUserReview(null);
-    setShowForm(false);
-    setDraftRating(0);
-    setDraftBody('');
+    setShowReviewsModal(false);
     setPhotoIndex(0);
     setGalleryScrollLock(false);
     galleryRef.current?.scrollTo({ x: 0, animated: false });
@@ -190,6 +147,11 @@ export default function PubCardContent({
     fetchReviews();
   }, [pub?.id, userId]);
 
+  useEffect(() => {
+    onReviewsModalVisibleChange?.(showReviewsModal);
+    return () => onReviewsModalVisibleChange?.(false);
+  }, [showReviewsModal, onReviewsModalVisibleChange]);
+
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {
     if (!userId) return;
@@ -210,64 +172,45 @@ export default function PubCardContent({
   }, [userId, pub?.id, pub?.isVisited, onToggleVisited]);
 
   // ── Review handlers ────────────────────────────────────────────────────────
-  const openWriteForm = () => {
-    if (userReview) {
-      setDraftRating(userReview.rating);
-      setDraftBody(userReview.body || '');
-    } else {
-      setDraftRating(0);
-      setDraftBody('');
-    }
-    setShowForm(true);
-  };
-
-  const handleSubmitReview = useCallback(async () => {
-    if (!userId || draftRating === 0) return;
-    // Capture synchronously before any awaits so stale closures can't interfere
+  const handleSubmitReview = useCallback(async (rating, body) => {
+    if (!userId || rating === 0) return;
     const isNewReview = !userReview;
     const pubId = pub?.id;
     const wasVisited = pub?.isVisited;
-    setSubmitting(true);
     try {
-      await upsertReview(userId, pubId, draftRating, draftBody);
+      await upsertReview(userId, pubId, rating, body);
       const [allReviews, mine] = await Promise.all([
         getReviews(pubId),
         getUserReview(userId, pubId),
       ]);
       setReviews(allReviews);
       setUserReview(mine);
-      setShowForm(false);
       if (isNewReview && !wasVisited && onToggleVisited) {
         onToggleVisited(pubId);
       }
     } catch {
       // silently ignore
-    } finally {
-      setSubmitting(false);
     }
-  }, [userId, pub?.id, pub?.isVisited, userReview, draftRating, draftBody, onToggleVisited]);
+  }, [userId, pub?.id, pub?.isVisited, userReview, onToggleVisited]);
 
-  const handleDeleteReview = async () => {
+  const handleDeleteReview = useCallback(async () => {
     if (!userId) return;
-    setSubmitting(true);
     try {
       await deleteReview(userId, pub.id);
       const allReviews = await getReviews(pub.id);
       setReviews(allReviews);
       setUserReview(null);
-      setShowForm(false);
     } catch {
       // silently ignore
-    } finally {
-      setSubmitting(false);
     }
-  };
+  }, [userId, pub?.id]);
 
   // ── Derived review stats ───────────────────────────────────────────────────
   const reviewCount = reviews.length;
-  const avgRating = reviewCount > 0
-    ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount).toFixed(1)
+  const avgRatingNumeric = reviewCount > 0
+    ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount
     : null;
+  const avgRatingDisplay = avgRatingNumeric != null ? avgRatingNumeric.toFixed(1) : null;
 
   const hasPhone   = !!pub.phone;
   const hasWebsite = !!pub.website;
@@ -294,9 +237,13 @@ export default function PubCardContent({
     [galleryWidth, photoIndex],
   );
 
-  const verticalScrollEnabled = galleryScrollLock
+  const verticalScrollEnabled = showReviewsModal
     ? false
-    : (scrollEnabled !== undefined ? scrollEnabled : isExpanded);
+    : galleryScrollLock
+      ? false
+      : (scrollEnabled !== undefined ? scrollEnabled : isExpanded);
+
+  const contentPointerEvents = showReviewsModal ? 'none' : pointerEvents;
 
   const handleGalleryTouchStart = useCallback((e) => {
     galleryTouchStart.current = {
@@ -330,7 +277,7 @@ export default function PubCardContent({
       ]}
       showsVerticalScrollIndicator={false}
       scrollEnabled={verticalScrollEnabled}
-      pointerEvents={pointerEvents}
+      pointerEvents={contentPointerEvents}
       onScroll={onScroll}
       scrollEventThrottle={16}
       bounces={false}
@@ -348,17 +295,36 @@ export default function PubCardContent({
         </Text>
       </View>
 
-      {/* ── Area row ─────────────────────────────────────────────────────── */}
-      {areaSegments.length > 0 && (
-        <View style={styles.areaRow}>
-          {areaSegments.map((segment, index) => (
-            <React.Fragment key={index}>
-              {index > 0 && <Text style={styles.amberDot}> · </Text>}
-              <Text style={styles.areaSegment}>{segment}</Text>
-            </React.Fragment>
-          ))}
+      {/* ── Area + rating (above photos) ─────────────────────────────────── */}
+      <View style={styles.areaRatingRow}>
+        <View style={styles.areaRowLeft}>
+          {areaSegments.length > 0 ? (
+            areaSegments.map((segment, index) => (
+              <React.Fragment key={index}>
+                {index > 0 && <Text style={styles.amberDot}> · </Text>}
+                <Text style={styles.areaSegment}>{segment}</Text>
+              </React.Fragment>
+            ))
+          ) : null}
         </View>
-      )}
+        <View style={styles.ratingSummaryRow}>
+          {reviewCount > 0 ? (
+            <>
+              <View style={styles.ratingStat}>
+                <Text style={styles.ratingStatValue}>{avgRatingDisplay}</Text>
+                <MaterialCommunityIcons name="star" size={15} color={COLORS.amber} />
+              </View>
+              <Text style={styles.ratingStatSeparator}>·</Text>
+              <View style={styles.ratingStat}>
+                <Text style={styles.ratingStatValue}>{reviewCount}</Text>
+                <MaterialCommunityIcons name="account-group-outline" size={15} color={COLORS.mediumGrey} />
+              </View>
+            </>
+          ) : (
+            <Text style={styles.noReviewsYetCompact}>No reviews</Text>
+          )}
+        </View>
+      </View>
 
       {/* ── Photos (full-width pages; swipe or tap arrow for more) ───────── */}
       {photoCount > 0 && (
@@ -489,41 +455,26 @@ export default function PubCardContent({
       {/* ── Divider ──────────────────────────────────────────────────────── */}
       <View style={styles.divider} />
 
-      {/* ── Reviews ──────────────────────────────────────────────────────── */}
+      {/* ── Reviews + drinks ─────────────────────────────────────────────── */}
       <View style={styles.reviewsSection}>
-        {/* Summary header + drinks counter on the same row */}
-        <View style={styles.reviewsSummaryRow}>
-          {/* Left half — ratings */}
-          {/* Left half — ratings + write/edit review */}
-          <View style={styles.reviewsSummaryLeft}>
-            <View style={styles.ratingsLine}>
-              <MaterialCommunityIcons name="star" size={18} color={COLORS.amber} />
-              <Text style={styles.reviewsSummaryText}>
-                {avgRating ? `${avgRating}  ·  ${reviewCount} ${reviewCount === 1 ? 'review' : 'reviews'}` : 'No reviews yet'}
-              </Text>
-            </View>
-
-            {userId && (
-              <TouchableOpacity
-                style={[styles.writeReviewButton, showForm && styles.writeReviewButtonActive]}
-                onPress={showForm ? () => setShowForm(false) : openWriteForm}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name={userReview ? 'pencil' : 'plus'}
-                  size={16}
-                  color={showForm ? '#FFFFFF' : COLORS.amber}
-                />
-                <Text style={[styles.writeReviewLabel, showForm && styles.writeReviewLabelActive]}>
-                  {userReview ? 'Edit review' : 'Write a review'}
-                </Text>
-              </TouchableOpacity>
-            )}
+        <View style={styles.reviewsActionsRow}>
+          <View style={styles.reviewsActionHalf}>
+            <TouchableOpacity
+              style={styles.reviewsButton}
+              onPress={() => setShowReviewsModal(true)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Open reviews"
+            >
+              <MaterialCommunityIcons name="comment-text-outline" size={20} color={COLORS.amber} />
+              <Text style={styles.reviewsButtonLabel}>Reviews</Text>
+              <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.mediumGrey} />
+            </TouchableOpacity>
           </View>
 
-          {/* Right half — drinks counter */}
           {userId && (
-            <View style={styles.drinksInlineRow}>
+            <View style={styles.reviewsActionHalf}>
+              <View style={styles.drinksInlineRow}>
               <TouchableOpacity
                 style={[
                   styles.drinkRectButton,
@@ -557,107 +508,25 @@ export default function PubCardContent({
               >
                 <MaterialCommunityIcons name="plus" size={26} color="#FFFFFF" />
               </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
-
-        {/* AI summary placeholder */}
-        {reviewCount > 0 && (
-          <View style={styles.aiSummaryBox}>
-            {/* TODO: replace with real AI-generated summary using OpenAI or similar */}
-            <Text style={styles.aiSummaryLabel}>AI Summary</Text>
-            <Text style={styles.aiSummaryText}>AI-generated summary coming soon.</Text>
-          </View>
-        )}
-
-        {/* Review form — full width, shown when editing/writing */}
-        {userId && (
-          <>
-            {showForm && (
-              <View style={styles.reviewForm}>
-                <View style={styles.reviewFormHeader}>
-                  <Text style={styles.reviewFormUsername}>
-                    {user?.username || 'Your review'}
-                  </Text>
-                  <StarRow rating={draftRating} size={32} onSelect={setDraftRating} style={styles.reviewFormStars} />
-                </View>
-                <TextInput
-                  style={styles.reviewInput}
-                  placeholder="Share your thoughts (optional)"
-                  placeholderTextColor={COLORS.mediumGrey}
-                  value={draftBody}
-                  onChangeText={setDraftBody}
-                  multiline
-                  maxLength={500}
-                  returnKeyType="done"
-                  blurOnSubmit
-                />
-                <View style={styles.reviewFormActions}>
-                  <TouchableOpacity
-                    style={[styles.reviewFormButton, styles.reviewFormCancel]}
-                    onPress={() => setShowForm(false)}
-                    disabled={submitting}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.reviewFormCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-
-                  {userReview && (
-                    <TouchableOpacity
-                      style={[styles.reviewFormButton, styles.reviewFormDelete]}
-                      onPress={handleDeleteReview}
-                      disabled={submitting}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.reviewFormDeleteText}>Delete</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={[
-                      styles.reviewFormButton,
-                      styles.reviewFormSubmit,
-                      (draftRating === 0 || submitting) && styles.reviewFormSubmitDisabled,
-                    ]}
-                    onPress={handleSubmitReview}
-                    disabled={draftRating === 0 || submitting}
-                    activeOpacity={0.7}
-                  >
-                    {submitting
-                      ? <ActivityIndicator size="small" color="#FFFFFF" />
-                      : <Text style={styles.reviewFormSubmitText}>Submit</Text>
-                    }
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </>
-        )}
-
-        {/* Reviews list */}
-        {reviewsLoading ? (
-          <ActivityIndicator size="small" color={COLORS.amber} style={{ marginTop: 12 }} />
-        ) : (
-          reviews.map(review => (
-            <View
-              key={review.id}
-              style={[
-                styles.reviewItem,
-                review.userId === userId && styles.reviewItemOwn,
-              ]}
-            >
-              <View style={styles.reviewItemHeader}>
-                <Text style={styles.reviewItemUsername}>{review.username}</Text>
-                <Text style={styles.reviewItemDate}>{formatRelativeDate(review.createdAt)}</Text>
-              </View>
-              <StarRow rating={review.rating} size={14} />
-              {review.body ? (
-                <Text style={styles.reviewItemBody}>{review.body}</Text>
-              ) : null}
-            </View>
-          ))
-        )}
       </View>
+
+      <PubReviewsModal
+        visible={showReviewsModal}
+        onClose={() => setShowReviewsModal(false)}
+        pubName={pub.name}
+        reviews={reviews}
+        reviewsLoading={reviewsLoading}
+        userReview={userReview}
+        userId={userId}
+        avgRating={avgRatingNumeric}
+        reviewCount={reviewCount}
+        onSubmitReview={handleSubmitReview}
+        onDeleteReview={handleDeleteReview}
+      />
 
       {/* ── History / description ───────────────────────────────────────── */}
       {(pub.history || pub.description) && (
@@ -709,12 +578,20 @@ const styles = StyleSheet.create({
     color: '#C62828', // dark red
   },
 
-  // ── Area row ──────────────────────────────────────────────────────────────
-  areaRow: {
+  // ── Area + rating row (above photos) ─────────────────────────────────────
+  areaRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 12,
+  },
+  areaRowLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    marginBottom: 12,
+    minWidth: 0,
   },
   areaSegment: {
     fontSize: 14,
@@ -863,33 +740,64 @@ const styles = StyleSheet.create({
   },
 
   // ── Reviews ───────────────────────────────────────────────────────────────
-  reviewsSection: {
-    // no extra padding — inherited from cardContainer's paddingHorizontal
-  },
-  reviewsSummaryRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    marginBottom: 8,
-    gap: 12,
-  },
-  reviewsSummaryLeft: {
-    flex: 1,
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    paddingVertical: 2,
-    gap: 8,
-  },
-  ratingsLine: {
+  reviewsSection: {},
+  ratingSummaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    flexShrink: 0,
   },
-  reviewsSummaryText: {
-    fontSize: 15,
+  ratingStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  ratingStatValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+  },
+  ratingStatSeparator: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.amber,
+    lineHeight: 18,
+  },
+  noReviewsYetCompact: {
+    fontSize: 13,
     fontWeight: '600',
+    color: COLORS.mediumGrey,
+  },
+  reviewsActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  reviewsActionHalf: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
+  reviewsButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.amber,
+    backgroundColor: 'transparent',
+  },
+  reviewsButtonLabel: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
     color: COLORS.darkGrey,
   },
   drinksInlineRow: {
+    width: '100%',
     flex: 1,
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -913,160 +821,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  aiSummaryBox: {
-    backgroundColor: COLORS.lightGrey,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  aiSummaryLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.amber,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  aiSummaryText: {
-    fontSize: 13,
-    color: COLORS.mediumGrey,
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  writeReviewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: COLORS.amber,
-    alignSelf: 'stretch',
-    backgroundColor: 'transparent',
-    marginBottom: 12,
-  },
-  writeReviewLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.amber,
-  },
-  writeReviewButtonActive: {
-    backgroundColor: COLORS.amber,
-  },
-  writeReviewLabelActive: {
-    color: '#FFFFFF',
-  },
-  reviewForm: {
-    backgroundColor: COLORS.lightGrey,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 16,
-    gap: 12,
-  },
-  reviewFormHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  reviewFormUsername: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.darkGrey,
-    flex: 1,
-  },
-  reviewFormStars: {
-    flex: 2,
-    justifyContent: 'space-around',
-  },
-  reviewInput: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    padding: 10,
-    fontSize: 14,
-    color: COLORS.darkGrey,
-    minHeight: 72,
-    textAlignVertical: 'top',
-  },
-  reviewFormActions: {
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'flex-end',
-  },
-  reviewFormButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  reviewFormCancel: {
-    borderWidth: 1,
-    borderColor: COLORS.mediumGrey,
-  },
-  reviewFormCancelText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.mediumGrey,
-  },
-  reviewFormDelete: {
-    borderWidth: 1,
-    borderColor: '#C62828',
-  },
-  reviewFormDeleteText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#C62828',
-  },
-  reviewFormSubmit: {
-    backgroundColor: COLORS.amber,
-    minWidth: 72,
-    alignItems: 'center',
-  },
-  reviewFormSubmitDisabled: {
-    opacity: 0.45,
-  },
-  reviewFormSubmitText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  reviewItem: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightGrey,
-    gap: 4,
-  },
-  reviewItemOwn: {
-    backgroundColor: '#FFFBF0',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    marginBottom: 2,
-  },
-  reviewItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  reviewItemUsername: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.darkGrey,
-  },
-  reviewItemDate: {
-    fontSize: 12,
-    color: COLORS.mediumGrey,
-  },
-  reviewItemBody: {
-    fontSize: 13,
-    color: COLORS.darkGrey,
-    lineHeight: 18,
-    marginTop: 4,
-  },
-
   // ── History ───────────────────────────────────────────────────────────────
   historyContainer: {
     marginBottom: 8,

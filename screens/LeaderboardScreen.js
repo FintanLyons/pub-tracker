@@ -198,7 +198,7 @@ export default function LeaderboardScreen() {
               </View>
             </View>
             <View style={styles.statDivider} />
-            <View style={styles.statCell}>
+            <View style={[styles.statCell, styles.drinksStatCell]}>
               <Text style={styles.statLabel}>Drinks</Text>
               <View style={styles.statValueSlot}>
                 <Text style={styles.statValue} numberOfLines={1}>
@@ -1026,7 +1026,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   statValueSlot: {
-    width: 20,
+    minWidth: 34,
     alignItems: 'flex-start',
   },
   statValue: {
@@ -1035,7 +1035,9 @@ const styles = StyleSheet.create({
     color: COLORS.accentGrey,
     fontVariant: ['tabular-nums'],
     textAlign: 'left',
-    width: '100%',
+  },
+  drinksStatCell: {
+    marginLeft: 5,
   },
   statDivider: {
     width: StyleSheet.hairlineWidth,

@@ -7,6 +7,7 @@ export function useFilterState(allPubs) {
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showOnlyAchievements, setShowOnlyAchievements] = useState(false);
   const [closingTimeMin, setClosingTimeMin] = useState(null);
+  const [minRating, setMinRating] = useState(null);
   const [showFilterScreen, setShowFilterScreen] = useState(false);
 
   const allOwnerships = useMemo(() => {
@@ -40,6 +41,7 @@ export function useFilterState(allPubs) {
     setShowOnlyFavorites(filters.showOnlyFavorites || false);
     setShowOnlyAchievements(filters.showOnlyAchievements || false);
     setClosingTimeMin(filters.closingTimeMin ?? null);
+    setMinRating(filters.minRating ?? null);
   }, []);
 
   const handleFilterPress = useCallback(() => setShowFilterScreen(true), []);
@@ -52,6 +54,7 @@ export function useFilterState(allPubs) {
     showOnlyFavorites,
     showOnlyAchievements,
     closingTimeMin,
+    minRating,
     showFilterScreen,
     allOwnerships,
     availableYearRange,

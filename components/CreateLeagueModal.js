@@ -15,6 +15,7 @@ import { createLeague, addLeagueMember } from '../services/LeagueService';
 import { getFriends } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
 import ShareLeagueModal from './ShareLeagueModal';
+import UserAvatar from './UserAvatar';
 
 export default function CreateLeagueModal({ visible, onClose, currentUserId, onLeagueCreated }) {
   const [leagueName, setLeagueName] = useState('');
@@ -99,9 +100,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
         style={[styles.friendItem, isSelected && styles.selectedFriendItem]}
         onPress={() => toggleFriendSelection(item.id)}
       >
-        <View style={styles.userIcon}>
-          <MaterialCommunityIcons name="account" size={32} color={COLORS.mediumGrey} />
-        </View>
+        <UserAvatar avatarUrl={item.avatar_url} size={48} style={styles.userIcon} />
         <View style={styles.userInfo}>
           <Text style={styles.username}>{item.username}</Text>
           <Text style={styles.userStats}>
@@ -396,12 +395,6 @@ const styles = StyleSheet.create({
     borderColor: COLORS.amber,
   },
   userIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E0E0E0',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   userInfo: {
