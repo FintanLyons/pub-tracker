@@ -75,6 +75,9 @@ export const removeFriend = async (userId, friendId) => {
 /**
  * Get all friends for a user (accepted friendships only)
  */
+const LEADERBOARD_USER_COLUMNS = 'id, username, avatar_url';
+const LEADERBOARD_STATS_COLUMNS = 'user_id, pubs_visited, total_score, level, total_drinks';
+
 export const getFriends = async (userId) => {
   const { data: friendships, error } = await supabase
     .from('friendships')
@@ -89,16 +92,10 @@ export const getFriends = async (userId) => {
     f.user_id === userId ? f.friend_id : f.user_id
   );
 
-  // Batch-fetch user profiles and stats instead of N+1 individual requests
-  const { data: users } = await supabase
-    .from('users')
-    .select('*')
-    .in('id', friendIds);
-
-  const { data: stats } = await supabase
-    .from('user_stats')
-    .select('*')
-    .in('user_id', friendIds);
+  const [{ data: users }, { data: stats }] = await Promise.all([
+    supabase.from('users').select(LEADERBOARD_USER_COLUMNS).in('id', friendIds),
+    supabase.from('user_stats').select(LEADERBOARD_STATS_COLUMNS).in('user_id', friendIds),
+  ]);
 
   const statsMap = {};
   (stats || []).forEach(s => { statsMap[s.user_id] = s; });
@@ -142,12 +139,10 @@ export const getPendingFriendRequests = async (userId) => {
  * Get leaderboard of friends (sorted by score)
  */
 export const getFriendsLeaderboard = async (userId) => {
-  const friends = await getFriends(userId);
-
-  // Fetch current user profile + stats
-  const [{ data: meArr }, { data: meStatsArr }] = await Promise.all([
-    supabase.from('users').select('*').eq('id', userId).limit(1),
-    supabase.from('user_stats').select('*').eq('user_id', userId).limit(1),
+  const [friends, { data: meArr }, { data: meStatsArr }] = await Promise.all([
+    getFriends(userId),
+    supabase.from('users').select(LEADERBOARD_USER_COLUMNS).eq('id', userId).limit(1),
+    supabase.from('user_stats').select(LEADERBOARD_STATS_COLUMNS).eq('user_id', userId).limit(1),
   ]);
 
   const currentUser = {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Location from 'expo-location';
-import { useUserLocation } from '../../../contexts/LocationContext';
+import { useLocationReady, useUserLocation } from '../../../contexts/LocationContext';
 import { DEFAULT_CAMERA, getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
 
 /** Throttle watch callbacks so the map dot only moves after this many metres. */
@@ -12,6 +12,7 @@ const LOCATE_REFINE_MS = 650;
 
 export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
   const contextLocation = useUserLocation();
+  const isLocationReady = useLocationReady();
   const [localLocation, setLocalLocation] = useState(null);
 
   const cameraRef = useRef(null);
@@ -19,6 +20,7 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
   const initialCameraSetRef = useRef(false);
   const hasUserInteractedRef = useRef(false);
   const currentLocationRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
 
   const currentLocation = localLocation || contextLocation;
 
@@ -69,16 +71,60 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
     };
   }, [isMapFocused]);
 
+  const handleMapLoaded = useCallback(() => {
+    setMapReady(true);
+  }, []);
+
   useEffect(() => {
-    if (contextLocation && !initialCameraSetRef.current && !hasUserInteractedRef.current && cameraRef.current) {
-      initialCameraSetRef.current = true;
-      cameraRef.current.jumpTo({
-        center: [contextLocation.longitude, contextLocation.latitude],
-        zoom: ZOOM_LEVELS.PUBS_MIN,
-      });
+    if (!isLocationReady || !mapReady) return undefined;
+
+    if (!contextLocation) {
+      setIsLocationLoaded?.(true);
+      return undefined;
     }
-    setIsLocationLoaded?.(true);
-  }, [contextLocation, setIsLocationLoaded]);
+
+    if (initialCameraSetRef.current || hasUserInteractedRef.current) {
+      setIsLocationLoaded?.(true);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const finishInitialCamera = () => {
+      if (cancelled) return;
+      initialCameraSetRef.current = true;
+      setIsLocationLoaded?.(true);
+    };
+
+    const trySetCamera = () => {
+      if (cancelled || !cameraRef.current) return false;
+      try {
+        cameraRef.current.jumpTo({
+          center: [contextLocation.longitude, contextLocation.latitude],
+          zoom: ZOOM_LEVELS.PUBS_MIN,
+        });
+        finishInitialCamera();
+        return true;
+      } catch (err) {
+        console.warn('useMapCamera: initial jumpTo failed', err?.message);
+        return false;
+      }
+    };
+
+    if (trySetCamera()) return () => { cancelled = true; };
+
+    let frameId;
+    const retry = () => {
+      if (trySetCamera()) return;
+      frameId = requestAnimationFrame(retry);
+    };
+    frameId = requestAnimationFrame(retry);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+    };
+  }, [contextLocation, isLocationReady, mapReady, setIsLocationLoaded]);
 
   const fitBoundsObject = useCallback((b, animationDuration = 800) => {
     if (!b || !cameraRef.current) return;
@@ -194,5 +240,6 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
     fitFeature,
     fitBoundsObject,
     handleCurrentLocation,
+    handleMapLoaded,
   };
 }

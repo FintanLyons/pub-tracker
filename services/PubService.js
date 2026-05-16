@@ -2,6 +2,7 @@ import { supabase } from '../config/supabase';
 import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { getPubRatingSummariesCached } from './ReviewService';
 
 // ---------------------------------------------------------------------------
 // Server-side visited / favorite tracking
@@ -128,8 +129,16 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 		achievements: [],
 		isVisited: visitedSet.has(pub.id),
 		isFavorite: favoritesSet.has(pub.id),
+		avgRating: null,
+		reviewCount: 0,
 	};
 };
+
+const attachRatingSummary = (pub, summary) => ({
+	...pub,
+	avgRating: summary?.avgRating ?? null,
+	reviewCount: summary?.reviewCount ?? 0,
+});
 
 export const fetchLondonPubs = async (options = {}) => {
 	try {
@@ -180,7 +189,10 @@ export const fetchLondonPubs = async (options = {}) => {
 			}
 		}
 
-		const formattedPubs = allPubs.map((p) => formatPub(p, visitedSet, favoritesSet));
+		const ratingSummaries = await getPubRatingSummariesCached();
+		const formattedPubs = allPubs.map((p) =>
+			attachRatingSummary(formatPub(p, visitedSet, favoritesSet), ratingSummaries[p.id]),
+		);
 
 		const isCoreLondonPostcodeArea = (pub) => {
 			const area = pub.postcodeArea || pub.borough;

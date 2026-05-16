@@ -9,6 +9,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { fetchPostcodeAreaSummaries } from '../services/PubService';
+import { prefetchLeaderboardCache } from '../services/leaderboardData';
 import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -33,12 +34,16 @@ const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderbo
 
 const Tab = createBottomTabNavigator();
 
+/** Minimum splash duration so the map can centre on GPS before first reveal. */
+const MIN_SPLASH_MS = 850;
+
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { achievements, totalVisited, drinkStats } = useUserStats();
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
+  const [minSplashElapsed, setMinSplashElapsed] = useState(false);
   const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
   const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
   const [mapReturnToProfile, setMapReturnToProfile] = useState({
@@ -95,7 +100,17 @@ export default function TabNavigator() {
     return () => { isCancelled = true; };
   }, [user?.id]);
 
-  const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded;
+  useEffect(() => {
+    if (!user?.id) return;
+    prefetchLeaderboardCache(user.id);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded && minSplashElapsed;
   
   return (
     <LoadingContext.Provider value={{

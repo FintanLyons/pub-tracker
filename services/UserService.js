@@ -9,7 +9,7 @@ export const searchUsers = async (query) => {
 
   const { data, error } = await supabase
     .from('users')
-    .select('id, username, created_at')
+    .select('id, username, created_at, avatar_url')
     .ilike('username', `%${safe}%`);
 
   if (error) throw error;
