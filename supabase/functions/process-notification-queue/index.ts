@@ -151,6 +151,40 @@ async function resolveMessage(
     };
   }
 
+  if (kind === "pub_summon") {
+    const summonerId = p.summoner_id as string | undefined;
+    let summonerName = "Someone";
+    if (summonerId) {
+      const { data: u } = await supabase
+        .from("users")
+        .select("username")
+        .eq("id", summonerId)
+        .maybeSingle();
+      if (u?.username) summonerName = u.username;
+    }
+
+    const pubName = (p.pub_name as string | undefined)?.trim() || "a pub";
+    const pubArea = (p.pub_area as string | undefined)?.trim() || "London";
+    const lat = p.lat as number | undefined;
+    const lon = p.lon as number | undefined;
+    const mapsUrl =
+      lat != null && lon != null
+        ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`
+        : undefined;
+
+    return {
+      title: "Summon the troops!",
+      body: `${summonerName} has summoned you to ${pubName} in ${pubArea}. Tap here for directions.`,
+      data: {
+        pub_id: p.pub_id,
+        summoner_id: summonerId,
+        lat,
+        lon,
+        maps_url: mapsUrl,
+      },
+    };
+  }
+
   if (kind === "league_added") {
     const leagueId = p.league_id as string | undefined;
     const addedBy = p.added_by_user_id as string | undefined;

@@ -21,6 +21,7 @@ import {
   installNotificationPresentationHandler,
   registerPushNotificationsForUser,
 } from './services/PushNotificationService';
+import { navigationRef } from './services/notificationNavigation';
 
 function onboardingKeyForUser(userId) {
   return `hasSeenOnboarding:${userId}`;
@@ -145,7 +146,7 @@ function AppContent() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <PaperProvider>
         <View style={styles.appContainer}>
           <LocationProvider userId={user.id}>

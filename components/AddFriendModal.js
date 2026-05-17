@@ -17,6 +17,7 @@ import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejec
 import { COLORS } from '../constants/theme';
 import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
 import UserAvatar from './UserAvatar';
+import { AppFeedbackOverlay } from './AppFeedbackModal';
 
 export default function AddFriendModal({
   visible,
@@ -24,6 +25,7 @@ export default function AddFriendModal({
   currentUserId,
   currentUsername,
   onFriendAdded,
+  onFriendRemoved,
   initialTab = 'search',
 }) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +35,8 @@ export default function AddFriendModal({
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab); // 'search', 'requests', or 'friends'
   const [feedback, setFeedback] = useState(null); // { title, message, tone: 'success' | 'error' }
+  const [removeConfirm, setRemoveConfirm] = useState(null); // { friendId, friendUsername }
+  const [removingFriend, setRemovingFriend] = useState(false);
   const searchTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -42,6 +46,8 @@ export default function AddFriendModal({
       setActiveTab(initialTab);
     } else {
       setFeedback(null);
+      setRemoveConfirm(null);
+      setRemovingFriend(false);
     }
   }, [visible, initialTab]);
 
@@ -111,21 +117,20 @@ export default function AddFriendModal({
 
   const handleSendRequest = async (friendId) => {
     try {
-      await sendFriendRequest(currentUserId, friendId);
-      showFeedback('Request sent', 'Your friend request was sent.');
+      const result = await sendFriendRequest(currentUserId, friendId);
+      if (result?.alreadyExists) {
+        showFeedback(
+          'Already connected',
+          'A request already exists or you are already friends.',
+        );
+      } else {
+        showFeedback('Request sent', 'Your friend request was sent.');
+      }
       setSearchQuery('');
       setSearchResults([]);
     } catch (error) {
       console.error('Error sending friend request:', error);
-      if (String(error.message || '').includes('already exists')) {
-        showFeedback(
-          'Could not send',
-          'A request already exists or you are already friends.',
-          'error',
-        );
-      } else {
-        showFeedback('Could not send', 'Failed to send friend request. Please try again.', 'error');
-      }
+      showFeedback('Could not send', 'Failed to send friend request. Please try again.', 'error');
     }
   };
 
@@ -162,29 +167,42 @@ export default function AddFriendModal({
     }
   };
 
-  const handleRemoveFriend = async (friendId, friendUsername) => {
-    Alert.alert(
-      'Remove Friend',
-      `Remove ${friendUsername} from your friends?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await removeFriend(currentUserId, friendId);
-              Alert.alert('Success', 'Friend removed');
-              loadFriends();
-              if (onFriendAdded) onFriendAdded(); // Refresh leaderboard
-            } catch (error) {
-              console.error('Error removing friend:', error);
-              Alert.alert('Error', 'Failed to remove friend');
-            }
-          }
-        }
-      ]
-    );
+  const handleRemoveFriend = (friendId, friendUsername) => {
+    setRemoveConfirm({ friendId, friendUsername });
+  };
+
+  const cancelRemoveFriend = () => {
+    if (!removingFriend) setRemoveConfirm(null);
+  };
+
+  const confirmRemoveFriend = async () => {
+    if (!removeConfirm || !currentUserId || removingFriend) return;
+
+    const { friendId, friendUsername } = removeConfirm;
+    setRemovingFriend(true);
+    try {
+      await removeFriend(currentUserId, friendId);
+      setRemoveConfirm(null);
+      loadFriends();
+      if (onFriendRemoved) {
+        onFriendRemoved(friendUsername);
+      } else {
+        showFeedback(
+          'Friend removed',
+          `${friendUsername} was removed from your friends.`,
+        );
+      }
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      setRemoveConfirm(null);
+      showFeedback(
+        'Could not remove',
+        'Failed to remove friend. Please try again.',
+        'error',
+      );
+    } finally {
+      setRemovingFriend(false);
+    }
   };
 
   const renderSearchResult = ({ item }) => (
@@ -249,13 +267,18 @@ export default function AddFriendModal({
     </View>
   );
 
+  const handleModalRequestClose = () => {
+    if (feedback) dismissFeedback();
+    else if (removeConfirm) cancelRemoveFriend();
+    else onClose();
+  };
+
   return (
-    <>
     <Modal
       visible={visible}
       animationType="slide"
       transparent={true}
-      onRequestClose={onClose}
+      onRequestClose={handleModalRequestClose}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
@@ -411,59 +434,58 @@ export default function AddFriendModal({
             </>
           )}
         </View>
-      </View>
-    </Modal>
 
-    <Modal
-      visible={!!feedback}
-      animationType="fade"
-      transparent
-      onRequestClose={dismissFeedback}
-    >
-      <View style={styles.feedbackOverlay}>
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={dismissFeedback}
-          accessibilityLabel="Dismiss"
-        />
-        <View style={styles.feedbackCard}>
-          <View style={styles.feedbackHeader}>
-            <Text style={styles.feedbackTitle}>{feedback?.title}</Text>
+        {removeConfirm && !feedback ? (
+          <View style={styles.confirmLayer} pointerEvents="box-none">
             <TouchableOpacity
-              onPress={dismissFeedback}
-              style={styles.feedbackClose}
-              accessibilityLabel="Close"
-              accessibilityRole="button"
-            >
-              <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-            </TouchableOpacity>
-          </View>
-          {feedback?.tone === 'success' ? (
-            <View style={styles.feedbackIconWrap}>
-              <MaterialCommunityIcons name="check-circle" size={48} color={COLORS.amber} />
+              style={styles.confirmBackdrop}
+              activeOpacity={1}
+              onPress={cancelRemoveFriend}
+              accessibilityLabel="Dismiss"
+            />
+            <View style={styles.confirmCard}>
+              <Text style={styles.confirmTitle}>Remove friend?</Text>
+              <Text style={styles.confirmBody}>
+                Remove {removeConfirm.friendUsername} from your friends?
+              </Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, styles.confirmBtnSecondary]}
+                  onPress={cancelRemoveFriend}
+                  disabled={removingFriend}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.confirmBtnTextSecondary}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, styles.confirmBtnDanger]}
+                  onPress={confirmRemoveFriend}
+                  disabled={removingFriend}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                >
+                  {removingFriend ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmBtnTextDanger}>Remove</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          ) : (
-            <View style={styles.feedbackIconWrap}>
-              <MaterialCommunityIcons name="alert-circle-outline" size={48} color={COLORS.errorRed} />
-            </View>
-          )}
-          <Text style={styles.feedbackBody}>{feedback?.message}</Text>
-          <View style={styles.feedbackActions}>
-            <TouchableOpacity
-              style={styles.feedbackPrimaryBtn}
-              onPress={dismissFeedback}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="OK"
-            >
-              <Text style={styles.feedbackPrimaryBtnText}>OK</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        ) : null}
+
+        {feedback ? (
+          <AppFeedbackOverlay
+            title={feedback.title}
+            message={feedback.message}
+            tone={feedback.tone}
+            onClose={dismissFeedback}
+          />
+        ) : null}
       </View>
     </Modal>
-    </>
   );
 }
 
@@ -472,6 +494,76 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  confirmLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    zIndex: 10,
+    elevation: 24,
+  },
+  confirmBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  confirmBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: COLORS.accentGrey,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+  },
+  confirmBtn: {
+    flex: 1,
+    minHeight: 48,
+    marginHorizontal: 5,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  confirmBtnSecondary: {
+    backgroundColor: COLORS.lightGrey,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  confirmBtnDanger: {
+    backgroundColor: COLORS.errorRed,
+  },
+  confirmBtnTextSecondary: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  confirmBtnTextDanger: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
@@ -693,80 +785,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.mediumGrey,
     marginTop: 8,
-    textAlign: 'center',
-  },
-  feedbackOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  feedbackCard: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 16,
-  },
-  feedbackHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.divider,
-  },
-  feedbackTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.darkGrey,
-    paddingRight: 8,
-  },
-  feedbackClose: {
-    padding: 6,
-    marginRight: -2,
-  },
-  feedbackIconWrap: {
-    alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  feedbackBody: {
-    paddingHorizontal: 22,
-    paddingTop: 8,
-    paddingBottom: 20,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '400',
-    color: COLORS.accentGrey,
-    textAlign: 'center',
-  },
-  feedbackActions: {
-    paddingHorizontal: 22,
-    paddingBottom: 22,
-  },
-  feedbackPrimaryBtn: {
-    minHeight: 48,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.amber,
-    alignSelf: 'stretch',
-  },
-  feedbackPrimaryBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.charcoal,
     textAlign: 'center',
   },
 });

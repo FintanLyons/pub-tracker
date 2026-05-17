@@ -114,13 +114,16 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
     );
   };
 
+  const handleModalRequestClose = showShareModal
+    ? () => setShowShareModal(false)
+    : onClose;
+
   return (
-    <>
       <Modal
         visible={visible}
         animationType="slide"
         transparent={true}
-        onRequestClose={onClose}
+        onRequestClose={handleModalRequestClose}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -231,16 +234,18 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
               </View>
             )}
           </View>
+
+          {showShareModal && createdLeague ? (
+            <ShareLeagueModal
+              embedded
+              visible
+              onClose={() => setShowShareModal(false)}
+              leagueName={createdLeague.name}
+              leagueCode={createdLeague.code}
+            />
+          ) : null}
         </View>
       </Modal>
-
-      <ShareLeagueModal
-        visible={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        leagueName={createdLeague?.name}
-        leagueCode={createdLeague?.code}
-      />
-    </>
   );
 }
 

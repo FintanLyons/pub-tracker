@@ -6,6 +6,22 @@ import { ZOOM_LEVELS } from './layerUtils';
 export const PUB_FETCH_BUFFER_RATIO = 0.55;
 export const MIN_PUB_FETCH_ZOOM = ZOOM_LEVELS.PUBS_MIN - 0.15;
 
+/** Rough visible bounds for a phone viewport at a given zoom (used before MapLibre reports bounds). */
+export const approximateBoundsFromCenter = (latitude, longitude, zoom) => {
+  if (![latitude, longitude, zoom].every(Number.isFinite)) return null;
+  const metersPerPixel =
+    (156543.03392 * Math.cos((latitude * Math.PI) / 180)) / (2 ** zoom);
+  const latDelta = (metersPerPixel * 700) / 111320;
+  const lonDelta =
+    (metersPerPixel * 400) / (111320 * Math.cos((latitude * Math.PI) / 180));
+  return {
+    north: latitude + latDelta / 2,
+    south: latitude - latDelta / 2,
+    east: longitude + lonDelta / 2,
+    west: longitude - lonDelta / 2,
+  };
+};
+
 export const findFeatureByPostcodeArea = (featureCollection, areaCode) => {
   if (!areaCode || typeof areaCode !== 'string') return null;
   const normalized = areaCode.trim().toLowerCase();

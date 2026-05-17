@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchLondonPubs } from '../../../services/PubService';
-import { boundsContain, expandBounds, mergeBounds, MIN_PUB_FETCH_ZOOM, parseVisibleBounds } from '../mapUtils';
+import {
+  approximateBoundsFromCenter,
+  boundsContain,
+  expandBounds,
+  mergeBounds,
+  MIN_PUB_FETCH_ZOOM,
+  parseVisibleBounds,
+} from '../mapUtils';
 
 export function useViewportPubs({ isFocused, mapZoomRef }) {
   const [allPubs, setAllPubs] = useState([]);
+  const [initialPubsReady, setInitialPubsReady] = useState(false);
   const [viewportBounds, setViewportBounds] = useState(null);
 
   const loadedPubBoundsRef = useRef(null);
@@ -12,6 +20,8 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
   const pubFetchTimeoutRef = useRef(null);
   /** When a fetch is already running, latest viewport bounds to fetch next (avoids dropped pans). */
   const pendingPubFetchBoundsRef = useRef(null);
+  const awaitingInitialPubLoadRef = useRef(false);
+  const initialPubsReadyRef = useRef(false);
 
   useEffect(() => () => {
     if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
@@ -25,6 +35,13 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
       });
       return Array.from(nextById.values());
     });
+  }, []);
+
+  const markInitialPubsReady = useCallback(() => {
+    if (initialPubsReadyRef.current) return;
+    initialPubsReadyRef.current = true;
+    awaitingInitialPubLoadRef.current = false;
+    setInitialPubsReady(true);
   }, []);
 
   const requestViewportPubs = useCallback((boundsToFetch) => {
@@ -50,6 +67,9 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
         if (latestPubFetchTokenRef.current === token) {
           inFlightPubFetchRef.current = false;
         }
+        if (awaitingInitialPubLoadRef.current) {
+          markInitialPubsReady();
+        }
         const pending = pendingPubFetchBoundsRef.current;
         pendingPubFetchBoundsRef.current = null;
         if (
@@ -59,7 +79,28 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
           requestViewportPubs(pending);
         }
       });
-  }, [mergeFetchedPubs]);
+  }, [markInitialPubsReady, mergeFetchedPubs]);
+
+  const requestInitialViewportPubs = useCallback(({ latitude, longitude, zoom }) => {
+    if (initialPubsReadyRef.current) return;
+    const effectiveZoom = Number.isFinite(zoom) ? zoom : mapZoomRef.current;
+    if (!Number.isFinite(effectiveZoom) || effectiveZoom < MIN_PUB_FETCH_ZOOM) return;
+    mapZoomRef.current = effectiveZoom;
+
+    const bounds = approximateBoundsFromCenter(latitude, longitude, effectiveZoom);
+    const bufferedBounds = expandBounds(bounds);
+    if (!bufferedBounds) {
+      markInitialPubsReady();
+      return;
+    }
+    if (boundsContain(loadedPubBoundsRef.current, bufferedBounds)) {
+      markInitialPubsReady();
+      return;
+    }
+
+    awaitingInitialPubLoadRef.current = true;
+    requestViewportPubs(bufferedBounds);
+  }, [mapZoomRef, markInitialPubsReady, requestViewportPubs]);
 
   const scheduleViewportPubFetch = useCallback((nextBounds, zoomLevel) => {
     if (!isFocused) return;
@@ -112,7 +153,9 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
   return {
     allPubs,
     setAllPubs,
+    initialPubsReady,
     requestViewportPubs,
+    requestInitialViewportPubs,
     scheduleViewportPubFetch,
     handleRegionChange,
     loadedPubBoundsRef,

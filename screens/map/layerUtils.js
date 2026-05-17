@@ -84,6 +84,8 @@ export const ZOOM_LEVELS = {
   PUBS_MIN: 12.35,
   /** Floor zoom when centring on GPS via the location control (below this = wider neighbourhood context). */
   CURRENT_LOCATION_MIN: 13.85,
+  /** Fixed zoom when focusing a pub from search (may zoom in or out from current level). */
+  PUB_SEARCH: 14,
 };
 
 /**

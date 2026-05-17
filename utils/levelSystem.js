@@ -1,9 +1,11 @@
 /**
  * Scoring & level rules (client).
  *
- * Server source of truth: `compute_user_stats` in `scripts/phase6_postcode_migration.sql`
- * (and `get_achievements`, which returns the same totalScore/level as `user_stats`
- * — see `scripts/get_achievements_read_user_stats.sql`).
+ * Server source of truth: `compute_user_stats` (`scripts/scoring_postcode_district_tiered_bonus.sql`
+ * and earlier migrations)
+ * (Pubs_List path: `scripts/pub_list_migration.sql` + `scripts/create_pub_achievements_table.sql`).
+ * `get_achievements` returns the same totalScore/level as `user_stats`.
+ * Per-milestone bonus: `pub_achievements.points` when the pub is visited (see create_pub_achievements_table.sql).
  * Contribution points from `reports`: `scripts/scoring_contribution_reports.sql`.
  */
 
@@ -16,10 +18,23 @@ export const DEFAULT_PUB_VISIT_POINTS = 10;
 /** Points per drink logged (sum of `pub_drinks.count`). */
 export const POINTS_PER_DRINK = 1;
 
-/** Bonus when every pub in a postcode district is visited. */
-export const DISTRICT_COMPLETION_BONUS_POINTS = 50;
+/** Area-complete tiers by district size (pub count); must match SQL. */
+export const AREA_COMPLETION_SIZE_TIERS = [
+  { key: 'S', points: 40 },
+  { key: 'M', points: 60 },
+  { key: 'L', points: 80 },
+  { key: 'XL', points: 100 },
+];
 
-/** Bonus when every pub in a letter postcode area (e.g. SW) is visited. */
+export function getPostcodeDistrictCompletionBonusPoints(pubCount) {
+  const n = Number(pubCount) || 0;
+  if (n < 10) return 40;
+  if (n < 20) return 60;
+  if (n < 30) return 80;
+  return 100;
+}
+
+/** Bonus when every pub in a letter postcode region (e.g. SW) is visited. */
 export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 1000;
 
 /** Points per missing-pub report submitted (one row = one submission). */

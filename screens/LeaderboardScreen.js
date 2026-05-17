@@ -25,6 +25,7 @@ import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
 import LeagueActionsModal from '../components/LeagueActionsModal';
 import ShareLeagueModal from '../components/ShareLeagueModal';
+import AppFeedbackModal from '../components/AppFeedbackModal';
 import { COLORS } from '../constants/theme';
 
 export default function LeaderboardScreen() {
@@ -47,6 +48,7 @@ export default function LeaderboardScreen() {
   const [leavingLeague, setLeavingLeague] = useState(false);
   const [showShareLeagueModal, setShowShareLeagueModal] = useState(false);
   const [showLeaveLeagueModal, setShowLeaveLeagueModal] = useState(false);
+  const [feedback, setFeedback] = useState(null);
   const selectedLeagueIdRef = useRef(null);
 
   useEffect(() => {
@@ -142,10 +144,18 @@ export default function LeaderboardScreen() {
       await removeLeagueMember(leagueId, currentUser.id);
       setShowLeaveLeagueModal(false);
       await loadData();
-      Alert.alert('League Left', `You have left ${leagueName}.`);
+      setFeedback({
+        title: 'Left league',
+        message: `You have left ${leagueName}.`,
+        tone: 'success',
+      });
     } catch (error) {
       console.error('Error leaving league:', error);
-      Alert.alert('Error', 'Failed to leave league. Please try again.');
+      setFeedback({
+        title: 'Could not leave',
+        message: 'Failed to leave league. Please try again.',
+        tone: 'error',
+      });
     } finally {
       setLeavingLeague(false);
       setLoading(false);
@@ -246,61 +256,54 @@ export default function LeaderboardScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.amber} colors={[COLORS.amber]} />
-      }
-    >
-      <View style={styles.headerContainer}>
-        <View style={styles.headerSideSlot} />
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>Leaderboard</Text>
+    <>
+    <View style={styles.container}>
+      <View style={styles.fixedChrome}>
+        <View style={styles.headerContainer}>
+          <View style={styles.headerSideSlot} />
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Leaderboard</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => {
+              setOpenAddFriendOnRequests(true);
+              setShowAddFriendModal(true);
+            }}
+            accessibilityLabel="Friend requests and notifications"
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
+            {pendingRequestsCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.notificationButton}
-          onPress={() => {
-            setOpenAddFriendOnRequests(true);
-            setShowAddFriendModal(true);
-          }}
-          accessibilityLabel="Friend requests and notifications"
-          accessibilityRole="button"
-        >
-          <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
-          {pendingRequestsCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
 
-      {/* Tab Selector */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
-          onPress={() => setActiveTab('friends')}
-        >
-          <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>
-            Friends
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'leagues' && styles.activeTab]}
-          onPress={() => setActiveTab('leagues')}
-        >
-          <Text style={[styles.tabText, activeTab === 'leagues' && styles.activeTabText]}>
-            Leagues
-          </Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
+            onPress={() => setActiveTab('friends')}
+          >
+            <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>
+              Friends
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'leagues' && styles.activeTab]}
+            onPress={() => setActiveTab('leagues')}
+          >
+            <Text style={[styles.tabText, activeTab === 'leagues' && styles.activeTabText]}>
+              Leagues
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* Friends Tab */}
-      {activeTab === 'friends' && (
-        <View style={styles.tabContent}>
+        {activeTab === 'friends' && (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Friends Leaderboard</Text>
             <TouchableOpacity
@@ -312,8 +315,129 @@ export default function LeaderboardScreen() {
               <MaterialCommunityIcons name="account-plus" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
+        )}
 
-          {friendsLeaderboard.length === 0 ? (
+        {activeTab === 'leagues' && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>League</Text>
+              <View style={styles.leagueHeaderRight}>
+                {leagues.length > 1 ? (
+                  <TouchableOpacity
+                    style={styles.leagueListButton}
+                    onPress={() => setShowLeagueSelector(!showLeagueSelector)}
+                    accessibilityLabel="Choose league"
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons name="format-list-bulleted" size={22} color={COLORS.darkGrey} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={() => setShowLeagueActionsModal(true)}
+                  accessibilityLabel="Create or join league"
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {showLeagueSelector && leagues.length > 0 && (
+              <View style={styles.leagueSelector}>
+                {leagues.map((league) => (
+                  <TouchableOpacity
+                    key={league.id}
+                    style={[
+                      styles.leagueOption,
+                      selectedLeague?.id === league.id && styles.selectedLeagueOption,
+                    ]}
+                    onPress={() => handleLeagueSelect(league)}
+                  >
+                    <View style={styles.leagueOptionContent}>
+                      <Text
+                        style={[
+                          styles.leagueOptionText,
+                          selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
+                        ]}
+                      >
+                        {league.name}
+                      </Text>
+                      {league.code && (
+                        <Text style={styles.leagueOptionCode}>{league.code}</Text>
+                      )}
+                    </View>
+                    {selectedLeague?.id === league.id && (
+                      <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.leagueCurrentCard}>
+              {selectedLeague ? (
+                <View style={styles.leagueCurrentRow}>
+                  <View style={styles.leagueCurrentMain}>
+                    <Text style={styles.leagueCurrentName}>{selectedLeague.name}</Text>
+                    {selectedLeague.code ? (
+                      <Text style={styles.leagueCurrentCode}>
+                        {String(selectedLeague.code).toUpperCase()}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.leagueCurrentActions}>
+                    <TouchableOpacity
+                      style={styles.leagueInlineIconButton}
+                      onPress={() => setShowShareLeagueModal(true)}
+                      accessibilityLabel="Share league"
+                      accessibilityRole="button"
+                    >
+                      <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.darkGrey} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.leagueLeaveIconButton,
+                        (leavingLeague || loading) && styles.leagueLeaveIconButtonDisabled,
+                      ]}
+                      onPress={() => setShowLeaveLeagueModal(true)}
+                      disabled={leavingLeague || loading}
+                      accessibilityLabel="Leave league"
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.leagueLeaveMinus}>-</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.leagueEmptyCardInner}>
+                  <MaterialCommunityIcons name="trophy-outline" size={36} color={COLORS.mediumGrey} />
+                  <Text style={styles.leagueEmptyTitle}>No league yet</Text>
+                  <Text style={styles.leagueEmptySubtext}>
+                    Tap + to create a league or join with a code.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+      </View>
+
+      <ScrollView
+        style={styles.membersScroll}
+        contentContainerStyle={styles.membersScrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.amber}
+            colors={[COLORS.amber]}
+          />
+        }
+        keyboardShouldPersistTaps="handled"
+      >
+        {activeTab === 'friends' && (
+          friendsLeaderboard.length === 0 ? (
             <View style={styles.emptyContainer}>
               <MaterialCommunityIcons name="account-group-outline" size={64} color={COLORS.mediumGrey} />
               <Text style={styles.emptyText}>No friends yet</Text>
@@ -323,127 +447,22 @@ export default function LeaderboardScreen() {
             <View style={styles.leaderboardContainer}>
               {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
             </View>
-          )}
-        </View>
-      )}
+          )
+        )}
 
-      {/* Leagues Tab */}
-      {activeTab === 'leagues' && (
-        <View style={styles.tabContent}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>League</Text>
-            <View style={styles.leagueHeaderRight}>
-              {leagues.length > 1 ? (
-                <TouchableOpacity
-                  style={styles.leagueListButton}
-                  onPress={() => setShowLeagueSelector(!showLeagueSelector)}
-                  accessibilityLabel="Choose league"
-                  accessibilityRole="button"
-                >
-                  <MaterialCommunityIcons name="format-list-bulleted" size={22} color={COLORS.darkGrey} />
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => setShowLeagueActionsModal(true)}
-                accessibilityLabel="Create or join league"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
+        {activeTab === 'leagues' && selectedLeague && (
+          leagueLeaderboard.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No members in this league</Text>
             </View>
-          </View>
-
-          {showLeagueSelector && leagues.length > 0 && (
-            <View style={styles.leagueSelector}>
-              {leagues.map((league) => (
-                <TouchableOpacity
-                  key={league.id}
-                  style={[
-                    styles.leagueOption,
-                    selectedLeague?.id === league.id && styles.selectedLeagueOption,
-                  ]}
-                  onPress={() => handleLeagueSelect(league)}
-                >
-                  <View style={styles.leagueOptionContent}>
-                    <Text
-                      style={[
-                        styles.leagueOptionText,
-                        selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
-                      ]}
-                    >
-                      {league.name}
-                    </Text>
-                    {league.code && (
-                      <Text style={styles.leagueOptionCode}>{league.code}</Text>
-                    )}
-                  </View>
-                  {selectedLeague?.id === league.id && (
-                    <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
-                  )}
-                </TouchableOpacity>
-              ))}
+          ) : (
+            <View style={styles.leaderboardContainer}>
+              {leagueLeaderboard.map((user) => renderLeaderboardRow(user))}
             </View>
-          )}
-
-          <View style={styles.leagueCurrentCard}>
-            {selectedLeague ? (
-              <View style={styles.leagueCurrentRow}>
-                <View style={styles.leagueCurrentMain}>
-                  <Text style={styles.leagueCurrentName}>{selectedLeague.name}</Text>
-                  {selectedLeague.code ? (
-                    <Text style={styles.leagueCurrentCode}>
-                      {String(selectedLeague.code).toUpperCase()}
-                    </Text>
-                  ) : null}
-                </View>
-                <View style={styles.leagueCurrentActions}>
-                  <TouchableOpacity
-                    style={styles.leagueInlineIconButton}
-                    onPress={() => setShowShareLeagueModal(true)}
-                    accessibilityLabel="Share league"
-                    accessibilityRole="button"
-                  >
-                    <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.darkGrey} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.leagueLeaveIconButton,
-                      (leavingLeague || loading) && styles.leagueLeaveIconButtonDisabled,
-                    ]}
-                    onPress={() => setShowLeaveLeagueModal(true)}
-                    disabled={leavingLeague || loading}
-                    accessibilityLabel="Leave league"
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.leagueLeaveMinus}>-</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.leagueEmptyCardInner}>
-                <MaterialCommunityIcons name="trophy-outline" size={36} color={COLORS.mediumGrey} />
-                <Text style={styles.leagueEmptyTitle}>No league yet</Text>
-                <Text style={styles.leagueEmptySubtext}>
-                  Tap + to create a league or join with a code.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {selectedLeague ? (
-            leagueLeaderboard.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No members in this league</Text>
-              </View>
-            ) : (
-              <View style={styles.leaderboardContainer}>
-                {leagueLeaderboard.map((user) => renderLeaderboardRow(user))}
-              </View>
-            )
-          ) : null}
-        </View>
-      )}
+          )
+        )}
+      </ScrollView>
+    </View>
 
       {/* Modals */}
       <AddFriendModal
@@ -455,6 +474,15 @@ export default function LeaderboardScreen() {
         currentUserId={currentUser?.id}
         currentUsername={currentUser?.username}
         onFriendAdded={loadData}
+        onFriendRemoved={(username) => {
+          setShowAddFriendModal(false);
+          loadData();
+          setFeedback({
+            title: 'Friend removed',
+            message: `${username} was removed from your friends.`,
+            tone: 'success',
+          });
+        }}
         initialTab={openAddFriendOnRequests ? 'requests' : 'search'}
       />
       <CreateLeagueModal
@@ -571,7 +599,15 @@ export default function LeaderboardScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+
+      <AppFeedbackModal
+        visible={!!feedback}
+        title={feedback?.title ?? ''}
+        message={feedback?.message ?? ''}
+        tone={feedback?.tone ?? 'success'}
+        onClose={() => setFeedback(null)}
+      />
+    </>
   );
 }
 
@@ -580,9 +616,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  contentContainer: {
-    padding: 20,
+  fixedChrome: {
+    paddingHorizontal: 20,
     paddingTop: 40,
+  },
+  membersScroll: {
+    flex: 1,
+  },
+  membersScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    flexGrow: 1,
   },
   contentContainerLoggedOut: {
     padding: 20,
@@ -674,9 +718,6 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: COLORS.darkGrey,
   },
-  tabContent: {
-    marginBottom: 20,
-  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -701,7 +742,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: COLORS.divider,
   },

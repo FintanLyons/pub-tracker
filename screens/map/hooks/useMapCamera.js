@@ -10,7 +10,7 @@ const MAP_LOCATION_DISTANCE_INTERVAL_M = 20;
 const LOCATE_ANIM_MS = 1000;
 const LOCATE_REFINE_MS = 650;
 
-export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
+export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInitialCameraReady }) {
   const contextLocation = useUserLocation();
   const isLocationReady = useLocationReady();
   const [localLocation, setLocalLocation] = useState(null);
@@ -75,13 +75,17 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
     setMapReady(true);
   }, []);
 
+  const notifyInitialCameraReady = useCallback((latitude, longitude) => {
+    mapZoomRef.current = ZOOM_LEVELS.PUBS_MIN;
+    onInitialCameraReady?.({
+      latitude,
+      longitude,
+      zoom: ZOOM_LEVELS.PUBS_MIN,
+    });
+  }, [mapZoomRef, onInitialCameraReady]);
+
   useEffect(() => {
     if (!isLocationReady || !mapReady) return undefined;
-
-    if (!contextLocation) {
-      setIsLocationLoaded?.(true);
-      return undefined;
-    }
 
     if (initialCameraSetRef.current || hasUserInteractedRef.current) {
       setIsLocationLoaded?.(true);
@@ -90,20 +94,21 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
 
     let cancelled = false;
 
-    const finishInitialCamera = () => {
+    const finishInitialCamera = (latitude, longitude) => {
       if (cancelled) return;
       initialCameraSetRef.current = true;
       setIsLocationLoaded?.(true);
+      notifyInitialCameraReady(latitude, longitude);
     };
 
-    const trySetCamera = () => {
+    const trySetCamera = (center, latitude, longitude) => {
       if (cancelled || !cameraRef.current) return false;
       try {
         cameraRef.current.jumpTo({
-          center: [contextLocation.longitude, contextLocation.latitude],
+          center,
           zoom: ZOOM_LEVELS.PUBS_MIN,
         });
-        finishInitialCamera();
+        finishInitialCamera(latitude, longitude);
         return true;
       } catch (err) {
         console.warn('useMapCamera: initial jumpTo failed', err?.message);
@@ -111,11 +116,36 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
       }
     };
 
-    if (trySetCamera()) return () => { cancelled = true; };
+    if (!contextLocation) {
+      const [lon, lat] = DEFAULT_CAMERA.center;
+      if (trySetCamera(DEFAULT_CAMERA.center, lat, lon)) {
+        return () => { cancelled = true; };
+      }
+    } else if (
+      trySetCamera(
+        [contextLocation.longitude, contextLocation.latitude],
+        contextLocation.latitude,
+        contextLocation.longitude,
+      )
+    ) {
+      return () => { cancelled = true; };
+    }
 
     let frameId;
     const retry = () => {
-      if (trySetCamera()) return;
+      if (cancelled) return;
+      if (!contextLocation) {
+        const [lon, lat] = DEFAULT_CAMERA.center;
+        if (trySetCamera(DEFAULT_CAMERA.center, lat, lon)) return;
+      } else if (
+        trySetCamera(
+          [contextLocation.longitude, contextLocation.latitude],
+          contextLocation.latitude,
+          contextLocation.longitude,
+        )
+      ) {
+        return;
+      }
       frameId = requestAnimationFrame(retry);
     };
     frameId = requestAnimationFrame(retry);
@@ -124,7 +154,7 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false }) {
       cancelled = true;
       cancelAnimationFrame(frameId);
     };
-  }, [contextLocation, isLocationReady, mapReady, setIsLocationLoaded]);
+  }, [contextLocation, isLocationReady, mapReady, notifyInitialCameraReady, setIsLocationLoaded]);
 
   const fitBoundsObject = useCallback((b, animationDuration = 800) => {
     if (!b || !cameraRef.current) return;

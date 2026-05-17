@@ -5,6 +5,8 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  memo,
+  startTransition,
 } from 'react';
 import {
   View,
@@ -12,6 +14,7 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   Modal,
   Animated,
@@ -52,11 +55,12 @@ import {
   POINTS_PER_LEVEL,
   DEFAULT_PUB_VISIT_POINTS,
   POINTS_PER_DRINK,
-  DISTRICT_COMPLETION_BONUS_POINTS,
+  AREA_COMPLETION_SIZE_TIERS,
   POSTCODE_AREA_COMPLETION_BONUS_POINTS,
   POINTS_NEW_PUB_REPORT,
   POINTS_PUB_CORRECTION_REPORT,
 } from '../utils/levelSystem';
+import { getAchievedTrophyIds } from '../utils/trophyUtils';
 import { CORE_LONDON_AREAS } from '../constants/londonAreas';
 import UserAchievementsPanel from '../components/UserAchievementsPanel';
 
@@ -65,6 +69,7 @@ const SORT_MODES = {
   ALPHABETICAL: 'alphabetical',
   MOST_VISITED: 'most_visited',
   PERCENTAGE: 'percentage',
+  MOST_DRINKS: 'most_drinks',
 };
 
 const VIEW_MODES = {
@@ -76,6 +81,13 @@ const DELETE_MODAL = {
   NONE: 'none',
   CONFIRM: 'confirm',
   ERROR: 'error',
+};
+
+/** Sub-views inside the single settings modal (nested RN Modals fail on iOS). */
+const SETTINGS_PANEL = {
+  MAIN: 'main',
+  AVATAR: 'avatar',
+  REMOVE_AVATAR: 'removeAvatar',
 };
 
 /** Map-return level bar + stat number timings (keep in sync). */
@@ -112,6 +124,85 @@ function formatScoreThousandsWorklet(n) {
 const AnimatedStatTextInput =
   AnimatedReanimated.createAnimatedComponent(TextInput);
 
+const DistrictStatRow = memo(function DistrictStatRow({ stat, drinks, onPress }) {
+  return (
+    <TouchableOpacity
+      style={styles.areaCard}
+      onPress={() => onPress(stat.district, stat.centerLat, stat.centerLon, stat.postcodeArea)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.areaHeader}>
+        <View style={styles.areaTitleRow}>
+          <Text style={styles.areaName} numberOfLines={1} ellipsizeMode="tail">
+            {stat.districtDisplayName || stat.district}
+          </Text>
+          {stat.district && String(stat.district).toUpperCase() !== 'UNKNOWN' && (
+            <Text style={styles.districtCodeInline} numberOfLines={1} ellipsizeMode="tail">
+              {stat.district}
+            </Text>
+          )}
+        </View>
+        <View style={styles.areaCountRow}>
+          {drinks > 0 && (
+            <View style={styles.inlinePints}>
+              <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+              <Text style={styles.inlinePintsText}>{drinks}</Text>
+            </View>
+          )}
+          <Text style={styles.areaCount}>
+            {stat.visited} / {stat.total}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.areaProgressBarContainer}>
+        <View style={styles.areaProgressBarBackground}>
+          <View style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]} />
+        </View>
+        <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const PostcodeAreaStatRow = memo(function PostcodeAreaStatRow({ stat, drinks, onPress }) {
+  const isInteractive = stat.postcodeArea && stat.postcodeArea !== 'Unknown';
+  return (
+    <TouchableOpacity
+      style={styles.areaCard}
+      onPress={() => onPress(stat.postcodeArea)}
+      activeOpacity={isInteractive ? 0.7 : 1}
+      disabled={!isInteractive}
+    >
+      <View style={styles.areaHeader}>
+        <Text style={styles.areaName}>{stat.postcodeArea}</Text>
+        <View style={styles.areaCountRow}>
+          {drinks > 0 && (
+            <View style={styles.inlinePints}>
+              <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
+              <Text style={styles.inlinePintsText}>{drinks}</Text>
+            </View>
+          )}
+          <Text style={styles.areaCount}>
+            {stat.visited} / {stat.total}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.areaProgressBarContainer}>
+        <View style={styles.areaProgressBarBackground}>
+          <View style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]} />
+        </View>
+        <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
+      </View>
+      <View style={styles.districtCompletionSummary}>
+        <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
+        <Text style={styles.districtCompletionSummaryText}>
+          Areas complete: {stat.completedDistricts} / {stat.totalDistricts}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
 export default function ProfileScreen({
   navigation,
   mapReturnAnimationKey = 0,
@@ -141,12 +232,13 @@ export default function ProfileScreen({
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showTrophiesModal, setShowTrophiesModal] = useState(false);
+  const [unseenTrophyCount, setUnseenTrophyCount] = useState(0);
+  const seenAchievedTrophyIdsRef = useRef(null);
   const [deleteModal, setDeleteModal] = useState(DELETE_MODAL.NONE);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const [showAvatarOptionsModal, setShowAvatarOptionsModal] = useState(false);
-  const [showRemoveAvatarConfirm, setShowRemoveAvatarConfirm] = useState(false);
+  const [settingsPanel, setSettingsPanel] = useState(SETTINGS_PANEL.MAIN);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const isFirstRender = useRef(true);
   const levelBarProgress = useSharedValue(0);
@@ -197,9 +289,20 @@ export default function ProfileScreen({
 
   useEffect(() => {
     if (!showSettingsModal) {
-      setShowAvatarOptionsModal(false);
+      setSettingsPanel(SETTINGS_PANEL.MAIN);
     }
   }, [showSettingsModal]);
+
+  const closeSettingsModal = useCallback(() => {
+    if (avatarBusy) return;
+    setShowSettingsModal(false);
+    setSettingsPanel(SETTINGS_PANEL.MAIN);
+  }, [avatarBusy]);
+
+  const goToSettingsMainPanel = useCallback(() => {
+    if (avatarBusy) return;
+    setSettingsPanel(SETTINGS_PANEL.MAIN);
+  }, [avatarBusy]);
 
   useEffect(() => {
     if (!baseDistrictStats?.length) {
@@ -268,6 +371,16 @@ export default function ProfileScreen({
     ])
   );
 
+  const getStatDrinkCount = useCallback(
+    (stat, type) => {
+      if (type === VIEW_MODES.DISTRICT) {
+        return drinkStats.byDistrict[stat.district] || 0;
+      }
+      return drinkStats.byPostcodeArea[stat.postcodeArea] || 0;
+    },
+    [drinkStats.byDistrict, drinkStats.byPostcodeArea],
+  );
+
   const sortStats = useCallback(
     (stats, type) => {
       const sorted = [...stats];
@@ -307,12 +420,19 @@ export default function ProfileScreen({
               (b.visited || 0) - (a.visited || 0)
           );
           break;
+        case SORT_MODES.MOST_DRINKS:
+          sorted.sort(
+            (a, b) =>
+              getStatDrinkCount(b, type) - getStatDrinkCount(a, type) ||
+              (b.visited || 0) - (a.visited || 0)
+          );
+          break;
         default:
           break;
       }
       return sorted;
     },
-    [sortMode]
+    [sortMode, getStatDrinkCount],
   );
 
   const sortedDistrictStats = useMemo(() => {
@@ -320,10 +440,10 @@ export default function ProfileScreen({
   }, [districtStatsRaw, sortStats]);
 
   const sortedPostcodeAreaStats = useMemo(() => {
-    const filtered = postcodeAreaStatsRaw.filter(
-      (row) => CORE_LONDON_AREAS.has(row.postcodeArea)
+    const londonOnly = postcodeAreaStatsRaw.filter(
+      (row) => CORE_LONDON_AREAS.has(row.postcodeArea),
     );
-    return sortStats(filtered, VIEW_MODES.POSTCODE_AREA);
+    return sortStats(londonOnly, VIEW_MODES.POSTCODE_AREA);
   }, [postcodeAreaStatsRaw, sortStats]);
 
   const hasPrevView = viewMode !== VIEW_MODES.DISTRICT;
@@ -331,15 +451,72 @@ export default function ProfileScreen({
 
   const handlePrevView = useCallback(() => {
     if (viewMode === VIEW_MODES.POSTCODE_AREA) {
-      setViewMode(VIEW_MODES.DISTRICT);
+      startTransition(() => {
+        setViewMode(VIEW_MODES.DISTRICT);
+      });
     }
   }, [viewMode]);
 
   const handleNextView = useCallback(() => {
     if (viewMode === VIEW_MODES.DISTRICT) {
-      setViewMode(VIEW_MODES.POSTCODE_AREA);
+      startTransition(() => {
+        setViewMode(VIEW_MODES.POSTCODE_AREA);
+      });
     }
   }, [viewMode]);
+
+  const areasRefreshControl = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        tintColor={COLORS.amber}
+        colors={[COLORS.amber]}
+      />
+    ),
+    [refreshing, onRefresh],
+  );
+
+  const areasListData = useMemo(
+    () => (viewMode === VIEW_MODES.DISTRICT ? sortedDistrictStats : sortedPostcodeAreaStats),
+    [viewMode, sortedDistrictStats, sortedPostcodeAreaStats],
+  );
+
+  const renderAreaItem = useCallback(
+    ({ item: stat }) => {
+      if (viewMode === VIEW_MODES.DISTRICT) {
+        return (
+          <DistrictStatRow
+            stat={stat}
+            drinks={drinkStats.byDistrict[stat.district] || 0}
+            onPress={handleDistrictPress}
+          />
+        );
+      }
+      return (
+        <PostcodeAreaStatRow
+          stat={stat}
+          drinks={drinkStats.byPostcodeArea[stat.postcodeArea] || 0}
+          onPress={handlePostcodeAreaPress}
+        />
+      );
+    },
+    [viewMode, drinkStats.byDistrict, drinkStats.byPostcodeArea, handleDistrictPress, handlePostcodeAreaPress],
+  );
+
+  const areasKeyExtractor = useCallback(
+    (item) => (viewMode === VIEW_MODES.DISTRICT ? item.district : item.postcodeArea),
+    [viewMode],
+  );
+
+  const areasListEmpty = useMemo(
+    () => (
+      <Text style={styles.emptyText}>
+        {viewMode === VIEW_MODES.DISTRICT ? 'No areas found' : 'No regions found'}
+      </Text>
+    ),
+    [viewMode],
+  );
 
   // Animate modal content slide
   useEffect(() => {
@@ -408,22 +585,21 @@ export default function ProfileScreen({
 
   const handleRemoveProfilePhoto = useCallback(() => {
     if (!user?.id || !user?.avatar_url || avatarBusy) return;
-    setShowRemoveAvatarConfirm(true);
+    setSettingsPanel(SETTINGS_PANEL.REMOVE_AVATAR);
   }, [user?.id, user?.avatar_url, avatarBusy]);
 
   const handleAvatarOptionsChangePhoto = useCallback(() => {
-    setShowAvatarOptionsModal(false);
+    setSettingsPanel(SETTINGS_PANEL.MAIN);
     handlePickProfilePhoto();
   }, [handlePickProfilePhoto]);
 
   const handleAvatarOptionsRemove = useCallback(() => {
-    setShowAvatarOptionsModal(false);
     handleRemoveProfilePhoto();
   }, [handleRemoveProfilePhoto]);
 
   const confirmRemoveProfilePhoto = useCallback(async () => {
     if (!user?.id) return;
-    setShowRemoveAvatarConfirm(false);
+    setSettingsPanel(SETTINGS_PANEL.MAIN);
     setAvatarBusy(true);
     try {
       const row = await updatePublicAvatarUrl(user.id, null);
@@ -528,6 +704,25 @@ export default function ProfileScreen({
       setRefreshing(false);
     }
   }, [refreshUserStats]);
+
+  useEffect(() => {
+    if (!achievements) return;
+    const achieved = getAchievedTrophyIds(achievements);
+    if (seenAchievedTrophyIdsRef.current === null) {
+      seenAchievedTrophyIdsRef.current = achieved;
+      return;
+    }
+    const seen = seenAchievedTrophyIdsRef.current;
+    setUnseenTrophyCount([...achieved].filter((id) => !seen.has(id)).length);
+  }, [achievements]);
+
+  const openTrophiesModal = useCallback(() => {
+    if (achievements) {
+      seenAchievedTrophyIdsRef.current = getAchievedTrophyIds(achievements);
+    }
+    setUnseenTrophyCount(0);
+    setShowTrophiesModal(true);
+  }, [achievements]);
 
   useEffect(() => {
     if (!showTrophiesModal) return;
@@ -761,27 +956,32 @@ export default function ProfileScreen({
 
   return (
     <>
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={COLORS.amber}
-          colors={[COLORS.amber]}
-        />
-      }
-    >
+    <View style={styles.container}>
+      <View style={styles.fixedChrome}>
       <View style={styles.headerContainer}>
         <TouchableOpacity
-          onPress={() => setShowTrophiesModal(true)}
+          onPress={openTrophiesModal}
           style={styles.trophyHeaderButton}
           activeOpacity={0.7}
-          accessibilityLabel="View trophies"
+          accessibilityLabel={
+            unseenTrophyCount > 0
+              ? `View trophies, ${unseenTrophyCount} new`
+              : 'View trophies'
+          }
           accessibilityRole="button"
         >
-          <MaterialCommunityIcons name="trophy" size={22} color={COLORS.amber} />
+          <MaterialCommunityIcons
+            name="trophy"
+            size={22}
+            color={unseenTrophyCount > 0 ? COLORS.amber : COLORS.darkGrey}
+          />
+          {unseenTrophyCount > 0 && (
+            <View style={styles.trophyBadge}>
+              <Text style={styles.trophyBadgeText}>
+                {unseenTrophyCount > 9 ? '9+' : unseenTrophyCount}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
         <View style={styles.headerUsernameWrap}>
           {user?.username ? (
@@ -911,7 +1111,6 @@ export default function ProfileScreen({
         </View>
       )}
 
-      <View style={styles.section}>
         <View style={styles.sectionTitleContainer}>
           <TouchableOpacity
             onPress={handlePrevView}
@@ -937,6 +1136,8 @@ export default function ProfileScreen({
               onPress={() => setShowFilterModal(true)}
               style={styles.filterButton}
               activeOpacity={0.8}
+              accessibilityLabel="Sort and filter areas"
+              accessibilityRole="button"
             >
               <MaterialCommunityIcons name="filter-variant" size={20} color={COLORS.darkGrey} />
             </TouchableOpacity>
@@ -958,103 +1159,25 @@ export default function ProfileScreen({
             </TouchableOpacity>
           </View>
         </View>
-        {viewMode === VIEW_MODES.DISTRICT ? (
-          sortedDistrictStats.length === 0 ? (
-            <Text style={styles.emptyText}>No areas found</Text>
-          ) : (
-            sortedDistrictStats.map((stat, index) => (
-              <TouchableOpacity
-                key={`district-${index}`}
-                style={styles.areaCard}
-                onPress={() =>
-                  handleDistrictPress(stat.district, stat.centerLat, stat.centerLon, stat.postcodeArea)
-                }
-                activeOpacity={0.7}
-              >
-                <View style={styles.areaHeader}>
-                  <View style={styles.areaTitleRow}>
-                    <Text style={styles.areaName} numberOfLines={1} ellipsizeMode="tail">
-                      {stat.districtDisplayName || stat.district}
-                    </Text>
-                    {stat.district && String(stat.district).toUpperCase() !== 'UNKNOWN' && (
-                      <Text
-                        style={styles.districtCodeInline}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                      >
-                        {stat.district}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.areaCountRow}>
-                    {drinkStats.byDistrict[stat.district] > 0 && (
-                      <View style={styles.inlinePints}>
-                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
-                        <Text style={styles.inlinePintsText}>{drinkStats.byDistrict[stat.district]}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.areaCount}>
-                      {stat.visited} / {stat.total}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.areaProgressBarContainer}>
-                  <View style={styles.areaProgressBarBackground}>
-                    <View
-                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
-                    />
-                  </View>
-                  <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
-                </View>
-              </TouchableOpacity>
-            ))
-          )
-        ) : sortedPostcodeAreaStats.length === 0 ? (
-          <Text style={styles.emptyText}>No regions found</Text>
-        ) : (
-          sortedPostcodeAreaStats.map((stat, index) => {
-            const isInteractive = stat.postcodeArea && stat.postcodeArea !== 'Unknown';
-            return (
-              <TouchableOpacity
-                key={`postcode-area-${index}`}
-                style={styles.areaCard}
-                onPress={() => handlePostcodeAreaPress(stat.postcodeArea)}
-                activeOpacity={isInteractive ? 0.7 : 1}
-                disabled={!isInteractive}
-              >
-                <View style={styles.areaHeader}>
-                  <Text style={styles.areaName}>{stat.postcodeArea}</Text>
-                  <View style={styles.areaCountRow}>
-                    {drinkStats.byPostcodeArea[stat.postcodeArea] > 0 && (
-                      <View style={styles.inlinePints}>
-                        <MaterialCommunityIcons name="beer-outline" size={13} color={COLORS.amber} />
-                        <Text style={styles.inlinePintsText}>{drinkStats.byPostcodeArea[stat.postcodeArea]}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.areaCount}>
-                      {stat.visited} / {stat.total}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.areaProgressBarContainer}>
-                  <View style={styles.areaProgressBarBackground}>
-                    <View
-                      style={[styles.areaProgressBarFill, { width: `${stat.percentage}%` }]}
-                    />
-                  </View>
-                  <Text style={styles.areaPercentage}>{stat.percentage}%</Text>
-                </View>
-                <View style={styles.districtCompletionSummary}>
-                  <MaterialCommunityIcons name="map-marker-radius" size={16} color={COLORS.darkGrey} />
-                  <Text style={styles.districtCompletionSummaryText}>
-                    Areas complete: {stat.completedDistricts} / {stat.totalDistricts}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
       </View>
+
+      <FlatList
+        data={areasListData}
+        keyExtractor={areasKeyExtractor}
+        renderItem={renderAreaItem}
+        extraData={viewMode}
+        ListEmptyComponent={areasListEmpty}
+        style={styles.areasScroll}
+        contentContainerStyle={styles.areasScrollContent}
+        refreshControl={areasRefreshControl}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+        nestedScrollEnabled
+      />
+    </View>
 
       <Modal
         visible={showFilterModal}
@@ -1085,7 +1208,13 @@ export default function ProfileScreen({
                 <MaterialCommunityIcons name="close" size={24} color={COLORS.darkGrey} />
               </TouchableOpacity>
             </View>
-            
+
+            <ScrollView
+              style={styles.filterModalScroll}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+            >
+            <Text style={styles.filterSectionLabel}>Sort by</Text>
             <TouchableOpacity
               style={[
                 styles.filterOption,
@@ -1169,6 +1298,31 @@ export default function ProfileScreen({
                 <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
               )}
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterOption,
+                sortMode === SORT_MODES.MOST_DRINKS && styles.filterOptionSelected,
+              ]}
+              onPress={() => {
+                setSortMode(SORT_MODES.MOST_DRINKS);
+                setShowFilterModal(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.filterOptionText,
+                  sortMode === SORT_MODES.MOST_DRINKS && styles.filterOptionTextSelected,
+                ]}
+              >
+                Most drinks
+              </Text>
+              {sortMode === SORT_MODES.MOST_DRINKS && (
+                <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
+              )}
+            </TouchableOpacity>
+
+            </ScrollView>
           </Animated.View>
         </View>
       </Modal>
@@ -1177,28 +1331,117 @@ export default function ProfileScreen({
         visible={showSettingsModal}
         animationType="fade"
         transparent
-        onRequestClose={() => setShowSettingsModal(false)}
+        onRequestClose={closeSettingsModal}
       >
         <View style={styles.floatingModalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            onPress={() => setShowSettingsModal(false)}
+            onPress={closeSettingsModal}
             accessibilityLabel="Dismiss settings"
           />
-          <View style={styles.floatingCard}>
+          <View style={styles.floatingCard} onStartShouldSetResponder={() => true}>
             <View style={styles.floatingCardHeader}>
-              <Text style={styles.floatingCardTitle}>Settings</Text>
+              <Text style={styles.floatingCardTitle}>
+                {settingsPanel === SETTINGS_PANEL.AVATAR
+                  ? 'Profile photo'
+                  : settingsPanel === SETTINGS_PANEL.REMOVE_AVATAR
+                    ? 'Remove profile photo?'
+                    : 'Settings'}
+              </Text>
               <TouchableOpacity
-                onPress={() => setShowSettingsModal(false)}
+                onPress={
+                  settingsPanel === SETTINGS_PANEL.MAIN
+                    ? closeSettingsModal
+                    : goToSettingsMainPanel
+                }
                 style={styles.floatingCardClose}
-                accessibilityLabel="Close settings"
+                accessibilityLabel={
+                  settingsPanel === SETTINGS_PANEL.MAIN ? 'Close settings' : 'Back'
+                }
                 accessibilityRole="button"
+                disabled={avatarBusy}
               >
-                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
+                <MaterialCommunityIcons
+                  name={settingsPanel === SETTINGS_PANEL.MAIN ? 'close' : 'arrow-left'}
+                  size={22}
+                  color={COLORS.darkGrey}
+                />
               </TouchableOpacity>
             </View>
 
+            {settingsPanel === SETTINGS_PANEL.AVATAR ? (
+              <View style={styles.floatingCardPickerBody}>
+                <TouchableOpacity
+                  style={[
+                    styles.settingsActionCard,
+                    styles.settingsActionCardNeutral,
+                    styles.avatarPickerAction,
+                  ]}
+                  onPress={handleAvatarOptionsChangePhoto}
+                  activeOpacity={0.75}
+                  disabled={avatarBusy || !user?.id}
+                  accessibilityLabel="Change profile photo"
+                  accessibilityRole="button"
+                >
+                  <View style={styles.settingsActionIconSlot}>
+                    <MaterialCommunityIcons name="camera-outline" size={22} color={COLORS.darkGrey} />
+                  </View>
+                  <Text style={styles.settingsActionLabel}>Change photo</Text>
+                </TouchableOpacity>
+                {user?.avatar_url ? (
+                  <TouchableOpacity
+                    style={[styles.settingsActionCard, styles.settingsActionCardDanger]}
+                    onPress={handleAvatarOptionsRemove}
+                    activeOpacity={0.75}
+                    disabled={avatarBusy}
+                    accessibilityLabel="Remove profile photo"
+                    accessibilityRole="button"
+                  >
+                    <View style={styles.settingsActionIconSlot}>
+                      <MaterialCommunityIcons name="trash-can-outline" size={22} color={COLORS.errorRed} />
+                    </View>
+                    <Text style={styles.settingsActionLabelDanger}>Remove photo</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+
+            {settingsPanel === SETTINGS_PANEL.REMOVE_AVATAR ? (
+              <>
+                <Text style={styles.floatingCardBody}>
+                  Your profile will show the default outline on the leaderboard and in settings.
+                </Text>
+                <View style={styles.floatingCardActions}>
+                  <TouchableOpacity
+                    style={[
+                      styles.floatingActionBtn,
+                      styles.floatingActionBtnHalf,
+                      styles.floatingActionBtnSecondary,
+                    ]}
+                    onPress={goToSettingsMainPanel}
+                    activeOpacity={0.75}
+                    disabled={avatarBusy}
+                  >
+                    <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.floatingActionBtn,
+                      styles.floatingActionBtnHalf,
+                      styles.floatingActionBtnDangerOutline,
+                    ]}
+                    onPress={confirmRemoveProfilePhoto}
+                    activeOpacity={0.75}
+                    disabled={avatarBusy}
+                  >
+                    <Text style={styles.floatingActionBtnTextDanger}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
+
+            {settingsPanel === SETTINGS_PANEL.MAIN ? (
             <View style={styles.settingsBody}>
               <View style={styles.settingsUserCard}>
                 <View style={styles.settingsUserTopRow}>
@@ -1218,7 +1461,7 @@ export default function ProfileScreen({
                   <View style={styles.settingsUserRightCol}>
                     <View style={styles.settingsAvatarTapWrap}>
                       <TouchableOpacity
-                        onPress={() => !avatarBusy && user?.id && setShowAvatarOptionsModal(true)}
+                        onPress={() => !avatarBusy && user?.id && setSettingsPanel(SETTINGS_PANEL.AVATAR)}
                         disabled={avatarBusy || !user?.id}
                         activeOpacity={0.82}
                         accessibilityLabel="Profile photo — change or remove"
@@ -1256,80 +1499,96 @@ export default function ProfileScreen({
 
               <View style={styles.settingsScoringCard}>
                 <Text style={styles.settingsScoringLabel}>Scoring</Text>
-                <View style={[styles.scoringRuleRow, styles.scoringRuleRowFirst]}>
-                  <Text style={styles.scoringRuleLeft}>Each pub visited</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>+{DEFAULT_PUB_VISIT_POINTS}</Text>
+
+                <View style={styles.scoringVisualRow}>
+                  <View style={styles.scoringVisualHalf}>
+                    <Text style={styles.scoringVisualWord}>Pub</Text>
+                    <MaterialCommunityIcons
+                      name="arrow-right"
+                      size={16}
+                      color={COLORS.mediumGrey}
+                      style={styles.scoringVisualArrow}
+                    />
+                    <Text style={styles.scoringVisualPoints}>
+                      +{DEFAULT_PUB_VISIT_POINTS}
+                    </Text>
+                  </View>
+                  <View style={styles.scoringVisualHalf}>
+                    <Text style={styles.scoringVisualWord}>Drinks</Text>
+                    <MaterialCommunityIcons
+                      name="arrow-right"
+                      size={16}
+                      color={COLORS.mediumGrey}
+                      style={styles.scoringVisualArrow}
+                    />
+                    <Text style={styles.scoringVisualPoints}>+{POINTS_PER_DRINK}</Text>
+                  </View>
                 </View>
-                <View style={styles.scoringRuleRow}>
-                  <Text style={styles.scoringRuleLeft}>Each drink logged</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>+{POINTS_PER_DRINK}</Text>
+
+                <Text style={styles.scoringSectionTitle}>Area</Text>
+
+                <View style={styles.scoringGridRow}>
+                  {AREA_COMPLETION_SIZE_TIERS.map((tier) => (
+                    <View key={tier.key} style={styles.scoringGridCell}>
+                      <Text style={styles.scoringGridLabel}>{tier.key}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.scoringGridCell}>
+                    <Text style={styles.scoringGridLabel}>Region</Text>
+                  </View>
                 </View>
-                <View style={styles.scoringRuleRow}>
-                  <Text style={styles.scoringRuleLeft}>New pub suggestion</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>+{POINTS_NEW_PUB_REPORT}</Text>
+
+                <View style={[styles.scoringGridRow, styles.scoringGridRowPoints]}>
+                  {AREA_COMPLETION_SIZE_TIERS.map((tier) => (
+                    <View key={tier.key} style={styles.scoringGridCell}>
+                      <Text style={styles.scoringGridPoints}>+{tier.points}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.scoringGridCell}>
+                    <Text style={styles.scoringGridPoints}>
+                      +{POSTCODE_AREA_COMPLETION_BONUS_POINTS}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.scoringRuleDividerLight} />
-                <View style={styles.scoringRuleRow}>
-                  <Text style={styles.scoringRuleLeft}>Pub correction</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>+{POINTS_PUB_CORRECTION_REPORT}</Text>
+
+                <Text style={styles.scoringSectionTitle}>Corrections</Text>
+
+                <View style={styles.scoringCorrectionsBlock}>
+                  <View style={[styles.scoringCorrectionRow, styles.scoringCorrectionRowFirst]}>
+                    <Text style={styles.scoringCorrectionLabel}>Missing Pub Corrected</Text>
+                    <MaterialCommunityIcons
+                      name="arrow-right"
+                      size={16}
+                      color={COLORS.mediumGrey}
+                      style={styles.scoringCorrectionArrow}
+                    />
+                    <Text style={styles.scoringCorrectionPoints}>
+                      +{POINTS_NEW_PUB_REPORT}
+                    </Text>
+                  </View>
+                  <View style={styles.scoringCorrectionRow}>
+                    <Text style={styles.scoringCorrectionLabel}>Pub Attribute Corrected</Text>
+                    <MaterialCommunityIcons
+                      name="arrow-right"
+                      size={16}
+                      color={COLORS.mediumGrey}
+                      style={styles.scoringCorrectionArrow}
+                    />
+                    <Text style={styles.scoringCorrectionPoints}>
+                      +{POINTS_PUB_CORRECTION_REPORT}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.scoringRuleDividerLight} />
-                <View style={styles.scoringRuleRow}>
-                  <Text style={styles.scoringRuleLeft}>Area finished</Text>
+
+                <View style={styles.scoringLevelRow}>
+                  <Text style={styles.scoringLevelPoints}>+{POINTS_PER_LEVEL}</Text>
                   <MaterialCommunityIcons
                     name="arrow-right"
-                    size={18}
+                    size={16}
                     color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
+                    style={styles.scoringVisualArrow}
                   />
-                  <Text style={styles.scoringRuleValue}>+{DISTRICT_COMPLETION_BONUS_POINTS}</Text>
-                </View>
-                <View style={[styles.scoringRuleRow, styles.scoringRuleRowTight]}>
-                  <Text style={styles.scoringRuleLeft}>Region finished</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>
-                    +{POSTCODE_AREA_COMPLETION_BONUS_POINTS}
-                  </Text>
-                </View>
-                <View style={styles.scoringRulesDivider} />
-                <View style={styles.scoringRuleRow}>
-                  <Text style={styles.scoringRuleLeft}>Every {POINTS_PER_LEVEL} points</Text>
-                  <MaterialCommunityIcons
-                    name="arrow-right"
-                    size={18}
-                    color={COLORS.mediumGrey}
-                    style={styles.scoringRuleArrow}
-                  />
-                  <Text style={styles.scoringRuleValue}>+1 level</Text>
+                  <Text style={styles.scoringLevelOutcome}>+1 Level</Text>
                 </View>
               </View>
 
@@ -1365,129 +1624,7 @@ export default function ProfileScreen({
                 </View>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showAvatarOptionsModal}
-        animationType="fade"
-        transparent
-        onRequestClose={() => !avatarBusy && setShowAvatarOptionsModal(false)}
-      >
-        <View style={styles.floatingModalOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => !avatarBusy && setShowAvatarOptionsModal(false)}
-            accessibilityLabel="Dismiss"
-          />
-          <View style={styles.floatingCard}>
-            <View style={styles.floatingCardHeader}>
-              <Text style={styles.floatingCardTitle}>Profile photo</Text>
-              <TouchableOpacity
-                onPress={() => !avatarBusy && setShowAvatarOptionsModal(false)}
-                style={styles.floatingCardClose}
-                accessibilityLabel="Close"
-                accessibilityRole="button"
-                disabled={avatarBusy}
-              >
-                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.floatingCardPickerBody}>
-              <TouchableOpacity
-                style={[
-                  styles.settingsActionCard,
-                  styles.settingsActionCardNeutral,
-                  styles.avatarPickerAction,
-                ]}
-                onPress={handleAvatarOptionsChangePhoto}
-                activeOpacity={0.75}
-                disabled={avatarBusy || !user?.id}
-                accessibilityLabel="Change profile photo"
-                accessibilityRole="button"
-              >
-                <View style={styles.settingsActionIconSlot}>
-                  <MaterialCommunityIcons name="camera-outline" size={22} color={COLORS.darkGrey} />
-                </View>
-                <Text style={styles.settingsActionLabel}>Change photo</Text>
-              </TouchableOpacity>
-              {user?.avatar_url ? (
-                <TouchableOpacity
-                  style={[styles.settingsActionCard, styles.settingsActionCardDanger]}
-                  onPress={handleAvatarOptionsRemove}
-                  activeOpacity={0.75}
-                  disabled={avatarBusy}
-                  accessibilityLabel="Remove profile photo"
-                  accessibilityRole="button"
-                >
-                  <View style={styles.settingsActionIconSlot}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={22} color={COLORS.errorRed} />
-                  </View>
-                  <Text style={styles.settingsActionLabelDanger}>Remove photo</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showRemoveAvatarConfirm}
-        animationType="fade"
-        transparent
-        onRequestClose={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
-      >
-        <View style={styles.floatingModalOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
-            accessibilityLabel="Dismiss"
-          />
-          <View style={styles.floatingCard}>
-            <View style={styles.floatingCardHeader}>
-              <Text style={styles.floatingCardTitle}>Remove profile photo?</Text>
-              <TouchableOpacity
-                onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
-                style={styles.floatingCardClose}
-                accessibilityLabel="Close"
-                accessibilityRole="button"
-                disabled={avatarBusy}
-              >
-                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.floatingCardBody}>
-              Your profile will show the default outline on the leaderboard and in settings.
-            </Text>
-            <View style={styles.floatingCardActions}>
-              <TouchableOpacity
-                style={[
-                  styles.floatingActionBtn,
-                  styles.floatingActionBtnHalf,
-                  styles.floatingActionBtnSecondary,
-                ]}
-                onPress={() => !avatarBusy && setShowRemoveAvatarConfirm(false)}
-                activeOpacity={0.75}
-                disabled={avatarBusy}
-              >
-                <Text style={styles.floatingActionBtnTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.floatingActionBtn,
-                  styles.floatingActionBtnHalf,
-                  styles.floatingActionBtnDangerOutline,
-                ]}
-                onPress={confirmRemoveProfilePhoto}
-                activeOpacity={0.75}
-                disabled={avatarBusy}
-              >
-                <Text style={styles.floatingActionBtnTextDanger}>Remove</Text>
-              </TouchableOpacity>
-            </View>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -1591,8 +1728,6 @@ export default function ProfileScreen({
           </View>
         </View>
       </Modal>
-    </ScrollView>
-
     <Modal
       visible={showTrophiesModal}
       animationType="slide"
@@ -1623,9 +1758,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  contentContainer: {
-    padding: 20,
+  fixedChrome: {
+    paddingHorizontal: 20,
     paddingTop: 40,
+  },
+  areasScroll: {
+    flex: 1,
+  },
+  areasScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
   },
   headerContainer: {
     flexDirection: 'row',
@@ -1638,8 +1780,26 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.lightGrey,
+    position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  trophyBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: '#F44336',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  trophyBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   trophiesModalRoot: {
     flex: 1,
@@ -1651,8 +1811,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.divider,
   },
   trophiesModalTitle: {
     fontSize: 20,
@@ -1907,44 +2065,110 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textAlign: 'left',
   },
-  scoringRuleRow: {
+  scoringVisualRow: {
+    flexDirection: 'row',
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  scoringVisualHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  scoringVisualWord: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  scoringVisualArrow: {
+    marginHorizontal: 6,
+  },
+  scoringVisualPoints: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.amber,
+  },
+  scoringGridRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scoringGridRowPoints: {
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  scoringGridCell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  scoringGridLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+  },
+  scoringGridPoints: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.amber,
+    textAlign: 'center',
+  },
+  scoringSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  scoringCorrectionsBlock: {
+    marginBottom: 14,
+  },
+  scoringCorrectionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 10,
   },
-  scoringRuleRowFirst: {
-    marginTop: 4,
+  scoringCorrectionRowFirst: {
+    marginTop: 0,
   },
-  scoringRuleRowTight: {
-    marginTop: 8,
-  },
-  scoringRuleLeft: {
+  scoringCorrectionLabel: {
     flex: 1,
-    fontSize: 14,
+    flexShrink: 1,
+    fontSize: 13,
     fontWeight: '600',
-    color: COLORS.darkGrey,
+    color: COLORS.accentGrey,
+    marginRight: 4,
   },
-  scoringRuleArrow: {
+  scoringCorrectionArrow: {
     marginHorizontal: 6,
+    flexShrink: 0,
   },
-  scoringRuleValue: {
+  scoringCorrectionPoints: {
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.amber,
-    minWidth: 52,
+    flexShrink: 0,
+    minWidth: 36,
     textAlign: 'right',
   },
-  scoringRuleDividerLight: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: COLORS.divider,
-    marginTop: 12,
-    marginBottom: 2,
+  scoringLevelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
-  scoringRulesDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: COLORS.divider,
-    marginTop: 12,
-    marginBottom: 4,
+  scoringLevelPoints: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.amber,
+  },
+  scoringLevelOutcome: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.burgundy,
   },
   settingsActionCard: {
     flexDirection: 'row',
@@ -2340,5 +2564,18 @@ const styles = StyleSheet.create({
   },
   filterOptionTextSelected: {
     fontWeight: '600',
+  },
+  filterModalScroll: {
+    maxHeight: 420,
+  },
+  filterSectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
 });

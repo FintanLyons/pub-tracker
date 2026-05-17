@@ -14,7 +14,9 @@ export const sendFriendRequest = async (userId, friendId) => {
     .limit(1);
 
   if (checkErr) throw checkErr;
-  if (existing && existing.length > 0) throw new Error('Friendship already exists');
+  if (existing && existing.length > 0) {
+    return { alreadyExists: true };
+  }
 
   const { data, error } = await supabase
     .from('friendships')
@@ -27,7 +29,7 @@ export const sendFriendRequest = async (userId, friendId) => {
     .select();
 
   if (error) throw error;
-  return data;
+  return { alreadyExists: false, data };
 };
 
 /**

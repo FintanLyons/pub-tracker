@@ -10,6 +10,7 @@ import { getPubRatingSummariesCached } from './ReviewService';
 
 let _visitedSet = null;
 let _favoritesSet = null;
+let _achievementsByPubId = null;
 let _cacheUserId = null;
 
 const getCurrentSession = async () => {
@@ -62,9 +63,36 @@ const loadVisitedAndFavoriteSets = async () => {
 	return { visitedSet: new Set(), favoritesSet: new Set() };
 };
 
+const loadPubAchievementsByPubId = async () => {
+	if (_achievementsByPubId) return _achievementsByPubId;
+
+	try {
+		const { data, error } = await supabase
+			.from('pub_achievements')
+			.select('pub_id, title, sort_order')
+			.order('sort_order', { ascending: true });
+
+		if (error) throw error;
+
+		const byPubId = {};
+		for (const row of data || []) {
+			if (!row?.pub_id || !row?.title) continue;
+			if (!byPubId[row.pub_id]) byPubId[row.pub_id] = [];
+			byPubId[row.pub_id].push(row.title);
+		}
+		_achievementsByPubId = byPubId;
+		return byPubId;
+	} catch (e) {
+		console.warn('pub_achievements fetch failed (table may not exist yet):', e.message);
+		_achievementsByPubId = {};
+		return {};
+	}
+};
+
 export const clearVisitedFavoriteCache = () => {
 	_visitedSet = null;
 	_favoritesSet = null;
+	_achievementsByPubId = null;
 	_cacheUserId = null;
 };
 
@@ -78,7 +106,7 @@ const SAFETY_LIMIT = 5000;
 const convertFeaturesToArray = (pub) =>
 	PUB_FEATURE_CHIPS.filter((f) => pub[f.flag] === true).map((f) => f.name);
 
-const formatPub = (pub, visitedSet, favoritesSet) => {
+const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
 	// postcode_district / postcode_area live directly on pub_list rows
 	const postcodeDistrict =
 		typeof pub.postcode_district === 'string' && pub.postcode_district.trim().length > 0
@@ -126,7 +154,7 @@ const formatPub = (pub, visitedSet, favoritesSet) => {
 			null,
 		points: 10,
 		features: convertFeaturesToArray(pub),
-		achievements: [],
+		achievements: achievementsByPubId[pub.id] || [],
 		isVisited: visitedSet.has(pub.id),
 		isFavorite: favoritesSet.has(pub.id),
 		avgRating: null,
@@ -152,7 +180,10 @@ export const fetchLondonPubs = async (options = {}) => {
 			: [];
 		const hasAreaFilter = requestedAreas.length > 0;
 
-		const { visitedSet, favoritesSet } = await loadVisitedAndFavoriteSets();
+		const [{ visitedSet, favoritesSet }, achievementsByPubId] = await Promise.all([
+			loadVisitedAndFavoriteSets(),
+			loadPubAchievementsByPubId(),
+		]);
 
 		let allPubs = [];
 		let from = 0;
@@ -191,7 +222,10 @@ export const fetchLondonPubs = async (options = {}) => {
 
 		const ratingSummaries = await getPubRatingSummariesCached();
 		const formattedPubs = allPubs.map((p) =>
-			attachRatingSummary(formatPub(p, visitedSet, favoritesSet), ratingSummaries[p.id]),
+			attachRatingSummary(
+				formatPub(p, visitedSet, favoritesSet, achievementsByPubId),
+				ratingSummaries[p.id],
+			),
 		);
 
 		const isCoreLondonPostcodeArea = (pub) => {
@@ -267,6 +301,31 @@ export const fetchPostcodeAreaSummaries = async (userId) => {
 // ---------------------------------------------------------------------------
 // Server-side pub search (uses search_pubs RPC)
 // ---------------------------------------------------------------------------
+
+export const fetchPubById = async (pubId) => {
+	if (!pubId) return null;
+
+	const id = String(pubId).trim();
+	if (!id) return null;
+
+	const { data, error } = await supabase
+		.from('Pubs_List')
+		.select('*')
+		.eq('id', id)
+		.maybeSingle();
+
+	if (error) throw error;
+	if (!data) return null;
+
+	const [{ visitedSet, favoritesSet }, achievementsByPubId, ratingSummaries] = await Promise.all([
+		loadVisitedAndFavoriteSets(),
+		loadPubAchievementsByPubId(),
+		getPubRatingSummariesCached(),
+	]);
+
+	const pub = formatPub(data, visitedSet, favoritesSet, achievementsByPubId);
+	return attachRatingSummary(pub, ratingSummaries?.[pub.id]);
+};
 
 export const searchPubsByName = async (query, limit = 5) => {
 	if (!query || typeof query !== 'string' || !query.trim()) return [];

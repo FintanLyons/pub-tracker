@@ -17,6 +17,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { joinLeagueByCode } from '../services/LeagueService';
 import { COLORS } from '../constants/theme';
+import { AppFeedbackOverlay } from './AppFeedbackModal';
 
 const BACKDROP = 'rgba(0, 0, 0, 0.5)';
 
@@ -78,11 +79,9 @@ export default function JoinLeagueModal({
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const onShow = (e) => {
-      if (Platform.OS === 'android') return;
       setKeyboardPad(e?.endCoordinates?.height ?? 0);
     };
     const onHide = () => {
-      if (Platform.OS === 'android') return;
       setKeyboardPad(0);
     };
 
@@ -162,15 +161,15 @@ export default function JoinLeagueModal({
     }
   };
 
-  const sheetBottomPad = Platform.OS === 'ios' ? keyboardPad : 0;
+  const sheetBottomPad = keyboardPad;
+  const handleModalRequestClose = feedback ? dismissFeedback : onClose;
 
   return (
-    <>
       <Modal
         visible={visible}
         animationType="none"
         transparent
-        onRequestClose={onClose}
+        onRequestClose={handleModalRequestClose}
       >
         <View style={styles.modalRoot}>
           <Animated.View
@@ -240,59 +239,17 @@ export default function JoinLeagueModal({
               </Animated.View>
             </TouchableWithoutFeedback>
           </View>
-        </View>
-      </Modal>
 
-      <Modal
-        visible={!!feedback}
-        animationType="fade"
-        transparent
-        onRequestClose={dismissFeedback}
-      >
-        <View style={styles.feedbackOverlay}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={dismissFeedback}
-            accessibilityLabel="Dismiss"
-          />
-          <View style={styles.feedbackCard}>
-            <View style={styles.feedbackHeader}>
-              <Text style={styles.feedbackTitle}>{feedback?.title}</Text>
-              <TouchableOpacity
-                onPress={dismissFeedback}
-                style={styles.feedbackClose}
-                accessibilityLabel="Close"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-              </TouchableOpacity>
-            </View>
-            {feedback?.tone === 'success' ? (
-              <View style={styles.feedbackIconWrap}>
-                <MaterialCommunityIcons name="check-circle" size={48} color={COLORS.amber} />
-              </View>
-            ) : (
-              <View style={styles.feedbackIconWrap}>
-                <MaterialCommunityIcons name="alert-circle-outline" size={48} color={COLORS.errorRed} />
-              </View>
-            )}
-            <Text style={styles.feedbackBody}>{feedback?.message}</Text>
-            <View style={styles.feedbackActions}>
-              <TouchableOpacity
-                style={styles.feedbackPrimaryBtn}
-                onPress={dismissFeedback}
-                activeOpacity={0.75}
-                accessibilityRole="button"
-                accessibilityLabel="OK"
-              >
-                <Text style={styles.feedbackPrimaryBtnText}>OK</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          {feedback ? (
+            <AppFeedbackOverlay
+              title={feedback.title}
+              message={feedback.message}
+              tone={feedback.tone}
+              onClose={dismissFeedback}
+            />
+          ) : null}
         </View>
       </Modal>
-    </>
   );
 }
 
@@ -376,79 +333,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-  },
-  feedbackOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  feedbackCard: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 16,
-  },
-  feedbackHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.divider,
-  },
-  feedbackTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.darkGrey,
-    paddingRight: 8,
-  },
-  feedbackClose: {
-    padding: 6,
-    marginRight: -2,
-  },
-  feedbackIconWrap: {
-    alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  feedbackBody: {
-    paddingHorizontal: 22,
-    paddingTop: 8,
-    paddingBottom: 20,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '400',
-    color: COLORS.accentGrey,
-    textAlign: 'center',
-  },
-  feedbackActions: {
-    paddingHorizontal: 22,
-    paddingBottom: 22,
-  },
-  feedbackPrimaryBtn: {
-    minHeight: 48,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.amber,
-    alignSelf: 'stretch',
-  },
-  feedbackPrimaryBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.charcoal,
-    textAlign: 'center',
   },
 });

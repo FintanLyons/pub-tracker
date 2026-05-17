@@ -14,6 +14,7 @@ import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
+import { setupPushNotificationNavigation } from '../services/notificationNavigation';
 
 const withErrorBoundary = (Screen, message) => (props) => (
   <ErrorBoundary fallbackMessage={message}>
@@ -109,6 +110,8 @@ export default function TabNavigator() {
     const timer = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => setupPushNotificationNavigation(), []);
 
   const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded && minSplashElapsed;
   

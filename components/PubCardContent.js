@@ -5,6 +5,7 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
+  Alert,
   StyleSheet,
   Linking,
   ActivityIndicator,
@@ -26,6 +27,7 @@ import {
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 import { getOpeningStatus } from '../utils/openingHours';
 import PubReviewsModal from './PubReviewsModal';
+import PubSummonTroopsModal from './PubSummonTroopsModal';
 
 const openDirections = async (lat, lon) => {
   const destination = `${lat},${lon}`;
@@ -76,7 +78,7 @@ export default function PubCardContent({
   scrollEnabled,
   scrollRef,
   onToggleVisited,
-  onReviewsModalVisibleChange,
+  onBlockingOverlayVisibleChange,
 }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -100,6 +102,7 @@ export default function PubCardContent({
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [userReview, setUserReview] = useState(null);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
+  const [showSummonModal, setShowSummonModal] = useState(false);
 
   const [galleryWidth, setGalleryWidth] = useState(Dimensions.get('window').width);
   const [photoIndex, setPhotoIndex] = useState(0);
@@ -113,6 +116,7 @@ export default function PubCardContent({
     setReviews([]);
     setUserReview(null);
     setShowReviewsModal(false);
+    setShowSummonModal(false);
     setPhotoIndex(0);
     setGalleryScrollLock(false);
     galleryRef.current?.scrollTo({ x: 0, animated: false });
@@ -147,10 +151,22 @@ export default function PubCardContent({
     fetchReviews();
   }, [pub?.id, userId]);
 
+  const blockingOverlayOpen = showReviewsModal || showSummonModal;
+
   useEffect(() => {
-    onReviewsModalVisibleChange?.(showReviewsModal);
-    return () => onReviewsModalVisibleChange?.(false);
-  }, [showReviewsModal, onReviewsModalVisibleChange]);
+    onBlockingOverlayVisibleChange?.(blockingOverlayOpen);
+    return () => onBlockingOverlayVisibleChange?.(false);
+  }, [blockingOverlayOpen, onBlockingOverlayVisibleChange]);
+
+  const pubAreaLabel = pub?.area ? formatDistrictWithCode(pub.area) : null;
+
+  const handleOpenSummonModal = useCallback(() => {
+    if (!userId) {
+      Alert.alert('Sign in required', 'Sign in to summon friends to this pub.');
+      return;
+    }
+    setShowSummonModal(true);
+  }, [userId]);
 
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {
@@ -237,13 +253,13 @@ export default function PubCardContent({
     [galleryWidth, photoIndex],
   );
 
-  const verticalScrollEnabled = showReviewsModal
+  const verticalScrollEnabled = blockingOverlayOpen
     ? false
     : galleryScrollLock
       ? false
       : (scrollEnabled !== undefined ? scrollEnabled : isExpanded);
 
-  const contentPointerEvents = showReviewsModal ? 'none' : pointerEvents;
+  const contentPointerEvents = blockingOverlayOpen ? 'none' : pointerEvents;
 
   const handleGalleryTouchStart = useCallback((e) => {
     galleryTouchStart.current = {
@@ -420,6 +436,8 @@ export default function PubCardContent({
         </View>
       )}
 
+      <View style={styles.dividerBeforeActions} />
+
       {/* ── Action buttons ───────────────────────────────────────────────── */}
       <View style={styles.actionRow}>
         <TouchableOpacity
@@ -453,7 +471,7 @@ export default function PubCardContent({
       </View>
 
       {/* ── Divider ──────────────────────────────────────────────────────── */}
-      <View style={styles.divider} />
+      <View style={styles.dividerAfterActions} />
 
       {/* ── Reviews + drinks ─────────────────────────────────────────────── */}
       <View style={styles.reviewsSection}>
@@ -467,18 +485,28 @@ export default function PubCardContent({
               accessibilityLabel="Open reviews"
             >
               <MaterialCommunityIcons name="comment-text-outline" size={20} color={COLORS.amber} />
-              <Text style={styles.reviewsButtonLabel}>Reviews</Text>
-              <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.mediumGrey} />
+              <Text style={[styles.reviewsButtonLabel, styles.reviewsButtonLabelSpaced]} numberOfLines={1}>
+                Reviews
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {userId && (
-            <View style={styles.reviewsActionHalf}>
-              <View style={styles.drinksInlineRow}>
+          <TouchableOpacity
+            style={[styles.summonRectButton, styles.reviewsRowSpaced]}
+            onPress={handleOpenSummonModal}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Summon friends to this pub"
+          >
+            <MaterialCommunityIcons name="account-multiple" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {userId ? (
+            <View style={[styles.drinksInlineRow, styles.reviewsRowSpaced]}>
               <TouchableOpacity
                 style={[
-                  styles.drinkRectButton,
-                  (drinkCount === 0 || drinkCountLoading) && styles.drinkRectButtonDisabled,
+                  styles.actionRectButton,
+                  (drinkCount === 0 || drinkCountLoading) && styles.actionRectButtonDisabled,
                 ]}
                 onPress={() => handleChangeDrink(-1)}
                 disabled={drinkCount === 0 || drinkCountLoading}
@@ -491,8 +519,8 @@ export default function PubCardContent({
                 />
               </TouchableOpacity>
 
-              <View style={styles.drinkCenter}>
-                <MaterialCommunityIcons name="beer" size={28} color={COLORS.amber} />
+              <View style={[styles.drinkCenter, styles.reviewsRowSpaced]}>
+                <MaterialCommunityIcons name="beer" size={24} color={COLORS.amber} />
                 {drinkCountLoading ? (
                   <ActivityIndicator size="small" color={COLORS.amber} />
                 ) : (
@@ -501,16 +529,19 @@ export default function PubCardContent({
               </View>
 
               <TouchableOpacity
-                style={[styles.drinkRectButton, drinkCountLoading && styles.drinkRectButtonDisabled]}
+                style={[
+                  styles.actionRectButton,
+                  styles.reviewsRowSpaced,
+                  drinkCountLoading && styles.actionRectButtonDisabled,
+                ]}
                 onPress={() => handleChangeDrink(1)}
                 disabled={drinkCountLoading}
                 activeOpacity={0.7}
               >
                 <MaterialCommunityIcons name="plus" size={26} color="#FFFFFF" />
               </TouchableOpacity>
-              </View>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -528,6 +559,15 @@ export default function PubCardContent({
         onDeleteReview={handleDeleteReview}
       />
 
+      <PubSummonTroopsModal
+        visible={showSummonModal}
+        onClose={() => setShowSummonModal(false)}
+        pubId={pub.id}
+        pubName={pub.name}
+        pubAreaLabel={pubAreaLabel}
+        currentUserId={userId}
+      />
+
       {/* ── History / description ───────────────────────────────────────── */}
       {(pub.history || pub.description) && (
         <View style={styles.historyContainer}>
@@ -538,6 +578,11 @@ export default function PubCardContent({
     </ScrollView>
   );
 }
+
+/** Same as featuresContainer: paddingVertical 10×2 + featureIconWrapper height 32 */
+const REVIEWS_ACTIONS_ROW_HEIGHT = 52;
+const REVIEWS_ROW_GAP = 8;
+const SUMMON_BUTTON_MIN_WIDTH = 52;
 
 const styles = StyleSheet.create({
   cardContent: {
@@ -659,16 +704,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
     paddingVertical: 10,
     paddingHorizontal: 8,
     borderRadius: 12,
     backgroundColor: COLORS.lightGrey,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 0,
+      },
+      default: {},
+    }),
   },
   featureIconWrapper: {
     alignItems: 'center',
@@ -685,7 +737,7 @@ const styles = StyleSheet.create({
   achievementContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   achievementText: {
     fontSize: 14,
@@ -698,7 +750,7 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 8,
     gap: 8,
   },
   actionButton: {
@@ -729,18 +781,31 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.lightGrey,
     marginVertical: 8,
   },
+  dividerBeforeActions: {
+    height: 1,
+    backgroundColor: COLORS.lightGrey,
+    marginBottom: 8,
+  },
+  dividerAfterActions: {
+    height: 1,
+    backgroundColor: COLORS.lightGrey,
+    marginBottom: 8,
+  },
 
   // ── Drinks counter ────────────────────────────────────────────────────────
   drinkCountText: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '700',
     color: COLORS.darkGrey,
-    minWidth: 28,
+    minWidth: 20,
+    marginLeft: 4,
     textAlign: 'center',
   },
 
   // ── Reviews ───────────────────────────────────────────────────────────────
-  reviewsSection: {},
+  reviewsSection: {
+    width: '100%',
+  },
   ratingSummaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -771,19 +836,26 @@ const styles = StyleSheet.create({
   reviewsActionsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 12,
+    width: '100%',
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
+  },
+  reviewsRowSpaced: {
+    marginLeft: REVIEWS_ROW_GAP,
   },
   reviewsActionHalf: {
-    flex: 1,
-    flexBasis: 0,
-    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 'auto',
+    minWidth: 108,
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
+    alignSelf: 'stretch',
   },
   reviewsButton: {
-    width: '100%',
+    flex: 1,
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1.5,
@@ -791,35 +863,47 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   reviewsButtonLabel: {
-    flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.darkGrey,
   },
+  reviewsButtonLabelSpaced: {
+    marginLeft: 8,
+  },
   drinksInlineRow: {
-    width: '100%',
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 6,
   },
-  drinkRectButton: {
-    width: 44,
-    marginVertical: 4,
+  summonRectButton: {
+    flex: 1,
+    flexShrink: 1,
+    minWidth: SUMMON_BUTTON_MIN_WIDTH,
+    alignSelf: 'stretch',
     backgroundColor: COLORS.amber,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  drinkRectButtonDisabled: {
+  actionRectButton: {
+    width: 44,
+    alignSelf: 'stretch',
+    backgroundColor: COLORS.amber,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionRectButtonDisabled: {
     backgroundColor: '#E0E0E0',
   },
   drinkCenter: {
-    flex: 1,
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    paddingHorizontal: 2,
+    maxWidth: 68,
   },
   // ── History ───────────────────────────────────────────────────────────────
   historyContainer: {

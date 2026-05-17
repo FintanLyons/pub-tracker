@@ -6,25 +6,17 @@ import {
   ScrollView,
   RefreshControl,
   Animated,
+  TouchableOpacity,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { getAreaTrophies, getMilestoneTrophies } from '../utils/trophyUtils';
 
-const isLondonTrophy = (trophy) => {
-  const id = typeof trophy.id === 'string' ? trophy.id : '';
-  if (trophy.type === 'district' || trophy.type === 'area') {
-    const m = id.match(/^district-([A-Z]+)/i);
-    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
-  }
-  if (trophy.type === 'postcode_area' || trophy.type === 'borough') {
-    const m = id.match(/^(?:postcode[_-]?area|borough)-([A-Z]+)/i);
-    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
-    return CORE_LONDON_AREAS.has(id.toUpperCase());
-  }
-  return true;
+const TROPHY_TABS = {
+  AREAS: 'areas',
+  MILESTONES: 'milestones',
 };
 
 function SkeletonBlock({ width, height, style }) {
@@ -46,38 +38,7 @@ function SkeletonBlock({ width, height, style }) {
   );
 }
 
-/**
- * Trophy collection only (no level bar). Used inside ProfileScreen modal.
- */
-export default function UserAchievementsPanel() {
-  const { achievements, statsLoading, refreshUserStats } = useUserStats();
-  const [refreshing, setRefreshing] = useState(false);
-
-  const trophies = useMemo(() => {
-    if (!achievements) return [];
-    const all = [
-      ...(achievements.districtTrophies || achievements.areaTrophies || []),
-      ...(achievements.postcodeAreaTrophies || achievements.boroughTrophies || []),
-      ...(achievements.pubAchievements || []),
-    ].filter(isLondonTrophy);
-    all.sort((a, b) => {
-      if (a.isAchieved && !b.isAchieved) return -1;
-      if (!a.isAchieved && b.isAchieved) return 1;
-      return 0;
-    });
-    return all;
-  }, [achievements]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refreshUserStats();
-    } catch {
-      /* handled in context */
-    }
-    setRefreshing(false);
-  }, [refreshUserStats]);
-
+function TrophyGrid({ trophies }) {
   const trophyRows = [];
   for (let i = 0; i < trophies.length; i += 3) {
     trophyRows.push(trophies.slice(i, i + 3));
@@ -99,6 +60,9 @@ export default function UserAchievementsPanel() {
 
   const formatTrophyTitle = (trophy) => {
     if (!trophy?.title) return '';
+    if (trophy.type === 'achievement') {
+      return trophy.description || trophy.title;
+    }
     if (trophy.type === 'district' || trophy.type === 'area') {
       const rawId = typeof trophy.id === 'string' ? trophy.id : '';
       const m = rawId.match(/^district-(.+)$/i);
@@ -109,6 +73,13 @@ export default function UserAchievementsPanel() {
       }
     }
     return trophy.title;
+  };
+
+  const formatTrophyDescription = (trophy) => {
+    if (trophy.type === 'achievement') {
+      return trophy.title || '';
+    }
+    return trophy.description || '';
   };
 
   const getTrophyColor = (trophy) => {
@@ -126,21 +97,130 @@ export default function UserAchievementsPanel() {
     }
   };
 
-  const showSkeleton = statsLoading && !achievements;
+  if (trophyRows.length === 0) {
+    return null;
+  }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={COLORS.amber}
-          colors={[COLORS.amber]}
-        />
-      }
-    >
+    <View style={styles.section}>
+      {trophyRows.map((row, rowIndex) => (
+        <View key={rowIndex} style={styles.trophyRow}>
+          {row.map((trophy) => (
+            <View key={trophy.id} style={styles.trophyContainer}>
+              <View
+                style={[
+                  styles.trophyIconContainer,
+                  !trophy.isAchieved && styles.trophyIconContainerLocked,
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={getTrophyIcon(trophy)}
+                  size={48}
+                  color={getTrophyColor(trophy)}
+                />
+              </View>
+              <Text
+                style={[styles.trophyTitle, !trophy.isAchieved && styles.trophyTitleLocked]}
+                numberOfLines={2}
+              >
+                {formatTrophyTitle(trophy)}
+              </Text>
+              <Text
+                style={[
+                  styles.trophyDescription,
+                  !trophy.isAchieved && styles.trophyDescriptionLocked,
+                ]}
+                numberOfLines={trophy.type === 'achievement' ? 2 : 1}
+              >
+                {formatTrophyDescription(trophy)}
+              </Text>
+            </View>
+          ))}
+          {row.length < 3
+            && Array.from({ length: 3 - row.length }).map((_, idx) => (
+              <View key={`empty-${idx}`} style={styles.trophyContainer} />
+            ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TrophyEmpty({ icon, title, subtitle }) {
+  return (
+    <View style={styles.emptyWrap}>
+      <MaterialCommunityIcons name={icon} size={56} color={COLORS.divider} />
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptySubtitle}>{subtitle}</Text>
+    </View>
+  );
+}
+
+/**
+ * Trophy collection only (no level bar). Used inside ProfileScreen modal.
+ */
+export default function UserAchievementsPanel() {
+  const { achievements, statsLoading, refreshUserStats } = useUserStats();
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState(TROPHY_TABS.AREAS);
+
+  const areaTrophies = useMemo(() => getAreaTrophies(achievements), [achievements]);
+  const milestoneTrophies = useMemo(() => getMilestoneTrophies(achievements), [achievements]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshUserStats();
+    } catch {
+      /* handled in context */
+    }
+    setRefreshing(false);
+  }, [refreshUserStats]);
+
+  const showSkeleton = statsLoading && !achievements;
+  const activeTrophies = activeTab === TROPHY_TABS.AREAS ? areaTrophies : milestoneTrophies;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.tabChrome}>
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === TROPHY_TABS.AREAS && styles.activeTab]}
+            onPress={() => setActiveTab(TROPHY_TABS.AREAS)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === TROPHY_TABS.AREAS }}
+          >
+            <Text style={[styles.tabText, activeTab === TROPHY_TABS.AREAS && styles.activeTabText]}>
+              Areas
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === TROPHY_TABS.MILESTONES && styles.activeTab]}
+            onPress={() => setActiveTab(TROPHY_TABS.MILESTONES)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === TROPHY_TABS.MILESTONES }}
+          >
+            <Text
+              style={[styles.tabText, activeTab === TROPHY_TABS.MILESTONES && styles.activeTabText]}
+            >
+              Milestones
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.amber}
+            colors={[COLORS.amber]}
+          />
+        }
+      >
       {showSkeleton ? (
         <>
           <View style={styles.trophyRow}>
@@ -160,54 +240,27 @@ export default function UserAchievementsPanel() {
             ))}
           </View>
         </>
+      ) : activeTab === TROPHY_TABS.AREAS ? (
+        activeTrophies.length === 0 ? (
+          <TrophyEmpty
+            icon="trophy-outline"
+            title="No area trophies yet"
+            subtitle="Visit every pub in a district or region to earn your first trophy"
+          />
+        ) : (
+          <TrophyGrid trophies={activeTrophies} />
+        )
+      ) : activeTrophies.length === 0 ? (
+        <TrophyEmpty
+          icon="medal-outline"
+          title="No milestones yet"
+          subtitle="Special pub visits and other challenges will appear here"
+        />
       ) : (
-        <View style={styles.section}>
-          {trophyRows.length === 0 ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="trophy-outline" size={56} color={COLORS.divider} />
-              <Text style={styles.emptyTitle}>No trophies yet</Text>
-              <Text style={styles.emptySubtitle}>
-                Visit every pub in an area to earn your first trophy
-              </Text>
-            </View>
-          ) : (
-            trophyRows.map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.trophyRow}>
-                {row.map((trophy) => (
-                  <View key={trophy.id} style={styles.trophyContainer}>
-                    <View style={[
-                      styles.trophyIconContainer,
-                      !trophy.isAchieved && styles.trophyIconContainerLocked,
-                    ]}>
-                      <MaterialCommunityIcons
-                        name={getTrophyIcon(trophy)}
-                        size={48}
-                        color={getTrophyColor(trophy)}
-                      />
-                    </View>
-                    <Text
-                      style={[styles.trophyTitle, !trophy.isAchieved && styles.trophyTitleLocked]}
-                      numberOfLines={2}
-                    >
-                      {formatTrophyTitle(trophy)}
-                    </Text>
-                    <Text
-                      style={[styles.trophyDescription, !trophy.isAchieved && styles.trophyDescriptionLocked]}
-                      numberOfLines={1}
-                    >
-                      {trophy.description}
-                    </Text>
-                  </View>
-                ))}
-                {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, idx) => (
-                  <View key={`empty-${idx}`} style={styles.trophyContainer} />
-                ))}
-              </View>
-            ))
-          )}
-        </View>
+        <TrophyGrid trophies={activeTrophies} />
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -216,12 +269,46 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
   },
-  contentContainer: {
+  tabChrome: {
     paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 40,
+    paddingBottom: 16,
   },
-  skeletonWrap: {},
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    flexGrow: 1,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.lightGrey,
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: COLORS.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.mediumGrey,
+  },
+  activeTabText: {
+    color: COLORS.darkGrey,
+  },
   section: {
     marginBottom: 20,
   },

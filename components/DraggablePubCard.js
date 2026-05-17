@@ -117,11 +117,11 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
-  const reviewsModalOpenRef = useRef(false);
+  const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
+  const blockingOverlayOpenRef = useRef(false);
   useEffect(() => {
-    reviewsModalOpenRef.current = reviewsModalOpen;
-  }, [reviewsModalOpen]);
+    blockingOverlayOpenRef.current = blockingOverlayOpen;
+  }, [blockingOverlayOpen]);
 
   /** PanResponder is created once; keep latest pub id for close callbacks. */
   const pubIdRef = useRef(pub?.id);
@@ -178,12 +178,12 @@ export default function DraggablePubCard({
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponderCapture: () => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         return false;
       },
 
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         const ax = Math.abs(gestureState.dx);
         const ay = Math.abs(gestureState.dy);
         const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
@@ -219,7 +219,7 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         const ax = Math.abs(gestureState.dx);
         const ay = Math.abs(gestureState.dy);
         const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
@@ -616,7 +616,7 @@ export default function DraggablePubCard({
       )}
       
       {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
-      {!isExpanded && !reviewsModalOpen && (
+      {!isExpanded && !blockingOverlayOpen && (
         <View 
           style={styles.draggableOverlay} 
           pointerEvents="box-only" 
@@ -633,15 +633,15 @@ export default function DraggablePubCard({
         pub={pub}
         isExpanded={isExpanded}
         getImageSource={getImageSource}
-        pointerEvents={reviewsModalOpen || !isExpanded ? 'none' : 'auto'}
+        pointerEvents={blockingOverlayOpen || !isExpanded ? 'none' : 'auto'}
         onScroll={handleScroll}
-        scrollEnabled={scrollEnabled && !reviewsModalOpen}
+        scrollEnabled={scrollEnabled && !blockingOverlayOpen}
         scrollRef={scrollViewRef}
         onToggleVisited={onToggleVisited}
-        onReviewsModalVisibleChange={setReviewsModalOpen}
+        onBlockingOverlayVisibleChange={setBlockingOverlayOpen}
       />
 
-      {reviewsModalOpen && (
+      {blockingOverlayOpen && (
         <View style={styles.modalBlockOverlay} pointerEvents="box-only" />
       )}
 

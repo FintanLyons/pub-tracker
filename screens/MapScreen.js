@@ -83,6 +83,8 @@ export default function MapScreen() {
 
   // ── Hooks ─────────────────────────────────────────────────────
 
+  const requestInitialViewportPubsRef = useRef(null);
+
   const {
     cameraRef,
     mapZoomRef,
@@ -93,15 +95,23 @@ export default function MapScreen() {
     fitBoundsObject,
     handleCurrentLocation,
     handleMapLoaded,
-  } = useMapCamera({ setIsLocationLoaded, isMapFocused: isFocused });
+  } = useMapCamera({
+    setIsLocationLoaded,
+    isMapFocused: isFocused,
+    onInitialCameraReady: (center) => requestInitialViewportPubsRef.current?.(center),
+  });
 
   const {
     allPubs,
     setAllPubs,
+    initialPubsReady,
     requestViewportPubs,
+    requestInitialViewportPubs,
     handleRegionChange,
     loadedPubBoundsRef,
   } = useViewportPubs({ isFocused, mapZoomRef });
+
+  requestInitialViewportPubsRef.current = requestInitialViewportPubs;
 
   const {
     selectedFeatures,
@@ -434,8 +444,16 @@ export default function MapScreen() {
   // ── Loading gate ──────────────────────────────────────────────
 
   useEffect(() => {
-    setIsInitialPubsLoaded?.(true);
-  }, [setIsInitialPubsLoaded]);
+    if (initialPubsReady) {
+      setIsInitialPubsLoaded?.(true);
+    }
+  }, [initialPubsReady, setIsInitialPubsLoaded]);
+
+  useEffect(() => {
+    if (initialPubsReady) return undefined;
+    const fallback = setTimeout(() => setIsInitialPubsLoaded?.(true), 12000);
+    return () => clearTimeout(fallback);
+  }, [initialPubsReady, setIsInitialPubsLoaded]);
 
   // ── Render ────────────────────────────────────────────────────
 

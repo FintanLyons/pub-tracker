@@ -2,11 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
 import { Dimensions } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { searchPubsByName, togglePubFavorite, togglePubVisited } from '../../../services/PubService';
+import {
+  fetchPubById,
+  searchPubsByName,
+  togglePubFavorite,
+  togglePubVisited,
+} from '../../../services/PubService';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../../utils/postcodeDistrictDisplayNames';
 import { distanceMeters } from '../../../utils/geo';
-import { getFeatureBounds } from '../layerUtils';
+import { getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
 import {
+  approximateBoundsFromCenter,
   boundsContain,
   expandBounds,
   findDistrictFeatureBySearchQuery,
@@ -55,6 +61,7 @@ export function useMapInteraction({
   const clearedPostcodeAreaRef = useRef(null);
   const processedDistrictRef = useRef(null);
   const processedPostcodeAreaRef = useRef(null);
+  const processedSummonPubRef = useRef(null);
   const pubSearchTimeoutRef = useRef(null);
   const normalizeSearchText = useCallback((value) => String(value || '').trim().toLowerCase(), []);
   const removeLeadingThe = useCallback((value) => value.replace(/^the\s+/i, '').trim(), []);
@@ -218,7 +225,26 @@ export function useMapInteraction({
     fitFeature(feature);
   }, [fitFeature, hasUserInteractedRef]);
 
-  const selectPub = useCallback((pub, updateSearch = true) => {
+  const focusCameraOnPub = useCallback((pub) => {
+    const lat = Number(pub?.lat);
+    const lon = Number(pub?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !cameraRef.current) return;
+
+    const targetZoom = ZOOM_LEVELS.PUB_SEARCH;
+    mapZoomRef.current = targetZoom;
+    try {
+      cameraRef.current.easeTo({
+        center: [lon, lat],
+        zoom: targetZoom,
+        duration: 700,
+        easing: 'ease',
+      });
+    } catch (err) {
+      console.warn('useMapInteraction: focusCameraOnPub failed', err?.message);
+    }
+  }, [cameraRef, mapZoomRef]);
+
+  const selectPub = useCallback((pub, updateSearch = true, focusCamera = false) => {
     if (!pub) return;
     hasUserInteractedRef.current = true;
     setSelectedDistrictName(null);
@@ -227,13 +253,14 @@ export function useMapInteraction({
     setMapHighlightedPubId(pub.id);
     // Selecting a pub should focus the map/card state, not leave a sticky query.
     if (updateSearch) setSearchQuery('');
+    if (focusCamera) focusCameraOnPub(pub);
     // Server/typeahead suggestions can reference a pub not yet in viewport `allPubs`. Toggles use
     // `allPubs.find` for baseline state and map updates — without this, visited/favourite can look
     // broken until a viewport fetch adds the row (feels like "wait for load").
     if (pub.id != null) {
       setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
     }
-  }, [hasUserInteractedRef, setAllPubs]);
+  }, [focusCameraOnPub, hasUserInteractedRef, setAllPubs]);
 
   // ── Toggle callbacks (optimistic) ────────────────────────────
 
@@ -330,11 +357,11 @@ export function useMapInteraction({
     if (districtMatch) { selectDistrict(districtMatch, true); return; }
 
     const localPubMatch = rankPubsForQuery(allPubs, rawQuery, 1)[0];
-    if (localPubMatch) { selectPub(localPubMatch, true); return; }
+    if (localPubMatch) { selectPub(localPubMatch, true, true); return; }
 
     try {
       const serverResults = await searchPubsByName(rawQuery.trim(), 1);
-      if (serverResults?.length > 0) selectPub(serverResults[0], true);
+      if (serverResults?.length > 0) selectPub(serverResults[0], true, true);
     } catch {
       // server search unavailable
     }
@@ -375,7 +402,7 @@ export function useMapInteraction({
   const handlePubSuggestionPress = useCallback((pub) => {
     setShowSuggestions(false);
     Keyboard.dismiss();
-    selectPub(pub, true);
+    selectPub(pub, true, true);
   }, [selectPub]);
 
   const dismissSearchSuggestions = useCallback(() => {
@@ -501,7 +528,55 @@ export function useMapInteraction({
       } else if (!postcodeAreaToSearch) {
         processedPostcodeAreaRef.current = null;
       }
-    }, [route.params, selectDistrict, selectPostcodeArea, cameraRef, mapZoomRef, hasUserInteractedRef]),
+
+      const summonPubId = route.params?.summonPubId;
+      if (summonPubId && String(summonPubId) !== processedSummonPubRef.current) {
+        const id = String(summonPubId);
+        processedSummonPubRef.current = id;
+
+        (async () => {
+          try {
+            let pub = allPubs.find((item) => String(item.id) === id);
+            if (!pub) {
+              pub = await fetchPubById(id);
+            }
+            if (!pub) {
+              processedSummonPubRef.current = null;
+              return;
+            }
+
+            const lat = Number(pub.lat);
+            const lon = Number(pub.lon);
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+              const viewport = approximateBoundsFromCenter(lat, lon, ZOOM_LEVELS.PUB_SEARCH);
+              const buffered = expandBounds(viewport);
+              if (buffered) requestViewportPubs(buffered);
+            }
+
+            selectPub(pub, false, true);
+          } catch (err) {
+            console.warn('useMapInteraction: summon pub deep link failed', err?.message);
+            processedSummonPubRef.current = null;
+          } finally {
+            const { summonPubId: _omit, ...remainingParams } = route.params || {};
+            navigation.setParams(remainingParams);
+          }
+        })();
+      } else if (!summonPubId) {
+        processedSummonPubRef.current = null;
+      }
+    }, [
+      allPubs,
+      navigation,
+      requestViewportPubs,
+      route.params,
+      selectDistrict,
+      selectPostcodeArea,
+      selectPub,
+      cameraRef,
+      mapZoomRef,
+      hasUserInteractedRef,
+    ]),
   );
 
   return {

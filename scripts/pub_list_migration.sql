@@ -439,8 +439,7 @@ GRANT EXECUTE ON FUNCTION public.get_borough_stats(UUID) TO authenticated;
 
 
 -- ============================================================================
--- G. get_achievements — reads pub_list
---    pub_list has no achievement column, so pubAchievements is always [].
+-- G. get_achievements — reads pub_list (pub milestones: run create_pub_achievements_table.sql)
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_achievements(p_user_id UUID)

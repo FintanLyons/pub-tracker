@@ -11,25 +11,25 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const PAGES = [
   {
-    key: 'map',
-    image: require('../assets/Screenshot_20260329-145338.png'),
-    icon: 'map-marker-multiple',
-    headline: 'Track Your Pubs',
-    body: 'Discover and mark every pub you visit across London. Tap any pub on the map to log your visit.',
+    key: 'discover',
+    image: require('../assets/onboarding-discover-pubs.png'),
+    icon: 'map-search',
+    headline: 'Discover new Pubs',
+    body: 'Explore London on the map, search by area, and find your next pint.',
   },
   {
-    key: 'achievements',
-    image: require('../assets/Screenshot_20260329-151017.png'),
-    icon: 'trophy',
-    headline: 'Earn Trophies',
-    body: 'Complete every pub in a postcode area to earn bonus points and unlock trophies. How many can you collect?',
+    key: 'track',
+    image: require('../assets/onboarding-track-visits.png'),
+    icon: 'star-circle',
+    headline: 'Earn points and track visits',
+    body: 'Mark pubs visited, log drinks, level up, and complete areas for bonus points.',
   },
   {
-    key: 'leaderboard',
-    image: require('../assets/Screenshot_20260329-151029.png'),
+    key: 'compete',
+    image: require('../assets/onboarding-compete-friends.png'),
     icon: 'crown',
-    headline: 'Compete With Friends',
-    body: 'Add friends, create private leagues, and climb the leaderboard to see who reigns supreme.',
+    headline: 'Compete against Friends',
+    body: 'Add friends, join leagues, and climb the leaderboard.',
   },
 ];
 
