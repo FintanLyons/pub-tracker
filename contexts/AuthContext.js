@@ -11,6 +11,7 @@ import {
   logoutUserSecure,
   deleteAccountSecure,
   ensureUserStub,
+  PUBLIC_USER_PROFILE_COLUMNS,
 } from '../services/SecureAuthService';
 import { removeAllPushTokensForUser } from '../services/PushNotificationService';
 
@@ -32,7 +33,7 @@ const loadProfile = async (uid) => {
   if (!uid) return null;
   const { data: users } = await supabase
     .from('users')
-    .select('*')
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', uid)
     .limit(1);
   return users && users.length > 0 ? users[0] : null;

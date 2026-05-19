@@ -29,6 +29,7 @@ import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
 import PubReportFormModal from '../components/PubReportFormModal';
+import AppFeedbackModal from '../components/AppFeedbackModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { useUserStats } from '../contexts/UserStatsContext';
@@ -407,13 +408,10 @@ export default function MapScreen() {
   }, [mapSheetMetrics, sheetTranslateY]);
 
   const mapControlsBaseBottom = MAP_FLOATING_CONTROLS_BOTTOM_GAP;
-  const feedbackToastBottom =
-    mapControlsBaseBottom + MAP_FLOATING_BUTTON_SIZE + 12;
-
   // ── Missing pub modal ─────────────────────────────────────────
 
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
-  const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
+  const [missingPubReportSubmittedVisible, setMissingPubReportSubmittedVisible] = useState(false);
 
   const openMissingPubModal = useCallback(() => {
     setIsMissingPubModalVisible(true);
@@ -756,28 +754,15 @@ export default function MapScreen() {
         onClose={closeMissingPubModal}
         mode="missing_pub"
         onSubmit={handleMissingPubSubmit}
-        onSuccess={() => setIsMissingPubSuccessVisible(true)}
+        onSuccess={() => setMissingPubReportSubmittedVisible(true)}
       />
 
-      {isMissingPubSuccessVisible && (
-        <Animated.View
-          style={[
-            baseStyles.feedbackToast,
-            screenStyles.feedbackToast,
-            { bottom: feedbackToastBottom },
-          ]}
-        >
-          <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
-          <Text style={baseStyles.feedbackToastText}>Missing pub successfully reported</Text>
-          <TouchableOpacity
-            onPress={() => setIsMissingPubSuccessVisible(false)}
-            style={baseStyles.feedbackToastCloseButton}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <MaterialCommunityIcons name="close" size={20} color={COLORS.charcoal} />
-          </TouchableOpacity>
-        </Animated.View>
-      )}
+      <AppFeedbackModal
+        visible={missingPubReportSubmittedVisible}
+        title="Report submitted"
+        message="Thank you! Your missing pub report has been submitted."
+        onClose={() => setMissingPubReportSubmittedVisible(false)}
+      />
     </View>
   );
 }
@@ -794,12 +779,5 @@ const screenStyles = StyleSheet.create({
     right: 16,
     zIndex: 1001,
     elevation: 6,
-  },
-  feedbackToast: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 1200,
-    elevation: 14,
   },
 });

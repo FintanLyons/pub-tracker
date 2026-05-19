@@ -7,7 +7,6 @@ import {
   Easing,
   PanResponder,
   StyleSheet,
-  Alert,
   Platform,
 } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
@@ -15,6 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
 import PubReportFormModal from './PubReportFormModal';
+import AppFeedbackModal from './AppFeedbackModal';
 import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 
@@ -117,6 +117,7 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
+  const [reportSubmittedVisible, setReportSubmittedVisible] = useState(false);
   const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
   const blockingOverlayOpenRef = useRef(false);
   useEffect(() => {
@@ -651,13 +652,13 @@ export default function DraggablePubCard({
         mode="pub_correction"
         initialPub={pub}
         onSubmit={handlePubCorrectionSubmit}
-        onSuccess={() =>
-          Alert.alert(
-            'Report Submitted',
-            'Thank you! Your report has been submitted successfully.',
-            [{ text: 'OK' }]
-          )
-        }
+        onSuccess={() => setReportSubmittedVisible(true)}
+      />
+      <AppFeedbackModal
+        visible={reportSubmittedVisible}
+        title="Report submitted"
+        message="Thank you! Your report has been submitted."
+        onClose={() => setReportSubmittedVisible(false)}
       />
       </View>
     </Animated.View>

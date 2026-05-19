@@ -125,7 +125,7 @@ export const getPendingFriendRequests = async (userId) => {
 
   const { data: users } = await supabase
     .from('users')
-    .select('*')
+    .select(LEADERBOARD_USER_COLUMNS)
     .in('id', requesterIds);
 
   const usersMap = {};

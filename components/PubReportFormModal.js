@@ -30,12 +30,19 @@ const UK_PHONE_DIGITS_MAX = 11;
 
 const FOUNDED_YEAR_MIN = 1000;
 
-function closingTimePrefillFromPub(pub) {
+/** Example shown under the opening hours field on reports. */
+const OPENING_HOURS_EXAMPLE = 'Mon–Fri 11:00–23:00; Sat 11:00–23:30; Sun 12:00–22:30';
+
+function openingHoursPrefillFromPub(pub) {
   if (!pub) return '';
+  const oh = pub.opening_hours;
+  if (oh != null && String(oh).trim()) return String(oh).trim();
   const ct = pub.closing_time;
   if (ct == null || ct === '') return '';
-  const n = Number(ct);
-  if (!Number.isFinite(n)) return '';
+  const s = String(ct).trim();
+  if (!s) return '';
+  const n = Number(s);
+  if (!Number.isFinite(n)) return s;
   return `${String(Math.floor(n)).padStart(2, '0')}:00`;
 }
 
@@ -51,25 +58,6 @@ function historyPrefillFromPub(pub) {
 
 function digitsOnlyPhone(raw) {
   return String(raw || '').replace(/\D/g, '').slice(0, UK_PHONE_DIGITS_MAX);
-}
-
-/** Up to 4 digits → display HH:mm (colon inserted after hour). */
-function formatClosingTimeDigits(raw) {
-  const d = String(raw).replace(/\D/g, '').slice(0, 4);
-  if (d.length === 0) return '';
-  if (d.length <= 2) return d;
-  return `${d.slice(0, 2)}:${d.slice(2)}`;
-}
-
-/** Empty = valid (optional). Otherwise strict HH:mm, 00:00–23:59. */
-function isValid24hClosing(display) {
-  const s = String(display || '').trim();
-  if (!s) return true;
-  const m = s.match(/^(\d{2}):(\d{2})$/);
-  if (!m) return false;
-  const h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  return h >= 0 && h <= 23 && min >= 0 && min <= 59;
 }
 
 function foundedYearFromPub(pub) {
@@ -96,7 +84,7 @@ export default function PubReportFormModal({
   const [address, setAddress] = useState('');
   const [website, setWebsite] = useState('');
   const [phone, setPhone] = useState('');
-  const [closingTime, setClosingTime] = useState('');
+  const [openingHours, setOpeningHours] = useState('');
   const [history, setHistory] = useState('');
   const [features, setFeatures] = useState(defaultFeatureSwitchState);
   const [imageUris, setImageUris] = useState([]);
@@ -124,7 +112,7 @@ export default function PubReportFormModal({
       setAddress(initialPub.address || '');
       setWebsite(initialPub.website ? String(initialPub.website) : '');
       setPhone(digitsOnlyPhone(initialPub.phone));
-      setClosingTime(closingTimePrefillFromPub(initialPub));
+      setOpeningHours(openingHoursPrefillFromPub(initialPub));
       setHistory(historyPrefillFromPub(initialPub));
       setFeatures(featureMapFromPubFeatureArray(initialPub.features));
     } else {
@@ -134,7 +122,7 @@ export default function PubReportFormModal({
       setAddress('');
       setWebsite('');
       setPhone('');
-      setClosingTime('');
+      setOpeningHours('');
       setHistory('');
       setFeatures(defaultFeatureSwitchState());
     }
@@ -192,10 +180,6 @@ export default function PubReportFormModal({
     setPhone(digitsOnlyPhone(text));
   }, []);
 
-  const handleClosingTimeChange = useCallback((text) => {
-    setClosingTime(formatClosingTimeDigits(text));
-  }, []);
-
   const canSubmit =
     mode === 'missing_pub'
       ? pubName.trim().length > 0 && address.trim().length > 0
@@ -203,11 +187,6 @@ export default function PubReportFormModal({
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isSubmitting) return;
-    const ct = closingTime.trim();
-    if (!isValid24hClosing(ct)) {
-      setErrorMessage('Closing time must be 24-hour HH:mm (e.g. 22:30), or leave blank.');
-      return;
-    }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
@@ -218,7 +197,7 @@ export default function PubReportFormModal({
         address: address.trim(),
         website: website.trim(),
         phone: phone.trim(),
-        closingTime: ct,
+        closingTime: openingHours.trim(),
         history: history.trim(),
         features,
         imageUris,
@@ -245,7 +224,7 @@ export default function PubReportFormModal({
     address,
     website,
     phone,
-    closingTime,
+    openingHours,
     history,
     features,
     imageUris,
@@ -412,16 +391,19 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Typical closing time</Text>
+              <Text style={styles.label}>Opening hours</Text>
+              <Text style={styles.sectionHint}>
+                e.g. {OPENING_HOURS_EXAMPLE}
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, styles.textInputMultiline]}
                 placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
-                value={closingTime}
-                onChangeText={handleClosingTimeChange}
-                keyboardType="number-pad"
+                value={openingHours}
+                onChangeText={setOpeningHours}
+                multiline
+                textAlignVertical="top"
                 autoCorrect={false}
-                maxLength={5}
                 editable={!isSubmitting}
               />
 

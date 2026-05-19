@@ -4,6 +4,10 @@ import { clearVisitedFavoriteCache } from './PubService';
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
 
+/** public.users columns exposed to the client (email is auth.users only — see tighten_social_rls_migration.sql). */
+export const PUBLIC_USER_PROFILE_COLUMNS =
+  'id, username, avatar_url, created_at, updated_at';
+
 /** Where the email confirmation link opens (must match Supabase Dashboard → Auth → Redirect URLs). */
 const EMAIL_CONFIRM_REDIRECT_TO =
   process.env.EXPO_PUBLIC_EMAIL_CONFIRM_REDIRECT_URL ?? 'https://fintanlyons.com/pub';
@@ -123,7 +127,7 @@ export const registerUserSecure = async (email, password) => {
 
     const { data: profile, error: profileError } = await supabase
       .from('users')
-      .select('*')
+      .select(PUBLIC_USER_PROFILE_COLUMNS)
       .eq('id', userData.id)
       .single();
 
@@ -171,7 +175,7 @@ export const loginUserSecure = async (email, password) => {
 
     let { data: users } = await supabase
       .from('users')
-      .select('*')
+      .select(PUBLIC_USER_PROFILE_COLUMNS)
       .eq('id', authData.user.id)
       .limit(1);
 
@@ -180,7 +184,7 @@ export const loginUserSecure = async (email, password) => {
       await ensureUserStub(authData.user.id, authData.user.email);
       const { data: refetch } = await supabase
         .from('users')
-        .select('*')
+        .select(PUBLIC_USER_PROFILE_COLUMNS)
         .eq('id', authData.user.id)
         .single();
       if (!refetch) {
@@ -247,7 +251,7 @@ export const updatePublicUsername = async (userId, username, options = {}) => {
     .from('users')
     .update(patch)
     .eq('id', userId)
-    .select()
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .single();
 
   if (error) {
@@ -281,7 +285,7 @@ export const updatePublicAvatarUrl = async (userId, avatarUrl) => {
     .from('users')
     .update(patch)
     .eq('id', userId)
-    .select()
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .single();
 
   if (error) throw error;
@@ -386,7 +390,7 @@ export const appleSignInSecure = async () => {
 
   let { data: users } = await supabase
     .from('users')
-    .select('*')
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', authUser.id)
     .limit(1);
 
@@ -403,7 +407,7 @@ export const appleSignInSecure = async () => {
 
   const { data: user, error: fetchError } = await supabase
     .from('users')
-    .select('*')
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', authUser.id)
     .single();
   if (fetchError || !user) {
@@ -440,7 +444,7 @@ export const googleSignInSecure = async () => {
 
   let { data: users } = await supabase
     .from('users')
-    .select('*')
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', authUser.id)
     .limit(1);
 
@@ -457,7 +461,7 @@ export const googleSignInSecure = async () => {
 
   const { data: user, error: fetchError } = await supabase
     .from('users')
-    .select('*')
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', authUser.id)
     .single();
   if (fetchError || !user) {
@@ -476,7 +480,7 @@ export const getCurrentUserSecure = async () => {
 
     const { data: users } = await supabase
       .from('users')
-      .select('*')
+      .select(PUBLIC_USER_PROFILE_COLUMNS)
       .eq('id', session.user.id)
       .limit(1);
 

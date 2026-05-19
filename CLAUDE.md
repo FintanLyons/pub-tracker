@@ -107,7 +107,7 @@ After the postcode migration, definitions live in `scripts/phase6_postcode_migra
 - `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`, `pubAchievements`); `totalScore` / `level` / `pubsVisited` match `user_stats`
 - `search_pubs(query, limit)` — name search; includes `postcode_district`, `postcode_area`
 - `compute_user_stats(user_id)` — recompute and upsert a user's `user_stats` row
-- `get_email_by_username(username)` — legacy RPC in some SQL scripts; the app logs in with **email + password** only
+- Login is **email + password** only (`get_email_by_username` removed — see `scripts/security_high_severity_fixes.sql`)
 
 ## Key conventions
 

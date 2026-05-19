@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  View, 
-  Text, 
-  ScrollView, 
-  TouchableOpacity, 
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Pressable,
   StyleSheet,
   Modal,
+  Animated,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -58,7 +60,21 @@ export default function FilterScreen({
   onApply 
 }) {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const sheetTranslateY = useRef(new Animated.Value(windowHeight)).current;
+
+  useEffect(() => {
+    if (visible) {
+      sheetTranslateY.setValue(windowHeight);
+      Animated.timing(sheetTranslateY, {
+        toValue: 0,
+        duration: 280,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      sheetTranslateY.setValue(windowHeight);
+    }
+  }, [visible, sheetTranslateY, windowHeight]);
   const filterChipWidth =
     Math.floor((windowWidth - FILTER_SECTION_PAD * 2 - FILTER_CHIP_GAP) / 2);
   const defaultYearRange = { min: minYear || 1800, max: maxYear || 2025 };
@@ -151,12 +167,23 @@ export default function FilterScreen({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      transparent={true}
+      animationType="none"
+      transparent
       onRequestClose={onClose}
     >
-      <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-        <View style={styles.modalContent}>
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={onClose}
+          accessibilityLabel="Dismiss filters"
+          accessibilityRole="button"
+        />
+        <Animated.View
+          style={[
+            styles.modalContent,
+            { transform: [{ translateY: sheetTranslateY }] },
+          ]}
+        >
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Filter Pubs</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -200,6 +227,9 @@ export default function FilterScreen({
                   localShowOnlyAchievements && styles.featureBoxSelected
                 ]}
                 onPress={() => setLocalShowOnlyAchievements(!localShowOnlyAchievements)}
+                accessibilityRole="button"
+                accessibilityLabel="Show only notable pubs"
+                accessibilityState={{ selected: localShowOnlyAchievements }}
               >
                 <MaterialCommunityIcons
                   name="trophy"
@@ -211,7 +241,7 @@ export default function FilterScreen({
                   styles.featureBoxText,
                   localShowOnlyAchievements && styles.featureBoxTextSelected
                 ]}>
-                  Achievements
+                  Notable
                 </Text>
               </TouchableOpacity>
             </View>
@@ -429,17 +459,20 @@ export default function FilterScreen({
               <Text style={styles.applyButtonText}>Apply Changes</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  modalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',

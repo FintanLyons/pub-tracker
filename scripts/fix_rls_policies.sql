@@ -42,24 +42,9 @@ CREATE POLICY "league_members_insert"
   );
 
 -- ============================================================================
--- FIX 3: Create a safe RPC for username-to-email lookup (login by username)
+-- FIX 3: Username login not used — do not add get_email_by_username.
+-- If it exists from an older run, remove via security_high_severity_fixes.sql.
 -- ============================================================================
--- Since users SELECT now requires authentication, anonymous users can't query
--- the users table to resolve a username to an email for login. This function
--- returns ONLY the email for a given username -- no enumeration possible.
--- ============================================================================
-
-CREATE OR REPLACE FUNCTION public.get_email_by_username(lookup_username TEXT)
-RETURNS TEXT
-LANGUAGE sql
-SECURITY DEFINER
-STABLE
-AS $$
-  SELECT email FROM public.users WHERE username = lookup_username LIMIT 1;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.get_email_by_username(TEXT) TO anon;
-GRANT EXECUTE ON FUNCTION public.get_email_by_username(TEXT) TO authenticated;
 
 -- ============================================================================
 -- VERIFICATION
