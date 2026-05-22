@@ -18,11 +18,22 @@ const iosBundleId =
 const androidPackage =
   process.env.EXPO_PUBLIC_ANDROID_PACKAGE || 'com.fintanlyons.pubtracker';
 
+/** iOS reversed client ID for Info.plist URL scheme (required by @react-native-google-signin plugin). */
+function googleIosUrlSchemeFromClientId(clientId) {
+  if (!clientId) return null;
+  const prefix = clientId.replace(/\.apps\.googleusercontent\.com$/i, '');
+  if (!prefix || prefix === clientId) return null;
+  return `com.googleusercontent.apps.${prefix}`;
+}
+
+const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
+const googleIosUrlScheme = googleIosUrlSchemeFromClientId(googleIosClientId);
+
 export default {
   expo: {
     name: APP_DISPLAY_NAME,
     slug: 'pub-tracker',
-    version: '1.0.0',
+    version: '1.0.1',
     orientation: 'portrait',
     // Charcoal + amber visited pub pin (1024); Android uses adaptive layers below.
     icon: './assets/app-icon.png',
@@ -52,7 +63,14 @@ export default {
           photosPermission: `Allow ${APP_DISPLAY_NAME} to attach photos to pub reports.`,
         },
       ],
-      '@react-native-google-signin/google-signin',
+      // iosUrlScheme only when EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID is set (EAS production build).
+      // Without it, use the plugin entry with no options so `expo config` / `eas credentials` still work locally.
+      googleIosUrlScheme
+        ? [
+            '@react-native-google-signin/google-signin',
+            { iosUrlScheme: googleIosUrlScheme },
+          ]
+        : '@react-native-google-signin/google-signin',
       [
         'expo-notifications',
         {
@@ -69,6 +87,7 @@ export default {
       infoPlist: {
         NSLocationWhenInUseUsageDescription: `${APP_DISPLAY_NAME} needs your location to show pubs near you.`,
         NSLocationAlwaysUsageDescription: `${APP_DISPLAY_NAME} needs your location to show pubs near you.`,
+        ITSAppUsesNonExemptEncryption: false,
       },
     },
     androidNavigationBar: {

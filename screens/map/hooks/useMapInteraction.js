@@ -47,6 +47,8 @@ export function useMapInteraction({
   route,
 }) {
   const [selectedPub, setSelectedPub] = useState(null);
+  /** Bumped on every pub select so the sheet re-opens when the same pub is tapped again. */
+  const [pubSelectionSeq, setPubSelectionSeq] = useState(0);
   /** Map marker highlight; cleared as soon as dismiss starts (before sheet animation ends). */
   const [mapHighlightedPubId, setMapHighlightedPubId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -189,7 +191,8 @@ export function useMapInteraction({
   const closeCard = useCallback((expectedPubId = null) => {
     setSelectedPub((current) => {
       if (!expectedPubId) return null;
-      return current?.id === expectedPubId ? null : current;
+      if (current?.id == null) return current;
+      return String(current.id) === String(expectedPubId) ? null : current;
     });
   }, []);
 
@@ -249,6 +252,7 @@ export function useMapInteraction({
     hasUserInteractedRef.current = true;
     setSelectedDistrictName(null);
     setSelectedPostcodeArea(null);
+    setPubSelectionSeq((seq) => seq + 1);
     setSelectedPub(pub);
     setMapHighlightedPubId(pub.id);
     // Selecting a pub should focus the map/card state, not leave a sticky query.
@@ -582,6 +586,7 @@ export function useMapInteraction({
   return {
     selectedPub,
     setSelectedPub,
+    pubSelectionSeq,
     mapHighlightedPubId,
     clearMapHighlight,
     searchQuery,

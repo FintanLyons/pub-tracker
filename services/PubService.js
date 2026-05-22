@@ -96,6 +96,23 @@ export const clearVisitedFavoriteCache = () => {
 	_cacheUserId = null;
 };
 
+/** Union of favourite pub ids for the given user ids (self and/or friends). */
+export const fetchFavoritePubIdsForUsers = async (userIds) => {
+	const ids = [...new Set((userIds || []).filter(Boolean))];
+	if (ids.length === 0) return new Set();
+
+	const session = await getCurrentSession();
+	if (!session?.userId) return new Set();
+
+	const { data, error } = await supabase
+		.from('favorite_pubs')
+		.select('pub_id')
+		.in('user_id', ids);
+
+	if (error) throw error;
+	return new Set((data || []).map((r) => r.pub_id));
+};
+
 // ---------------------------------------------------------------------------
 // Pub fetching (paginated via Supabase JS client)
 // ---------------------------------------------------------------------------
@@ -131,6 +148,14 @@ const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
 		name: pub.name,
 		lat: parseFloat(pub.lat),
 		lon: parseFloat(pub.lon),
+		addrHousenumber:
+			typeof pub.addr_housenumber === 'string' && pub.addr_housenumber.trim()
+				? pub.addr_housenumber.trim()
+				: null,
+		addrStreet:
+			typeof pub.addr_street === 'string' && pub.addr_street.trim()
+				? pub.addr_street.trim()
+				: null,
 		phone: pub.phone,
 		description: pub.description,
 		// Card UI reads `history`; Pubs_List stores enriched copy in `description`.
@@ -155,6 +180,7 @@ const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
 		points: 10,
 		features: convertFeaturesToArray(pub),
 		achievements: achievementsByPubId[pub.id] || [],
+		isActive: pub.is_active !== false,
 		isVisited: visitedSet.has(pub.id),
 		isFavorite: favoritesSet.has(pub.id),
 		avgRating: null,
@@ -190,7 +216,7 @@ export const fetchLondonPubs = async (options = {}) => {
 		let hasMore = true;
 
 		while (hasMore) {
-			let query = supabase.from('Pubs_List').select('*');
+			let query = supabase.from('Pubs_List').select('*').eq('is_active', true);
 
 			if (hasBounds) {
 				query = query

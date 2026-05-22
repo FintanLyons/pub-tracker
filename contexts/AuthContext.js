@@ -14,6 +14,12 @@ import {
   PUBLIC_USER_PROFILE_COLUMNS,
 } from '../services/SecureAuthService';
 import { removeAllPushTokensForUser } from '../services/PushNotificationService';
+import { promiseWithTimeout } from '../utils/promiseWithTimeout';
+
+/** Reading persisted Supabase session from AsyncStorage — hang here often needs local sign-out. */
+const AUTH_SESSION_READ_TIMEOUT_MS = 10000;
+/** Loading public.users after session is valid — allow longer for slow networks. */
+const AUTH_PROFILE_TIMEOUT_MS = 15000;
 
 const AuthContext = createContext();
 
@@ -71,6 +77,36 @@ const resolveProfileForSession = async (session, authUserHint) => {
   return mergeAuthIntoProfile(authUser || session.user, profile);
 };
 
+/** Restore session + public profile; throws on hard failures (caller handles timeout). */
+async function bootstrapAuthSession() {
+  const { data: { session }, error: sessionError } = await promiseWithTimeout(
+    supabase.auth.getSession(),
+    AUTH_SESSION_READ_TIMEOUT_MS,
+    'getSession',
+  );
+  if (sessionError) {
+    const msg = String(sessionError.message || '');
+    if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
+    return null;
+  }
+
+  if (!session?.user) return null;
+
+  const { data, error } = await supabase.auth.getUser();
+  if (error) {
+    await supabase.auth.signOut({ scope: 'local' });
+    return null;
+  }
+
+  return promiseWithTimeout(
+    resolveProfileForSession(session, data?.user),
+    AUTH_PROFILE_TIMEOUT_MS,
+    'profile load',
+  );
+}
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -78,49 +114,32 @@ export const AuthProvider = ({ children }) => {
   const skipAuthProfileRefreshUntilRef = useRef(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
-      try {
-        if (sessionError) {
-          const msg = String(sessionError.message || '');
-          if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
-            await supabase.auth.signOut({ scope: 'local' });
-          }
-          setUser(null);
-          setLoading(false);
-          return;
-        }
+    let cancelled = false;
 
-        if (session?.user) {
-          let authUser;
-          try {
-            const { data, error } = await supabase.auth.getUser();
-            if (error) {
-              await supabase.auth.signOut({ scope: 'local' });
-              setUser(null);
-              setLoading(false);
-              return;
-            }
-            authUser = data?.user;
-          } catch {
-            await supabase.auth.signOut({ scope: 'local' });
-            setUser(null);
-            setLoading(false);
-            return;
-          }
-          const profile = await resolveProfileForSession(session, authUser);
-          setUser(profile);
-          setLoading(false);
-        } else {
-          setUser(null);
-          setLoading(false);
+    const finishBootstrap = async (profile) => {
+      if (cancelled) return;
+      setUser(profile);
+      setLoading(false);
+    };
+
+    const failBootstrap = async (err) => {
+      if (cancelled) return;
+      const msg = String(err?.message ?? err);
+      console.warn('AuthContext: bootstrap failed', msg);
+      if (/getSession timed out/i.test(msg)) {
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch {
+          // best-effort — clear corrupt persisted session (same effect as "clear cache")
         }
-      } catch (err) {
-        // Startup should fail soft on transient network loss (common on fresh dev-build launch).
-        console.warn('AuthContext: failed to restore session/profile', err?.message ?? err);
-        setUser(null);
-        setLoading(false);
       }
-    });
+      setUser(null);
+      setLoading(false);
+    };
+
+    bootstrapAuthSession()
+      .then((profile) => finishBootstrap(profile))
+      .catch((err) => failBootstrap(err));
 
     const {
       data: { subscription },
@@ -148,7 +167,10 @@ export const AuthProvider = ({ children }) => {
       }, 0);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const logout = useCallback(async () => {

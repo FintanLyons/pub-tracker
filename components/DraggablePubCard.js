@@ -66,6 +66,7 @@ export default function DraggablePubCard({
   containerHeight,
   translateY,
   collapseRequest = 0,
+  openRequest = 0,
   onCloseStart,
   onClose,
   onToggleVisited,
@@ -120,9 +121,26 @@ export default function DraggablePubCard({
   const [reportSubmittedVisible, setReportSubmittedVisible] = useState(false);
   const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
   const blockingOverlayOpenRef = useRef(false);
+  const [sheetTouchEnabled, setSheetTouchEnabled] = useState(false);
   useEffect(() => {
     blockingOverlayOpenRef.current = blockingOverlayOpen;
   }, [blockingOverlayOpen]);
+
+  useEffect(() => {
+    if (!pub) {
+      setSheetTouchEnabled(false);
+      return undefined;
+    }
+
+    const syncTouchEnabled = (value) => {
+      const hidden = value >= hiddenYRef.current - 24;
+      setSheetTouchEnabled((current) => (current === !hidden ? current : !hidden));
+    };
+
+    syncTouchEnabled(currentPosition.current);
+    const listenerId = translateY.addListener(({ value }) => syncTouchEnabled(value));
+    return () => translateY.removeListener(listenerId);
+  }, [pub, translateY]);
 
   /** PanResponder is created once; keep latest pub id for close callbacks. */
   const pubIdRef = useRef(pub?.id);
@@ -420,7 +438,7 @@ export default function DraggablePubCard({
         scrollY.current = 0;
       });
     }
-  }, [pub?.id]);
+  }, [pub?.id, openRequest, COLLAPSED_Y, HIDDEN_Y, translateY, updateIsExpanded, updateScrollEnabled]);
 
   // External request to collapse sheet should use the same internal state transition
   // as gesture snaps (expanded chrome -> collapsed chrome + correct layout metrics).
@@ -447,7 +465,7 @@ export default function DraggablePubCard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapseRequest, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
   
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     const closingPubId = pub?.id;
     onCloseStartRef.current?.(closingPubId);
     translateY.stopAnimation();
@@ -468,7 +486,7 @@ export default function DraggablePubCard({
       updateIsExpanded(false);
       onClose(closingPubId);
     });
-  };
+  }, [HIDDEN_Y, onClose, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
 
   const handlePubCorrectionSubmit = useCallback(
     async (payload) => {
@@ -479,7 +497,9 @@ export default function DraggablePubCard({
         pubArea: pub.area || 'Unknown Area',
         chainOrIndependent: payload.chainOrIndependent,
         founded: payload.founded,
-        address: payload.address,
+        housenumber: payload.housenumber,
+        street: payload.street,
+        postcode: payload.postcode,
         website: payload.website,
         phone: payload.phone,
         closingTime: payload.closingTime,
@@ -502,6 +522,7 @@ export default function DraggablePubCard({
   return (
     <Animated.View
       collapsable={false}
+      pointerEvents={sheetTouchEnabled ? 'auto' : 'none'}
       // Android: cache this subtree as a GPU texture while translateY updates (cheap compositing).
       // iOS: keep transform on this layer with minimal non-animated props for Core Animation.
       renderToHardwareTextureAndroid
@@ -618,9 +639,9 @@ export default function DraggablePubCard({
       
       {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
       {!isExpanded && !blockingOverlayOpen && (
-        <View 
-          style={styles.draggableOverlay} 
-          pointerEvents="box-only" 
+        <View
+          style={styles.draggableOverlay}
+          pointerEvents="box-only"
         />
       )}
 
@@ -657,7 +678,7 @@ export default function DraggablePubCard({
       <AppFeedbackModal
         visible={reportSubmittedVisible}
         title="Report submitted"
-        message="Thank you! Your report has been submitted."
+        message="Thanks! Your report is pending review. Points are awarded once it is accepted."
         onClose={() => setReportSubmittedVisible(false)}
       />
       </View>

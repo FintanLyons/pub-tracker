@@ -2,7 +2,9 @@ import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 import { clearVisitedFavoriteCache } from './PubService';
 
-const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
+import { isValidUsernameFormat } from '../utils/usernameValidation';
+
+export { isValidUsernameFormat };
 
 /** public.users columns exposed to the client (email is auth.users only — see tighten_social_rls_migration.sql). */
 export const PUBLIC_USER_PROFILE_COLUMNS =
@@ -23,9 +25,6 @@ const setAuthUsernamePending = async () => {
     console.warn('setAuthUsernamePending:', error.message);
   }
 };
-
-export const isValidUsernameFormat = (username) =>
-  typeof username === 'string' && USERNAME_REGEX.test(username.trim());
 
 /**
  * Supabase projects often have a trigger on auth.users that INSERTs public.users
@@ -420,14 +419,37 @@ export const appleSignInSecure = async () => {
 export const googleSignInSecure = async () => {
   const { GoogleSignin } = require('@react-native-google-signin/google-signin');
 
+  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+  if (!webClientId || !webClientId.includes('.apps.googleusercontent.com')) {
+    throw new Error(
+      'Google Sign-In is not configured in this build (EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID). ' +
+        'Set it in expo.dev → Environment variables for this EAS profile, then rebuild.',
+    );
+  }
+
+  // Drop stale Supabase refresh tokens so startup/sign-in does not log AuthApiError noise.
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // best-effort
+  }
+  clearVisitedFavoriteCache();
+
   GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    webClientId,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
   });
 
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-  clearVisitedFavoriteCache();
 
   const response = await GoogleSignin.signIn();
+
+  // v16: signIn() resolves with { type: 'cancelled' } instead of throwing on cancel.
+  if (response.type === 'cancelled' || response.type === 'noSavedCredentialFound') {
+    const err = new Error('SIGN_IN_CANCELLED');
+    err.code = 'SIGN_IN_CANCELLED';
+    throw err;
+  }
 
   if (!response.data?.idToken) {
     throw new Error('Google Sign-In failed — no ID token returned.');

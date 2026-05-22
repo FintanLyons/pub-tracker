@@ -37,10 +37,10 @@ export function getPostcodeDistrictCompletionBonusPoints(pubCount) {
 /** Bonus when every pub in a letter postcode region (e.g. SW) is visited. */
 export const POSTCODE_AREA_COMPLETION_BONUS_POINTS = 1000;
 
-/** Points per missing-pub report submitted (one row = one submission). */
+/** Points per missing-pub report accepted by a moderator. */
 export const POINTS_NEW_PUB_REPORT = 20;
 
-/** Points per pub correction report (one submission, any number of fields). */
+/** Points per pub correction report accepted by a moderator. */
 export const POINTS_PUB_CORRECTION_REPORT = 5;
 
 /**

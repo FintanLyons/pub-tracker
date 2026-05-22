@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Alert,
   Share,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -18,6 +17,7 @@ import { COLORS } from '../constants/theme';
 import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
 import UserAvatar from './UserAvatar';
 import { AppFeedbackOverlay } from './AppFeedbackModal';
+import { useAppAlert } from '../contexts/AppAlertContext';
 
 export default function AddFriendModal({
   visible,
@@ -28,6 +28,7 @@ export default function AddFriendModal({
   onFriendRemoved,
   initialTab = 'search',
 }) {
+  const { showAppAlert } = useAppAlert();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -72,7 +73,7 @@ export default function AddFriendModal({
       setSearchResults(filtered);
     } catch (error) {
       console.error('Error searching users:', error);
-      Alert.alert('Error', 'Failed to search users');
+      showAppAlert({ title: 'Error', message: 'Failed to search users', tone: 'error' });
     } finally {
       setLoading(false);
     }

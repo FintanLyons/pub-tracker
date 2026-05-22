@@ -5,7 +5,6 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  Alert,
   StyleSheet,
   Linking,
   ActivityIndicator,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -26,6 +26,7 @@ import {
 } from '../services/ReviewService';
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 import { getOpeningStatus } from '../utils/openingHours';
+import { resolvePubPhotoUrls } from '../constants/pubPhotoPlaceholder';
 import PubReviewsModal from './PubReviewsModal';
 import PubSummonTroopsModal from './PubSummonTroopsModal';
 
@@ -80,11 +81,15 @@ export default function PubCardContent({
   onToggleVisited,
   onBlockingOverlayVisibleChange,
 }) {
+  const { showAppAlert } = useAppAlert();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
   // ── Opening status (OSM opening_hours; empty → until 11 PM daily) ───────────
-  const { isOpen, statusText: openStatusText } = getOpeningStatus(pub?.opening_hours);
+  const inactivePub = pub?.isActive === false;
+  const { isOpen, statusText: openStatusText } = inactivePub
+    ? { isOpen: false, statusText: 'Permanently closed' }
+    : getOpeningStatus(pub?.opening_hours);
 
   // ── Area row segments ──────────────────────────────────────────────────────
   const areaSegments = [
@@ -162,7 +167,11 @@ export default function PubCardContent({
 
   const handleOpenSummonModal = useCallback(() => {
     if (!userId) {
-      Alert.alert('Sign in required', 'Sign in to summon friends to this pub.');
+      showAppAlert({
+        title: 'Sign in required',
+        message: 'Sign in to summon friends to this pub.',
+        tone: 'neutral',
+      });
       return;
     }
     setShowSummonModal(true);
@@ -231,7 +240,7 @@ export default function PubCardContent({
   const hasPhone   = !!pub.phone;
   const hasWebsite = !!pub.website;
 
-  const photoUrls = pub.photoUrls?.length ? pub.photoUrls : pub.photoUrl ? [pub.photoUrl] : [];
+  const photoUrls = resolvePubPhotoUrls(pub.photoUrls, pub.photoUrl);
   const photoCount = photoUrls.length;
   const hasMultiplePhotos = photoCount > 1;
 
@@ -343,8 +352,7 @@ export default function PubCardContent({
       </View>
 
       {/* ── Photos (full-width pages; swipe or tap arrow for more) ───────── */}
-      {photoCount > 0 && (
-        <View
+      <View
           style={styles.photoGalleryWrap}
           onLayout={(e) => {
             const w = e.nativeEvent.layout.width;
@@ -409,7 +417,6 @@ export default function PubCardContent({
             </View>
           )}
         </View>
-      )}
 
       {/* ── Feature icons ────────────────────────────────────────────────── */}
       <View style={styles.featuresContainer}>
@@ -498,7 +505,7 @@ export default function PubCardContent({
             accessibilityRole="button"
             accessibilityLabel="Summon friends to this pub"
           >
-            <MaterialCommunityIcons name="account-multiple" size={28} color="#FFFFFF" />
+            <MaterialCommunityIcons name="account-multiple" size={24} color="#FFFFFF" />
           </TouchableOpacity>
 
           {userId ? (
@@ -520,12 +527,26 @@ export default function PubCardContent({
               </TouchableOpacity>
 
               <View style={[styles.drinkCenter, styles.reviewsRowSpaced]}>
-                <MaterialCommunityIcons name="beer" size={24} color={COLORS.amber} />
-                {drinkCountLoading ? (
-                  <ActivityIndicator size="small" color={COLORS.amber} />
-                ) : (
-                  <Text style={styles.drinkCountText}>{drinkCount}</Text>
-                )}
+                <MaterialCommunityIcons
+                  name="beer"
+                  size={DRINK_BEER_ICON_SIZE}
+                  color={COLORS.amber}
+                />
+                <View style={styles.drinkCountSlot}>
+                  {drinkCountLoading ? (
+                    <ActivityIndicator size="small" color={COLORS.amber} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.drinkCountText,
+                        { fontSize: drinkCountDisplayFontSize(drinkCount) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {drinkCount}
+                    </Text>
+                  )}
+                </View>
               </View>
 
               <TouchableOpacity
@@ -582,7 +603,27 @@ export default function PubCardContent({
 /** Same as featuresContainer: paddingVertical 10×2 + featureIconWrapper height 32 */
 const REVIEWS_ACTIONS_ROW_HEIGHT = 52;
 const REVIEWS_ROW_GAP = 8;
-const SUMMON_BUTTON_MIN_WIDTH = 52;
+/** Icon-only summon control — fixed width so drinks +/- are not clipped on narrow Android rows. */
+const SUMMON_BUTTON_WIDTH = 44;
+const DRINK_ACTION_BUTTON_WIDTH = 40;
+const DRINK_BEER_ICON_SIZE = 22;
+const DRINK_ICON_COUNT_GAP = 4;
+const DRINK_COUNT_FONT_SIZE_TWO_DIGITS = 22;
+/** Slot width for two digits at DRINK_COUNT_FONT_SIZE_TWO_DIGITS; 3+ digits use smaller type. */
+const DRINK_COUNT_SLOT_WIDTH = 34;
+
+function drinkCountDisplayFontSize(count) {
+  const digits = String(Math.max(0, count)).length;
+  if (digits <= 2) return DRINK_COUNT_FONT_SIZE_TWO_DIGITS;
+  if (digits === 3) return 17;
+  if (digits === 4) return 14;
+  return 12;
+}
+
+const DRINK_CENTER_WIDTH =
+  DRINK_BEER_ICON_SIZE + DRINK_ICON_COUNT_GAP + DRINK_COUNT_SLOT_WIDTH;
+const DRINKS_INLINE_ROW_WIDTH =
+  DRINK_ACTION_BUTTON_WIDTH * 2 + REVIEWS_ROW_GAP * 2 + DRINK_CENTER_WIDTH;
 
 const styles = StyleSheet.create({
   cardContent: {
@@ -793,13 +834,22 @@ const styles = StyleSheet.create({
   },
 
   // ── Drinks counter ────────────────────────────────────────────────────────
+  drinkCountSlot: {
+    width: DRINK_COUNT_SLOT_WIDTH,
+    height: DRINK_COUNT_FONT_SIZE_TWO_DIGITS + 4,
+    marginLeft: DRINK_ICON_COUNT_GAP,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
   drinkCountText: {
-    fontSize: 22,
     fontWeight: '700',
     color: COLORS.darkGrey,
-    minWidth: 20,
-    marginLeft: 4,
     textAlign: 'center',
+    width: DRINK_COUNT_SLOT_WIDTH,
+    fontVariant: ['tabular-nums'],
+    includeFontPadding: false,
+    ...(Platform.OS === 'android' ? { textAlignVertical: 'center' } : null),
   },
 
   // ── Reviews ───────────────────────────────────────────────────────────────
@@ -843,10 +893,9 @@ const styles = StyleSheet.create({
     marginLeft: REVIEWS_ROW_GAP,
   },
   reviewsActionHalf: {
-    flexGrow: 0,
+    flex: 1,
     flexShrink: 1,
-    flexBasis: 'auto',
-    minWidth: 108,
+    minWidth: 92,
     height: REVIEWS_ACTIONS_ROW_HEIGHT,
     alignSelf: 'stretch',
   },
@@ -875,11 +924,12 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'stretch',
+    width: DRINKS_INLINE_ROW_WIDTH,
   },
   summonRectButton: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: SUMMON_BUTTON_MIN_WIDTH,
+    width: SUMMON_BUTTON_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
     alignSelf: 'stretch',
     backgroundColor: COLORS.amber,
     borderRadius: 12,
@@ -887,7 +937,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionRectButton: {
-    width: 44,
+    width: DRINK_ACTION_BUTTON_WIDTH,
     alignSelf: 'stretch',
     backgroundColor: COLORS.amber,
     borderRadius: 12,
@@ -899,11 +949,11 @@ const styles = StyleSheet.create({
   },
   drinkCenter: {
     alignSelf: 'stretch',
+    width: DRINK_CENTER_WIDTH,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 2,
-    maxWidth: 68,
+    overflow: 'hidden',
   },
   // ── History ───────────────────────────────────────────────────────────────
   historyContainer: {

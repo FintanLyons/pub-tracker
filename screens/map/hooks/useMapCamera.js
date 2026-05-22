@@ -10,17 +10,23 @@ const MAP_LOCATION_DISTANCE_INTERVAL_M = 20;
 const LOCATE_ANIM_MS = 1000;
 const LOCATE_REFINE_MS = 650;
 
+/** Unblock splash if map never signals ready (tile load failure). */
+const INITIAL_LOAD_FALLBACK_MS = 3500;
+/** Wait for GPS before falling back to London centre (permission may be granted but fix slow). */
+const NO_LOCATION_FALLBACK_MS = 4000;
+
 export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInitialCameraReady }) {
   const contextLocation = useUserLocation();
   const isLocationReady = useLocationReady();
   const [localLocation, setLocalLocation] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
   const cameraRef = useRef(null);
   const mapZoomRef = useRef(DEFAULT_CAMERA.zoom);
-  const initialCameraSetRef = useRef(false);
+  const initialLoadCompleteRef = useRef(false);
+  const hasCenteredOnUserRef = useRef(false);
   const hasUserInteractedRef = useRef(false);
   const currentLocationRef = useRef(null);
-  const [mapReady, setMapReady] = useState(false);
 
   const currentLocation = localLocation || contextLocation;
 
@@ -82,70 +88,72 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInit
       longitude,
       zoom: ZOOM_LEVELS.PUBS_MIN,
     });
-  }, [mapZoomRef, onInitialCameraReady]);
+  }, [onInitialCameraReady]);
 
+  const jumpToCoordinates = useCallback((latitude, longitude) => {
+    if (!cameraRef.current) return false;
+    try {
+      cameraRef.current.jumpTo({
+        center: [longitude, latitude],
+        zoom: ZOOM_LEVELS.PUBS_MIN,
+      });
+      return true;
+    } catch (err) {
+      console.warn('useMapCamera: jumpTo failed', err?.message);
+      return false;
+    }
+  }, []);
+
+  const completeInitialLoad = useCallback((latitude, longitude) => {
+    if (initialLoadCompleteRef.current) return;
+    initialLoadCompleteRef.current = true;
+    setIsLocationLoaded?.(true);
+    notifyInitialCameraReady(latitude, longitude);
+  }, [notifyInitialCameraReady, setIsLocationLoaded]);
+
+  const centerOnUserOnce = useCallback((location = currentLocationRef.current) => {
+    if (hasCenteredOnUserRef.current || hasUserInteractedRef.current || !location) {
+      return hasCenteredOnUserRef.current;
+    }
+    const { latitude, longitude } = location;
+    if (!jumpToCoordinates(latitude, longitude)) return false;
+    hasCenteredOnUserRef.current = true;
+    return true;
+  }, [jumpToCoordinates]);
+
+  /**
+   * One-time centre after MapLibre mounts. Does not re-run on GPS updates — those were
+   * snapping the map back to the user while panning.
+   */
   useEffect(() => {
-    if (!isLocationReady || !mapReady) return undefined;
-
-    if (initialCameraSetRef.current || hasUserInteractedRef.current) {
-      setIsLocationLoaded?.(true);
+    if (
+      !isMapFocused
+      || !isLocationReady
+      || !mapReady
+      || hasCenteredOnUserRef.current
+      || hasUserInteractedRef.current
+    ) {
       return undefined;
     }
 
     let cancelled = false;
 
-    const finishInitialCamera = (latitude, longitude) => {
-      if (cancelled) return;
-      initialCameraSetRef.current = true;
-      setIsLocationLoaded?.(true);
-      notifyInitialCameraReady(latitude, longitude);
-    };
-
-    const trySetCamera = (center, latitude, longitude) => {
-      if (cancelled || !cameraRef.current) return false;
-      try {
-        cameraRef.current.jumpTo({
-          center,
-          zoom: ZOOM_LEVELS.PUBS_MIN,
-        });
-        finishInitialCamera(latitude, longitude);
+    const tryCenter = () => {
+      if (cancelled || hasCenteredOnUserRef.current || hasUserInteractedRef.current) {
         return true;
-      } catch (err) {
-        console.warn('useMapCamera: initial jumpTo failed', err?.message);
-        return false;
       }
+      const liveLocation = currentLocationRef.current;
+      if (!liveLocation) return false;
+      if (!centerOnUserOnce(liveLocation)) return false;
+      completeInitialLoad(liveLocation.latitude, liveLocation.longitude);
+      return true;
     };
 
-    if (!contextLocation) {
-      const [lon, lat] = DEFAULT_CAMERA.center;
-      if (trySetCamera(DEFAULT_CAMERA.center, lat, lon)) {
-        return () => { cancelled = true; };
-      }
-    } else if (
-      trySetCamera(
-        [contextLocation.longitude, contextLocation.latitude],
-        contextLocation.latitude,
-        contextLocation.longitude,
-      )
-    ) {
-      return () => { cancelled = true; };
-    }
+    if (tryCenter()) return () => { cancelled = true; };
 
     let frameId;
     const retry = () => {
-      if (cancelled) return;
-      if (!contextLocation) {
-        const [lon, lat] = DEFAULT_CAMERA.center;
-        if (trySetCamera(DEFAULT_CAMERA.center, lat, lon)) return;
-      } else if (
-        trySetCamera(
-          [contextLocation.longitude, contextLocation.latitude],
-          contextLocation.latitude,
-          contextLocation.longitude,
-        )
-      ) {
-        return;
-      }
+      if (tryCenter()) return;
       frameId = requestAnimationFrame(retry);
     };
     frameId = requestAnimationFrame(retry);
@@ -154,7 +162,49 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInit
       cancelled = true;
       cancelAnimationFrame(frameId);
     };
-  }, [contextLocation, isLocationReady, mapReady, notifyInitialCameraReady, setIsLocationLoaded]);
+  }, [isMapFocused, isLocationReady, mapReady, centerOnUserOnce, completeInitialLoad]);
+
+  /** Splash safety net — timers set once per session, not reset on GPS refine. */
+  useEffect(() => {
+    if (!isMapFocused || !isLocationReady) return undefined;
+
+    const noLocationTimer = setTimeout(() => {
+      if (initialLoadCompleteRef.current || hasCenteredOnUserRef.current) return;
+
+      const liveLocation = currentLocationRef.current;
+      if (liveLocation) {
+        if (centerOnUserOnce()) {
+          completeInitialLoad(liveLocation.latitude, liveLocation.longitude);
+        }
+        return;
+      }
+
+      const [defaultLon, defaultLat] = DEFAULT_CAMERA.center;
+      jumpToCoordinates(defaultLat, defaultLon);
+      hasCenteredOnUserRef.current = true;
+      completeInitialLoad(defaultLat, defaultLon);
+    }, NO_LOCATION_FALLBACK_MS);
+
+    const splashTimer = setTimeout(() => {
+      if (initialLoadCompleteRef.current) return;
+
+      const liveLocation = currentLocationRef.current;
+      if (liveLocation && centerOnUserOnce()) {
+        completeInitialLoad(liveLocation.latitude, liveLocation.longitude);
+        return;
+      }
+
+      if (!initialLoadCompleteRef.current) {
+        const [defaultLon, defaultLat] = DEFAULT_CAMERA.center;
+        completeInitialLoad(defaultLat, defaultLon);
+      }
+    }, INITIAL_LOAD_FALLBACK_MS);
+
+    return () => {
+      clearTimeout(noLocationTimer);
+      clearTimeout(splashTimer);
+    };
+  }, [isMapFocused, isLocationReady, centerOnUserOnce, completeInitialLoad, jumpToCoordinates]);
 
   const fitBoundsObject = useCallback((b, animationDuration = 800) => {
     if (!b || !cameraRef.current) return;
@@ -263,7 +313,7 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInit
   return {
     cameraRef,
     mapZoomRef,
-    initialCameraSetRef,
+    initialCameraSetRef: initialLoadCompleteRef,
     hasUserInteractedRef,
     currentLocation,
     currentLocationShape,
@@ -272,4 +322,4 @@ export function useMapCamera({ setIsLocationLoaded, isMapFocused = false, onInit
     handleCurrentLocation,
     handleMapLoaded,
   };
-}
+};

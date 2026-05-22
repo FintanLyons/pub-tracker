@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -24,8 +23,26 @@ import {
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
 import { COLORS } from '../constants/theme';
+import { isSupabaseConfigured, getSupabaseProjectHost } from '../config/supabase';
+import { useAppAlert } from '../contexts/AppAlertContext';
+
+function authNetworkErrorMessage() {
+  if (!isSupabaseConfigured) {
+    return (
+      'This build cannot reach Supabase. In expo.dev → your project → Environment variables, ' +
+      'set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY for the production ' +
+      'environment (from Supabase → Project Settings → API), then create a new build.'
+    );
+  }
+  const host = getSupabaseProjectHost();
+  return (
+    `Cannot reach Supabase${host ? ` (${host})` : ''}. Check your internet connection, ` +
+    'confirm the Supabase project is active (not paused), and rebuild if you recently changed env vars.'
+  );
+}
 
 export default function AuthScreen({ onAuthSuccess }) {
+  const { showAppAlert } = useAppAlert();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,25 +87,33 @@ export default function AuthScreen({ onAuthSuccess }) {
   const handleAuth = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      Alert.alert('Error', 'Please enter your email');
+      showAppAlert({ title: 'Error', message: 'Please enter your email', tone: 'error' });
       return;
     }
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      showAppAlert({
+        title: 'Error',
+        message: 'Please enter a valid email address',
+        tone: 'error',
+      });
       return;
     }
     if (!password) {
-      Alert.alert('Error', 'Please enter a password');
+      showAppAlert({ title: 'Error', message: 'Please enter a password', tone: 'error' });
       return;
     }
 
     if (!isLogin) {
       if (password.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters');
+        showAppAlert({
+          title: 'Error',
+          message: 'Password must be at least 6 characters',
+          tone: 'error',
+        });
         return;
       }
       if (password !== confirmPassword) {
-        Alert.alert('Error', 'Passwords do not match');
+        showAppAlert({ title: 'Error', message: 'Passwords do not match', tone: 'error' });
         return;
       }
     }
@@ -101,36 +126,66 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else {
         const { needsEmailVerification } = await registerUserSecure(trimmedEmail, password);
         if (needsEmailVerification) {
-          Alert.alert(
-            'Check Your Email',
-            `We sent a verification link to ${trimmedEmail}.\n\nClick the link then come back and log in.`,
-            [{ text: 'OK', onPress: () => { setIsLogin(true); clearForm(); } }],
-          );
+          showAppAlert({
+            title: 'Check Your Email',
+            message: `We sent a verification link to ${trimmedEmail}.\n\nClick the link then come back and log in.`,
+            tone: 'neutral',
+            buttons: [
+              {
+                text: 'OK',
+                variant: 'primary',
+                onPress: () => {
+                  setIsLogin(true);
+                  clearForm();
+                },
+              },
+            ],
+          });
           return;
         }
-        Alert.alert('Success', 'Account created!');
+        showAppAlert({ title: 'Success', message: 'Account created!', tone: 'success' });
         await onAuthSuccess();
       }
     } catch (error) {
       const msg = error.message || 'Something went wrong';
       if (msg.includes('already registered') || msg.includes('login tab instead')) {
-        Alert.alert('Already Registered', msg, [
-          { text: 'Switch to Login', onPress: () => { setIsLogin(true); clearForm(); } },
-        ]);
+        showAppAlert({
+          title: 'Already Registered',
+          message: msg,
+          tone: 'error',
+          buttons: [
+            {
+              text: 'Switch to Login',
+              variant: 'primary',
+              onPress: () => {
+                setIsLogin(true);
+                clearForm();
+              },
+            },
+          ],
+        });
       } else if (msg.includes('Too many') || msg.includes('rate limit') || msg.includes('wait')) {
-        Alert.alert('Please Wait', msg);
+        showAppAlert({ title: 'Please Wait', message: msg, tone: 'neutral' });
       } else if (msg.includes('Invalid email or password')) {
-        Alert.alert('Error', 'Invalid email or password.');
+        showAppAlert({ title: 'Error', message: 'Invalid email or password.', tone: 'error' });
       } else if (msg.includes('valid email')) {
-        Alert.alert('Error', msg);
+        showAppAlert({ title: 'Error', message: msg, tone: 'error' });
       } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
-        Alert.alert(
-          'Email Not Verified',
-          'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
-        );
+        showAppAlert({
+          title: 'Email Not Verified',
+          message:
+            'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
+          tone: 'neutral',
+        });
+      } else if (/network request failed|failed to fetch|network error/i.test(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
       } else {
         console.error('Auth error:', error);
-        Alert.alert('Error', msg);
+        showAppAlert({ title: 'Error', message: msg, tone: 'error' });
       }
     } finally {
       setLoading(false);
@@ -152,7 +207,19 @@ export default function AuthScreen({ onAuthSuccess }) {
         return;
       }
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Error', 'Sign in with Apple failed. Please try again.');
+      if (/network request failed|failed to fetch|network error/i.test(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
+      } else {
+        showAppAlert({
+          title: 'Error',
+          message: 'Sign in with Apple failed. Please try again.',
+          tone: 'error',
+        });
+      }
     } finally {
       setAppleLoading(false);
     }
@@ -165,19 +232,67 @@ export default function AuthScreen({ onAuthSuccess }) {
       await onAuthSuccess();
     } catch (error) {
       const msg = error.message || '';
+      const code = error.code || '';
+
+      // User dismissed the account picker — not an error.
       if (
+        code === 'SIGN_IN_CANCELLED' ||
         msg.includes('SIGN_IN_CANCELLED') ||
         msg.includes('canceled') ||
         msg.includes('cancelled')
       ) {
         return;
       }
-      if (msg.includes('PLAY_SERVICES_NOT_AVAILABLE')) {
-        Alert.alert('Error', 'Google Play Services is not available on this device.');
+
+      if (
+        code === 'PLAY_SERVICES_NOT_AVAILABLE' ||
+        msg.includes('PLAY_SERVICES_NOT_AVAILABLE')
+      ) {
+        showAppAlert({
+          title: 'Error',
+          message: 'Google Play Services is not available on this device.',
+          tone: 'error',
+        });
         return;
       }
-      console.error('Google Sign-In error:', error);
-      Alert.alert('Error', 'Google Sign-In failed. Please try again.');
+
+      // Android OAuth client / SHA-1 mismatch (Google Cloud Console).
+      if (
+        code === 10 ||
+        code === '10' ||
+        msg.includes('DEVELOPER_ERROR') ||
+        msg.includes('Developer console is not set up correctly')
+      ) {
+        showAppAlert({
+          title: 'Google Sign-In setup',
+          message:
+            'This build’s signing key is not registered in Google Cloud.\n\n' +
+            '1. Run: npx @react-native-google-signin/config-doctor\n' +
+            '2. Or in Google Cloud → Credentials → Android OAuth client:\n' +
+            '   • Package: com.fintanlyons.pubtracker (or your EXPO_PUBLIC_ANDROID_PACKAGE)\n' +
+            '   • SHA-1: from `eas credentials -p android` for the profile you installed\n' +
+            '3. webClientId must be the Web client ID (not Android).\n' +
+            '4. Rebuild the APK after updating credentials.',
+          tone: 'error',
+        });
+        return;
+      }
+
+      console.error('Google Sign-In error — code:', code, '| message:', msg, '| raw:', error);
+
+      if (/network request failed|failed to fetch|network error/i.test(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
+      } else {
+        showAppAlert({
+          title: 'Sign-in failed',
+          message: `Google Sign-In failed. Please try again.\n\n(${code || msg || 'unknown error'})`,
+          tone: 'error',
+        });
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -200,6 +315,13 @@ export default function AuthScreen({ onAuthSuccess }) {
               <Text style={styles.title}>{APP_DISPLAY_NAME}</Text>
               <Text style={styles.subtitle}>London's pub community</Text>
             </View>
+
+            {!isSupabaseConfigured ? (
+              <View style={styles.configBanner}>
+                <Text style={styles.configBannerTitle}>Server not configured</Text>
+                <Text style={styles.configBannerBody}>{authNetworkErrorMessage()}</Text>
+              </View>
+            ) : null}
 
             <View style={styles.tabContainer}>
               <TouchableOpacity
@@ -363,6 +485,25 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  configBanner: {
+    backgroundColor: COLORS.errorLight,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.errorRed,
+  },
+  configBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.errorRed,
+    marginBottom: 8,
+  },
+  configBannerBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.darkGrey,
   },
   title: {
     fontSize: 28,

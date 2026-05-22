@@ -1,11 +1,14 @@
 import { supabase } from '../config/supabase';
 import { presignAndPutImage } from './r2Upload';
+import { parseUkPostcode } from '../utils/ukPostcode';
 
 /**
  * Report photos: Cloudflare R2 via Supabase Edge Function `presign-r2-upload`.
  * Keys: `reports/{userId}/{uuid}.{ext}` in a single bucket (prefix layout).
- * Public URLs are stored in `reports.photo_urls`.
+ * Public URLs are stored in `reports.photo_urls` (max 5; maps to Pubs_List.photo_url1..5 on apply).
  */
+
+const MAX_REPORT_PHOTOS = 5;
 
 async function fetchReporterUsername(userId) {
   const { data, error } = await supabase
@@ -23,11 +26,17 @@ const emptyToNull = (v) => {
   return s.length ? s : null;
 };
 
+const buildPubAddress = (housenumber, street, postcode) => {
+  const parts = [housenumber, street, postcode].map(emptyToNull).filter(Boolean);
+  return parts.length ? parts.join('\n') : null;
+};
+
 async function uploadReportPhotoUris(imageUris) {
-  if (!imageUris?.length) return [];
+  const capped = (imageUris || []).slice(0, MAX_REPORT_PHOTOS);
+  if (!capped.length) return [];
   const out = [];
-  for (let i = 0; i < imageUris.length; i++) {
-    const publicUrl = await presignAndPutImage(imageUris[i], { purpose: 'report' });
+  for (let i = 0; i < capped.length; i++) {
+    const publicUrl = await presignAndPutImage(capped[i], { purpose: 'report' });
     out.push(publicUrl);
   }
   return out;
@@ -38,9 +47,11 @@ async function uploadReportPhotoUris(imageUris) {
  * @param {'missing_pub'|'pub_correction'} params.reportType
  * @param {string|null|undefined} params.pubId
  * @param {string} params.pubName
- * @param {string} params.pubArea Legacy summary area (e.g. district); also used when address absent
+ * @param {string} [params.pubArea] Legacy district label for corrections (e.g. SW1)
  * @param {string} [params.chainOrIndependent]
- * @param {string} [params.address]
+ * @param {string} [params.housenumber] Maps to addr_housenumber
+ * @param {string} [params.street] Maps to addr_street
+ * @param {string} [params.postcode] Full UK postcode; parsed to postcode_district / postcode_area
  * @param {string} [params.website]
  * @param {string} [params.phone]
  * @param {string} [params.closingTime]
@@ -56,7 +67,9 @@ export async function submitPubReport({
   pubName,
   pubArea,
   chainOrIndependent,
-  address,
+  housenumber,
+  street,
+  postcode,
   website,
   phone,
   closingTime,
@@ -73,23 +86,56 @@ export async function submitPubReport({
     throw new Error('You must be signed in to submit a report.');
   }
 
+  const addr_housenumber = emptyToNull(housenumber);
+  const addr_street = emptyToNull(street);
+  const postcodeRaw = emptyToNull(postcode);
+  const parsed = postcodeRaw ? parseUkPostcode(postcodeRaw) : {
+    postcode: null,
+    postcodeDistrict: null,
+    postcodeArea: null,
+  };
+
+  if (reportType === 'missing_pub') {
+    if (!addr_housenumber) {
+      throw new Error('House number is required.');
+    }
+    if (!addr_street) {
+      throw new Error('Street is required.');
+    }
+    if (!postcodeRaw) {
+      throw new Error('Postcode is required.');
+    }
+    if (!parsed.postcode) {
+      throw new Error('Enter a valid UK postcode (e.g. SW1A 1AA).');
+    }
+  } else if (postcodeRaw && !parsed.postcode) {
+    throw new Error('Enter a valid UK postcode (e.g. SW1A 1AA), or leave it blank.');
+  }
+
   const reporter_username = await fetchReporterUsername(session.user.id);
 
   const photo_urls =
     imageUris.length > 0 ? await uploadReportPhotoUris(imageUris) : null;
 
-  const areaFallback = emptyToNull(address) || 'Unknown Area';
+  const pub_address = buildPubAddress(addr_housenumber, addr_street, parsed.postcode || postcodeRaw);
+  const areaFallback =
+    parsed.postcodeDistrict || emptyToNull(pubArea) || addr_street || 'Unknown Area';
 
   const row = {
     pub_id: pubId ?? null,
     pub_name: emptyToNull(pubName) || 'Unknown Pub',
-    pub_area: emptyToNull(pubArea) || areaFallback,
+    pub_area: areaFallback,
     report_text: reportType === 'missing_pub' ? 'Pub Missing' : 'Pub correction',
     report_type: reportType,
     reporter_id: session.user.id,
     reporter_username,
     chain_or_independent: emptyToNull(chainOrIndependent),
-    pub_address: emptyToNull(address),
+    addr_housenumber,
+    addr_street,
+    postcode: parsed.postcode,
+    postcode_district: parsed.postcodeDistrict,
+    postcode_area: parsed.postcodeArea,
+    pub_address,
     website: emptyToNull(website),
     phone: emptyToNull(phone),
     closing_time: emptyToNull(closingTime),

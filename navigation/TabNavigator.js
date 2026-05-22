@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
+import PintGlassIcon from '../components/PintGlassIcon';
 import { setupPushNotificationNavigation } from '../services/notificationNavigation';
 
 const withErrorBoundary = (Screen, message) => (props) => (
@@ -37,6 +38,8 @@ const Tab = createBottomTabNavigator();
 
 /** Minimum splash duration so the map can centre on GPS before first reveal. */
 const MIN_SPLASH_MS = 850;
+/** Hard cap so first-time / cold-start never blocks on the loading wheel indefinitely. */
+const MAX_SPLASH_MS = 10000;
 
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
@@ -108,6 +111,14 @@ export default function TabNavigator() {
 
   useEffect(() => {
     const timer = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLocationLoaded(true);
+      setIsInitialPubsLoaded(true);
+    }, MAX_SPLASH_MS);
     return () => clearTimeout(timer);
   }, []);
 
@@ -222,11 +233,7 @@ export default function TabNavigator() {
         </Tab.Navigator>
         {!isFullyLoaded && (
           <View style={styles.loadingContainer}>
-            <Image 
-              source={require('../assets/pub_icon.png')} 
-              style={styles.loadingLogo}
-              resizeMode="contain"
-            />
+            <PintGlassIcon size={160} color={COLORS.amber} style={styles.loadingLogo} />
             <ActivityIndicator size="large" color={COLORS.amber} style={styles.loadingSpinner} />
           </View>
         )}
@@ -247,8 +254,6 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   loadingLogo: {
-    width: 150,
-    height: 150,
     marginBottom: 30,
   },
   loadingSpinner: {

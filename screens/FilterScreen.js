@@ -13,6 +13,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RangeSlider from '../components/RangeSlider';
+import FavoritesFilterModal from '../components/FavoritesFilterModal';
 import { COLORS } from '../constants/theme';
 import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 
@@ -53,7 +54,9 @@ export default function FilterScreen({
   yearRange,
   minYear,
   maxYear,
-  showOnlyFavorites,
+  favoritesFilterUserIds,
+  currentUserId,
+  currentUser,
   showOnlyAchievements,
   closingTimeMin,
   minRating,
@@ -81,7 +84,10 @@ export default function FilterScreen({
   const [localSelectedFeatures, setLocalSelectedFeatures] = useState(new Set(selectedFeatures));
   const [localSelectedOwnerships, setLocalSelectedOwnerships] = useState(new Set(selectedOwnerships || []));
   const [localYearRange, setLocalYearRange] = useState(yearRange || defaultYearRange);
-  const [localShowOnlyFavorites, setLocalShowOnlyFavorites] = useState(showOnlyFavorites || false);
+  const [localFavoritesFilterUserIds, setLocalFavoritesFilterUserIds] = useState(
+    favoritesFilterUserIds || []
+  );
+  const [favoritesPickerVisible, setFavoritesPickerVisible] = useState(false);
   const [localShowOnlyAchievements, setLocalShowOnlyAchievements] = useState(showOnlyAchievements || false);
   const [localClosingTimeMin, setLocalClosingTimeMin] = useState(closingTimeMin || null);
   const [localMinRating, setLocalMinRating] = useState(minRating ?? null);
@@ -90,11 +96,23 @@ export default function FilterScreen({
     setLocalSelectedFeatures(new Set(selectedFeatures));
     setLocalSelectedOwnerships(new Set(selectedOwnerships || []));
     setLocalYearRange(yearRange || defaultYearRange);
-    setLocalShowOnlyFavorites(showOnlyFavorites || false);
+    setLocalFavoritesFilterUserIds(favoritesFilterUserIds || []);
     setLocalShowOnlyAchievements(showOnlyAchievements || false);
     setLocalClosingTimeMin(closingTimeMin || null);
     setLocalMinRating(minRating ?? null);
-  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, closingTimeMin, minRating, visible]);
+    if (!visible) setFavoritesPickerVisible(false);
+  }, [
+    selectedFeatures,
+    selectedOwnerships,
+    yearRange,
+    minYear,
+    maxYear,
+    favoritesFilterUserIds,
+    showOnlyAchievements,
+    closingTimeMin,
+    minRating,
+    visible,
+  ]);
 
   const allFeatureNames = PUB_FEATURE_CHIPS.map((f) => f.name);
   const allFeaturesSelected = allFeatureNames.every((n) => localSelectedFeatures.has(n));
@@ -131,7 +149,7 @@ export default function FilterScreen({
     setLocalSelectedFeatures(new Set());
     setLocalSelectedOwnerships(new Set());
     setLocalYearRange(defaultYearRange);
-    setLocalShowOnlyFavorites(false);
+    setLocalFavoritesFilterUserIds([]);
     setLocalShowOnlyAchievements(false);
     setLocalClosingTimeMin(null);
     setLocalMinRating(null);
@@ -150,13 +168,20 @@ export default function FilterScreen({
   const ownershipStripHeight =
     FILTER_CHIP_MIN_H * OWNERSHIP_GRID_ROWS + FILTER_CHIP_GAP * (OWNERSHIP_GRID_ROWS - 1);
 
+  const favoritesFilterActive = localFavoritesFilterUserIds.length > 0;
+
+  const handleFavoritesPickerApply = (userIds) => {
+    setLocalFavoritesFilterUserIds(userIds);
+    setFavoritesPickerVisible(false);
+  };
+
   const handleApply = () => {
     const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || 2025);
     onApply({
       features: Array.from(localSelectedFeatures),
       ownerships: Array.from(localSelectedOwnerships),
       yearRange: isFullRange ? null : localYearRange,
-      showOnlyFavorites: localShowOnlyFavorites,
+      favoritesFilterUserIds: localFavoritesFilterUserIds,
       showOnlyAchievements: localShowOnlyAchievements,
       closingTimeMin: localClosingTimeMin,
       minRating: localMinRating,
@@ -202,21 +227,25 @@ export default function FilterScreen({
                 style={[
                   styles.filterChip,
                   { width: filterChipWidth },
-                  localShowOnlyFavorites && styles.featureBoxSelected
+                  favoritesFilterActive && styles.featureBoxSelected
                 ]}
-                onPress={() => setLocalShowOnlyFavorites(!localShowOnlyFavorites)}
+                onPress={() => setFavoritesPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Filter by favourites"
+                accessibilityState={{ selected: favoritesFilterActive }}
               >
                 <MaterialCommunityIcons
                   name="heart"
                   size={18}
-                  color={localShowOnlyFavorites ? COLORS.amber : COLORS.mediumGrey}
+                  color={favoritesFilterActive ? COLORS.amber : COLORS.mediumGrey}
                   style={styles.filterIconInline}
                 />
                 <Text style={[
                   styles.featureBoxText,
-                  localShowOnlyFavorites && styles.featureBoxTextSelected
+                  favoritesFilterActive && styles.featureBoxTextSelected
                 ]}>
                   Favourites
+                  {favoritesFilterActive ? ` (${localFavoritesFilterUserIds.length})` : ''}
                 </Text>
               </TouchableOpacity>
 
@@ -460,6 +489,16 @@ export default function FilterScreen({
             </TouchableOpacity>
           </View>
         </Animated.View>
+
+        <FavoritesFilterModal
+          embedded
+          visible={favoritesPickerVisible}
+          onClose={() => setFavoritesPickerVisible(false)}
+          onApply={handleFavoritesPickerApply}
+          currentUserId={currentUserId}
+          currentUser={currentUser}
+          initialSelectedIds={localFavoritesFilterUserIds}
+        />
       </View>
     </Modal>
   );

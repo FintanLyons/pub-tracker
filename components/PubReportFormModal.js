@@ -9,7 +9,6 @@ import {
   ScrollView,
   Switch,
   Dimensions,
-  Alert,
   FlatList,
   Platform,
 } from 'react-native';
@@ -17,13 +16,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { AppDialogOverlay } from './AppDialog';
 import {
   PUB_FEATURES_DISPLAY,
   defaultFeatureSwitchState,
   featureMapFromPubFeatureArray,
 } from '../constants/pubFeatures';
+import { normalizeUkPostcode } from '../utils/ukPostcode';
 
-const MAX_PHOTOS = 6;
+const MAX_PHOTOS = 5;
 
 /** UK national numbers are at most 11 digits including trunk 0 (e.g. 02079460123, 07123456789). */
 const UK_PHONE_DIGITS_MAX = 11;
@@ -81,7 +82,9 @@ export default function PubReportFormModal({
   const [chainOrIndependent, setChainOrIndependent] = useState('');
   const [foundedYear, setFoundedYear] = useState(null);
   const [foundedPickerVisible, setFoundedPickerVisible] = useState(false);
-  const [address, setAddress] = useState('');
+  const [housenumber, setHousenumber] = useState('');
+  const [street, setStreet] = useState('');
+  const [postcode, setPostcode] = useState('');
   const [website, setWebsite] = useState('');
   const [phone, setPhone] = useState('');
   const [openingHours, setOpeningHours] = useState('');
@@ -90,6 +93,7 @@ export default function PubReportFormModal({
   const [imageUris, setImageUris] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [photoPermissionDialog, setPhotoPermissionDialog] = useState(false);
   /** pub_correction only: true = still operating, false = permanently closed (not opening hours). */
   const [pubStillOpen, setPubStillOpen] = useState(true);
 
@@ -109,7 +113,9 @@ export default function PubReportFormModal({
       setPubName(initialPub.name || '');
       setChainOrIndependent(initialPub.ownership || '');
       setFoundedYear(foundedYearFromPub(initialPub));
-      setAddress(initialPub.address || '');
+      setHousenumber(initialPub.addrHousenumber || '');
+      setStreet(initialPub.addrStreet || '');
+      setPostcode('');
       setWebsite(initialPub.website ? String(initialPub.website) : '');
       setPhone(digitsOnlyPhone(initialPub.phone));
       setOpeningHours(openingHoursPrefillFromPub(initialPub));
@@ -119,7 +125,9 @@ export default function PubReportFormModal({
       setPubName('');
       setChainOrIndependent('');
       setFoundedYear(null);
-      setAddress('');
+      setHousenumber('');
+      setStreet('');
+      setPostcode('');
       setWebsite('');
       setPhone('');
       setOpeningHours('');
@@ -130,6 +138,7 @@ export default function PubReportFormModal({
     setImageUris([]);
     setErrorMessage(null);
     setFoundedPickerVisible(false);
+    setPhotoPermissionDialog(false);
   }, [visible, mode, initialPub?.id]);
 
   const handleClose = useCallback(() => {
@@ -153,10 +162,7 @@ export default function PubReportFormModal({
       granted = status === 'granted';
     }
     if (!granted) {
-      Alert.alert(
-        'Photos',
-        'Photo library access is needed to attach images. You can enable it in your device settings.'
-      );
+      setPhotoPermissionDialog(true);
       return;
     }
 
@@ -180,10 +186,22 @@ export default function PubReportFormModal({
     setPhone(digitsOnlyPhone(text));
   }, []);
 
+  const handlePostcodeChange = useCallback((text) => {
+    setPostcode(text.toUpperCase());
+  }, []);
+
+  const handlePostcodeBlur = useCallback(() => {
+    const normalised = normalizeUkPostcode(postcode);
+    if (normalised) setPostcode(normalised);
+  }, [postcode]);
+
   const canSubmit =
     mode === 'missing_pub'
-      ? pubName.trim().length > 0 && address.trim().length > 0
-      : history.trim().length > 0;
+      ? pubName.trim().length > 0
+        && housenumber.trim().length > 0
+        && street.trim().length > 0
+        && postcode.trim().length > 0
+      : true;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isSubmitting) return;
@@ -194,7 +212,9 @@ export default function PubReportFormModal({
         pubName: pubName.trim(),
         chainOrIndependent: chainOrIndependent.trim(),
         founded: foundedYear != null ? String(foundedYear) : '',
-        address: address.trim(),
+        housenumber: housenumber.trim(),
+        street: street.trim(),
+        postcode: postcode.trim(),
         website: website.trim(),
         phone: phone.trim(),
         closingTime: openingHours.trim(),
@@ -221,7 +241,9 @@ export default function PubReportFormModal({
     pubName,
     chainOrIndependent,
     foundedYear,
-    address,
+    housenumber,
+    street,
+    postcode,
     website,
     phone,
     openingHours,
@@ -324,7 +346,8 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Chain / independent</Text>
+              <Text style={styles.label}>Ownership</Text>
+              <Text style={styles.sectionHint}>Chain, brewery, or independent operator</Text>
               <TextInput
                 style={styles.textInput}
                 placeholder=""
@@ -335,7 +358,7 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Founded</Text>
+              <Text style={styles.label}>Year founded</Text>
               <TouchableOpacity
                 style={[styles.textInput, styles.yearPickerTrigger]}
                 onPress={() => !isSubmitting && setFoundedPickerVisible(true)}
@@ -348,20 +371,53 @@ export default function PubReportFormModal({
                   }
                   numberOfLines={1}
                 >
-                  {foundedYear != null ? String(foundedYear) : ''}
+                  {foundedYear != null ? String(foundedYear) : 'Select year'}
                 </Text>
                 <MaterialCommunityIcons name="calendar-month-outline" size={22} color={COLORS.mediumGrey} />
               </TouchableOpacity>
 
-              <Text style={styles.label}>Pub address {mode === 'missing_pub' ? '*' : ''}</Text>
+              <Text style={styles.sectionTitle}>Address</Text>
+
+              <Text style={styles.label}>
+                House number{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              {mode !== 'missing_pub' ? (
+                <Text style={styles.sectionHint}>Building number or name, if known</Text>
+              ) : null}
               <TextInput
-                style={[styles.textInput, styles.textInputMultiline]}
+                style={styles.textInput}
                 placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
-                value={address}
-                onChangeText={setAddress}
-                multiline
-                textAlignVertical="top"
+                value={housenumber}
+                onChangeText={setHousenumber}
+                autoCorrect={false}
+                editable={!isSubmitting}
+              />
+
+              <Text style={styles.label}>
+                Street{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder=""
+                placeholderTextColor={COLORS.inputPlaceholder}
+                value={street}
+                onChangeText={setStreet}
+                autoCorrect={false}
+                editable={!isSubmitting}
+              />
+
+              <Text style={styles.label}>
+                Postcode{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. SW1A 1AA"
+                placeholderTextColor={COLORS.inputPlaceholder}
+                value={postcode}
+                onChangeText={handlePostcodeChange}
+                onBlur={handlePostcodeBlur}
+                autoCapitalize="characters"
                 autoCorrect={false}
                 editable={!isSubmitting}
               />
@@ -423,9 +479,8 @@ export default function PubReportFormModal({
                 </View>
               ))}
 
-              <Text style={styles.label}>
-                History {mode === 'pub_correction' ? '*' : ''}
-              </Text>
+              <Text style={styles.label}>About this pub</Text>
+              <Text style={styles.sectionHint}>Shown on the pub card as the main description</Text>
               <TextInput
                 style={[styles.textInput, styles.textInputTall]}
                 placeholder=""
@@ -437,7 +492,10 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.sectionTitle}>Pub photos</Text>
+              <Text style={styles.sectionTitle}>Photos</Text>
+              <Text style={styles.sectionHint}>
+                Up to {MAX_PHOTOS} — applied to the pub listing when your report is accepted
+              </Text>
               <View style={styles.photoRow}>
                 <TouchableOpacity
                   style={styles.addPhotoButton}
@@ -479,60 +537,64 @@ export default function PubReportFormModal({
               </TouchableOpacity>
             </ScrollView>
         </View>
-      </View>
-    </Modal>
-
-    <Modal
-      visible={foundedPickerVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setFoundedPickerVisible(false)}
-    >
-      <View style={styles.yearPickerOverlay}>
-        <TouchableOpacity
-          style={styles.yearPickerDismissArea}
-          activeOpacity={1}
-          onPress={() => setFoundedPickerVisible(false)}
-        />
-        <View style={styles.yearPickerSheet}>
-          <Text style={styles.yearPickerTitle}>Year founded</Text>
-          <TouchableOpacity
-            style={styles.yearPickerClearRow}
-            onPress={() => {
-              setFoundedYear(null);
-              setFoundedPickerVisible(false);
-            }}
-          >
-            <Text style={styles.yearPickerClearText}>Clear selection</Text>
-          </TouchableOpacity>
-          <FlatList
-            data={foundedYearOptions}
-            keyExtractor={(item) => String(item)}
-            style={[styles.yearPickerList, { maxHeight: Math.min(screenH * 0.42, 340) }]}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
+        {photoPermissionDialog ? (
+          <AppDialogOverlay
+            title="Photos"
+            message="Photo library access is needed to attach images. You can enable it in your device settings."
+            tone="neutral"
+            onClose={() => setPhotoPermissionDialog(false)}
+          />
+        ) : null}
+        {foundedPickerVisible ? (
+          <View style={styles.yearPickerOverlay} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.yearPickerDismissArea}
+              activeOpacity={1}
+              onPress={() => setFoundedPickerVisible(false)}
+              accessibilityLabel="Dismiss year picker"
+            />
+            <View style={styles.yearPickerSheet} pointerEvents="auto">
+              <Text style={styles.yearPickerTitle}>Year founded</Text>
               <TouchableOpacity
-                style={[
-                  styles.yearPickerRow,
-                  foundedYear === item && styles.yearPickerRowSelected,
-                ]}
+                style={styles.yearPickerClearRow}
                 onPress={() => {
-                  setFoundedYear(item);
+                  setFoundedYear(null);
                   setFoundedPickerVisible(false);
                 }}
               >
-                <Text
-                  style={[
-                    styles.yearPickerRowText,
-                    foundedYear === item && styles.yearPickerRowTextSelected,
-                  ]}
-                >
-                  {item}
-                </Text>
+                <Text style={styles.yearPickerClearText}>Clear selection</Text>
               </TouchableOpacity>
-            )}
-          />
-        </View>
+              <FlatList
+                data={foundedYearOptions}
+                keyExtractor={(item) => String(item)}
+                style={[styles.yearPickerList, { maxHeight: Math.min(screenH * 0.42, 340) }]}
+                keyboardShouldPersistTaps="handled"
+                initialNumToRender={24}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.yearPickerRow,
+                      foundedYear === item && styles.yearPickerRowSelected,
+                    ]}
+                    onPress={() => {
+                      setFoundedYear(item);
+                      setFoundedPickerVisible(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.yearPickerRowText,
+                        foundedYear === item && styles.yearPickerRowTextSelected,
+                      ]}
+                    >
+                      {item}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
     </Modal>
     </>
@@ -689,8 +751,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   yearPickerOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    zIndex: 20,
+    elevation: 20,
   },
   yearPickerDismissArea: {
     flex: 1,

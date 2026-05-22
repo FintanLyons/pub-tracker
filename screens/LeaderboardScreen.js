@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
 import {
   fetchLeaderboardBundle,
@@ -29,6 +29,7 @@ import AppFeedbackModal from '../components/AppFeedbackModal';
 import { COLORS } from '../constants/theme';
 
 export default function LeaderboardScreen() {
+  const { showAppAlert } = useAppAlert();
   const { user: authUser } = useAuth();
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('friends'); // 'friends' or 'leagues'
@@ -96,7 +97,11 @@ export default function LeaderboardScreen() {
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
       if (!getCachedLeaderboardData()) {
-        Alert.alert('Error', 'Failed to load leaderboard data');
+        showAppAlert({
+          title: 'Error',
+          message: 'Failed to load leaderboard data',
+          tone: 'error',
+        });
       }
     } finally {
       setLoading(false);
@@ -124,7 +129,11 @@ export default function LeaderboardScreen() {
       setLeagueLeaderboard(leagueBoard);
     } catch (error) {
       console.error('Error loading league leaderboard:', error);
-      Alert.alert('Error', 'Failed to load league leaderboard');
+      showAppAlert({
+        title: 'Error',
+        message: 'Failed to load league leaderboard',
+        tone: 'error',
+      });
     } finally {
       setLoading(false);
     }

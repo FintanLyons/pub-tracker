@@ -4,7 +4,8 @@ export function useFilterState(allPubs) {
   const [selectedFeatures, setSelectedFeatures] = useState([]);
   const [selectedOwnerships, setSelectedOwnerships] = useState([]);
   const [yearRange, setYearRange] = useState(null);
-  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  /** User ids whose favourite pubs are shown on the map; empty = favourites filter off. */
+  const [favoritesFilterUserIds, setFavoritesFilterUserIds] = useState([]);
   const [showOnlyAchievements, setShowOnlyAchievements] = useState(false);
   const [closingTimeMin, setClosingTimeMin] = useState(null);
   const [minRating, setMinRating] = useState(null);
@@ -38,7 +39,9 @@ export function useFilterState(allPubs) {
     setSelectedFeatures(filters.features || []);
     setSelectedOwnerships(filters.ownerships || []);
     setYearRange(filters.yearRange || null);
-    setShowOnlyFavorites(filters.showOnlyFavorites || false);
+    setFavoritesFilterUserIds(
+      Array.isArray(filters.favoritesFilterUserIds) ? filters.favoritesFilterUserIds : []
+    );
     setShowOnlyAchievements(filters.showOnlyAchievements || false);
     setClosingTimeMin(filters.closingTimeMin ?? null);
     setMinRating(filters.minRating ?? null);
@@ -51,7 +54,7 @@ export function useFilterState(allPubs) {
     selectedFeatures,
     selectedOwnerships,
     yearRange,
-    showOnlyFavorites,
+    favoritesFilterUserIds,
     showOnlyAchievements,
     closingTimeMin,
     minRating,

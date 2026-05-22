@@ -20,7 +20,6 @@ import {
   Animated,
   InteractionManager,
   RefreshControl,
-  Alert,
   ActivityIndicator,
   Platform,
 } from 'react-native';
@@ -40,6 +39,7 @@ import AnimatedReanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { updatePublicAvatarUrl } from '../services/SecureAuthService';
 import { presignAndPutImage } from '../services/r2Upload';
 import {
@@ -211,6 +211,7 @@ export default function ProfileScreen({
   mapReturnBaselineVisited = 0,
   mapReturnBaselineDrinks = 0,
 }) {
+  const { showAppAlert } = useAppAlert();
   const { logout, user, deleteAccount, applyUserProfileRow } = useAuth();
   const {
     districtStats: baseDistrictStats,
@@ -565,9 +566,17 @@ export default function ProfileScreen({
     const res = await pickNormalizedAvatarUri();
     if (!res.ok) {
       if (res.reason === 'denied') {
-        Alert.alert(AVATAR_LIBRARY_PERMISSION_ALERT.title, AVATAR_LIBRARY_PERMISSION_ALERT.message);
+        showAppAlert({
+          title: AVATAR_LIBRARY_PERMISSION_ALERT.title,
+          message: AVATAR_LIBRARY_PERMISSION_ALERT.message,
+          tone: 'neutral',
+        });
       } else if (res.reason === 'processing') {
-        Alert.alert('Error', res.message || 'Could not process photo.');
+        showAppAlert({
+          title: 'Error',
+          message: res.message || 'Could not process photo.',
+          tone: 'error',
+        });
       }
       return;
     }
@@ -577,7 +586,11 @@ export default function ProfileScreen({
       const row = await updatePublicAvatarUrl(user.id, publicUrl);
       applyUserProfileRow(row);
     } catch (e) {
-      Alert.alert('Error', e?.message || 'Could not update profile photo.');
+      showAppAlert({
+        title: 'Error',
+        message: e?.message || 'Could not update profile photo.',
+        tone: 'error',
+      });
     } finally {
       setAvatarBusy(false);
     }
@@ -605,7 +618,11 @@ export default function ProfileScreen({
       const row = await updatePublicAvatarUrl(user.id, null);
       applyUserProfileRow(row);
     } catch (e) {
-      Alert.alert('Error', e?.message || 'Could not remove photo.');
+      showAppAlert({
+        title: 'Error',
+        message: e?.message || 'Could not remove photo.',
+        tone: 'error',
+      });
     } finally {
       setAvatarBusy(false);
     }
@@ -1551,11 +1568,11 @@ export default function ProfileScreen({
                   </View>
                 </View>
 
-                <Text style={styles.scoringSectionTitle}>Corrections</Text>
+                <Text style={styles.scoringSectionTitle}>Corrections (when accepted)</Text>
 
                 <View style={styles.scoringCorrectionsBlock}>
                   <View style={[styles.scoringCorrectionRow, styles.scoringCorrectionRowFirst]}>
-                    <Text style={styles.scoringCorrectionLabel}>Missing Pub Corrected</Text>
+                    <Text style={styles.scoringCorrectionLabel}>Missing pub added</Text>
                     <MaterialCommunityIcons
                       name="arrow-right"
                       size={16}
@@ -1567,7 +1584,7 @@ export default function ProfileScreen({
                     </Text>
                   </View>
                   <View style={styles.scoringCorrectionRow}>
-                    <Text style={styles.scoringCorrectionLabel}>Pub Attribute Corrected</Text>
+                    <Text style={styles.scoringCorrectionLabel}>Pub details corrected</Text>
                     <MaterialCommunityIcons
                       name="arrow-right"
                       size={16}

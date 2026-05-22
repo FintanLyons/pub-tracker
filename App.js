@@ -12,6 +12,7 @@ import AuthScreen from './screens/AuthScreen';
 import ChooseUsernameScreen from './screens/ChooseUsernameScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AppAlertProvider } from './contexts/AppAlertContext';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
@@ -22,6 +23,10 @@ import {
   registerPushNotificationsForUser,
 } from './services/PushNotificationService';
 import { navigationRef } from './services/notificationNavigation';
+import { promiseWithTimeout } from './utils/promiseWithTimeout';
+
+/** Avoid infinite spinner if AsyncStorage read hangs (corrupt / full storage on device). */
+const ONBOARDING_READ_TIMEOUT_MS = 5000;
 
 function onboardingKeyForUser(userId) {
   return `hasSeenOnboarding:${userId}`;
@@ -69,13 +74,28 @@ function AppContent() {
   useEffect(() => {
     if (!user?.id) {
       setUserOnboardingDone(null);
-      return;
+      return undefined;
     }
-    const uid = user.id;
-    const key = onboardingKeyForUser(uid);
-    AsyncStorage.getItem(key).then((v) => {
-      setUserOnboardingDone(v === 'true');
-    });
+    let cancelled = false;
+    const key = onboardingKeyForUser(user.id);
+
+    promiseWithTimeout(
+      AsyncStorage.getItem(key),
+      ONBOARDING_READ_TIMEOUT_MS,
+      'onboarding flag read',
+    )
+      .then((v) => {
+        if (!cancelled) setUserOnboardingDone(v === 'true');
+      })
+      .catch((err) => {
+        console.warn('App: onboarding flag read failed', err?.message ?? err);
+        // Prefer loading the app over blocking on a stuck flag read.
+        if (!cancelled) setUserOnboardingDone(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   /**
@@ -173,7 +193,9 @@ export default function App() {
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
         <NetworkProvider>
           <AuthProvider>
-            <AppContent />
+            <AppAlertProvider>
+              <AppContent />
+            </AppAlertProvider>
           </AuthProvider>
         </NetworkProvider>
       </ErrorBoundary>

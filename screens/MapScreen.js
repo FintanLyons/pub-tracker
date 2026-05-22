@@ -32,7 +32,9 @@ import PubReportFormModal from '../components/PubReportFormModal';
 import AppFeedbackModal from '../components/AppFeedbackModal';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
+import { fetchFavoritePubIdsForUsers } from '../services/PubService';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
 import { useMapCamera } from './map/hooks/useMapCamera';
@@ -114,11 +116,13 @@ export default function MapScreen() {
 
   requestInitialViewportPubsRef.current = requestInitialViewportPubs;
 
+  const { user: authUser } = useAuth();
+
   const {
     selectedFeatures,
     selectedOwnerships,
     yearRange,
-    showOnlyFavorites,
+    favoritesFilterUserIds,
     showOnlyAchievements,
     closingTimeMin,
     minRating,
@@ -129,6 +133,29 @@ export default function MapScreen() {
     handleFilterPress,
     handleFilterClose,
   } = useFilterState(allPubs);
+
+  const [favoritesFilterPubIds, setFavoritesFilterPubIds] = useState(null);
+
+  useEffect(() => {
+    if (!favoritesFilterUserIds?.length) {
+      setFavoritesFilterPubIds(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    fetchFavoritePubIdsForUsers(favoritesFilterUserIds)
+      .then((ids) => {
+        if (!cancelled) setFavoritesFilterPubIds(ids);
+      })
+      .catch((e) => {
+        console.warn('Favourites filter fetch failed:', e?.message);
+        if (!cancelled) setFavoritesFilterPubIds(new Set());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [favoritesFilterUserIds]);
 
   const interaction = useMapInteraction({
     allPubs,
@@ -162,6 +189,7 @@ export default function MapScreen() {
     keyboardHeight,
     keyboardTop,
     mapHighlightedPubId,
+    pubSelectionSeq,
     clearMapHighlight,
     closeCard,
     handleToggleVisited,
@@ -182,7 +210,7 @@ export default function MapScreen() {
     const hasFeatures = selectedFeatures?.length > 0;
     const hasOwnerships = selectedOwnerships?.length > 0;
     const hasYearRange = yearRange && yearRange.min !== null && yearRange.max !== null;
-    const hasFavorites = showOnlyFavorites === true;
+    const hasFavoritesFilter = favoritesFilterUserIds.length > 0;
     const hasAchievements = showOnlyAchievements === true;
     const hasClosingTime = closingTimeMin != null;
     const hasMinRating = minRating != null;
@@ -201,7 +229,9 @@ export default function MapScreen() {
         const foundedYear = parseInt(pub.founded, 10);
         if (!Number.isFinite(foundedYear) || foundedYear < yearRange.min || foundedYear > yearRange.max) return false;
       }
-      if (hasFavorites && pub.isFavorite !== true) return false;
+      if (hasFavoritesFilter) {
+        if (!favoritesFilterPubIds || !favoritesFilterPubIds.has(pub.id)) return false;
+      }
       if (hasAchievements && (!pub.achievements || pub.achievements.length === 0)) return false;
       if (hasClosingTime) {
         if (closingTimeMin === 'open_now') {
@@ -223,7 +253,8 @@ export default function MapScreen() {
     selectedFeatures,
     selectedOwnerships,
     yearRange,
-    showOnlyFavorites,
+    favoritesFilterUserIds,
+    favoritesFilterPubIds,
     showOnlyAchievements,
     closingTimeMin,
     minRating,
@@ -321,6 +352,16 @@ export default function MapScreen() {
       sheetTranslateY.setValue(mapSheetMetrics.hiddenY);
     }
   }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
+
+  // Re-tapping the Map tab while already on the map dismisses an open pub card.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress', () => {
+      if (!isFocused || !selectedPub) return;
+      clearMapHighlight(selectedPub.id);
+      closeCard(selectedPub.id);
+    });
+    return unsubscribe;
+  }, [navigation, isFocused, selectedPub, clearMapHighlight, closeCard]);
 
   // Android back behavior on map:
   // 1) if search suggestions are open, close them (or let system close keyboard first)
@@ -426,10 +467,11 @@ export default function MapScreen() {
       reportType: 'missing_pub',
       pubId: null,
       pubName: payload.pubName,
-      pubArea: payload.address || 'Unknown Area',
       chainOrIndependent: payload.chainOrIndependent,
       founded: payload.founded,
-      address: payload.address,
+      housenumber: payload.housenumber,
+      street: payload.street,
+      postcode: payload.postcode,
       website: payload.website,
       phone: payload.phone,
       closingTime: payload.closingTime,
@@ -449,7 +491,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     if (initialPubsReady) return undefined;
-    const fallback = setTimeout(() => setIsInitialPubsLoaded?.(true), 12000);
+    const fallback = setTimeout(() => setIsInitialPubsLoaded?.(true), 8000);
     return () => clearTimeout(fallback);
   }, [initialPubsReady, setIsInitialPubsLoaded]);
 
@@ -468,7 +510,10 @@ export default function MapScreen() {
         touchRotate={false}
         onRegionDidChange={onMapRegionDidChange}
         onDidFinishLoadingMap={handleMapLoaded}
-        onDidFailLoadingMap={() => console.warn('MapLibre: map failed to load')}
+        onDidFailLoadingMap={() => {
+          console.warn('MapLibre: map failed to load — continuing with fallback');
+          handleMapLoaded();
+        }}
       >
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
         <Images
@@ -710,7 +755,9 @@ export default function MapScreen() {
         yearRange={yearRange}
         minYear={availableYearRange.min}
         maxYear={availableYearRange.max}
-        showOnlyFavorites={showOnlyFavorites}
+        favoritesFilterUserIds={favoritesFilterUserIds}
+        currentUserId={authUser?.id}
+        currentUser={authUser}
         showOnlyAchievements={showOnlyAchievements}
         closingTimeMin={closingTimeMin}
         minRating={minRating}
@@ -722,6 +769,7 @@ export default function MapScreen() {
         containerHeight={mapAreaHeight}
         translateY={sheetTranslateY}
         collapseRequest={collapseSheetRequest}
+        openRequest={pubSelectionSeq}
         onCloseStart={clearMapHighlight}
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
@@ -760,7 +808,7 @@ export default function MapScreen() {
       <AppFeedbackModal
         visible={missingPubReportSubmittedVisible}
         title="Report submitted"
-        message="Thank you! Your missing pub report has been submitted."
+        message="Thanks! Your report is pending review. Points are awarded once it is accepted."
         onClose={() => setMissingPubReportSubmittedVisible(false)}
       />
     </View>

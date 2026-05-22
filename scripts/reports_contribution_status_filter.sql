@@ -1,36 +1,19 @@
 -- ============================================================================
--- Tiered postcode district (area) completion bonus by pub count — e.g. SW12
--- Letter postcode region (e.g. SW) stays flat +1000.
--- Run in Supabase SQL Editor (replaces mistaken area-tiered migration if applied).
---
---   District / area (SW12, E1, …) when every pub in the district is visited:
---     < 10 pubs  → +40
---     10–19 pubs → +60
---     20–29 pubs → +80
---     30+ pubs   → +100
---
---   Region (SW, E, …) when every pub in the letter area is visited: +1000
+-- Report contribution points: only count accepted reports
 -- ============================================================================
-
-CREATE OR REPLACE FUNCTION public.postcode_district_completion_bonus(p_pub_count INT)
-RETURNS INT
-LANGUAGE sql
-IMMUTABLE
-PARALLEL SAFE
-AS $$
-  SELECT CASE
-    WHEN COALESCE(p_pub_count, 0) < 10 THEN 40
-    WHEN p_pub_count < 20 THEN 60
-    WHEN p_pub_count < 30 THEN 80
-    ELSE 100
-  END;
-$$;
-
-COMMENT ON FUNCTION public.postcode_district_completion_bonus(INT) IS
-  'Bonus when a user completes every pub in a postcode district (e.g. SW12), scaled by pub count.';
-
--- Remove misnamed helper from earlier migration (safe if never applied)
-DROP FUNCTION IF EXISTS public.postcode_area_completion_bonus(INT);
+-- Run AFTER scripts/reports_apply_migration.sql (needs reports.status).
+--
+-- You already have tiered district scoring (+40/60/80/100, +1000 region).
+-- This only updates compute_user_stats so report points require:
+--   status IN ('approved', 'auto_applied')
+--
+-- Does NOT recalculate existing user_stats (no backfill).
+-- New points apply on next report approve / visit / profile refresh.
+--
+-- If your live compute_user_stats matches scoring_postcode_district_tiered_bonus.sql
+-- except for this WHERE clause, you can instead edit that function in the Dashboard
+-- and add the one line marked *** below.
+-- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.compute_user_stats(p_user_id UUID)
 RETURNS void
@@ -77,7 +60,6 @@ BEGIN
       COALESCE(NULLIF(TRIM(pl.postcode_district), ''), 'Unknown') AS effective_district,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
     FROM public."Pubs_List" pl
-    WHERE pl.is_active = true
   ),
   district_counts AS (
     SELECT ep.effective_district AS district_name,
@@ -101,7 +83,6 @@ BEGIN
       pl.id,
       COALESCE(NULLIF(TRIM(pl.postcode_area), ''), 'Unknown') AS effective_area
     FROM public."Pubs_List" pl
-    WHERE pl.is_active = true
   ),
   region_counts AS (
     SELECT ep.effective_area AS area_name,
@@ -138,7 +119,7 @@ BEGIN
     INTO v_data_contribution_pts
     FROM public.reports r
    WHERE r.reporter_id = p_user_id
-     AND r.status IN ('approved', 'auto_applied');
+     AND r.status IN ('approved', 'auto_applied');  -- *** the only report-scoring change
 
   v_total_score := v_pub_points
                  + v_achievement_points
@@ -159,14 +140,4 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.postcode_district_completion_bonus(INT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.compute_user_stats(UUID) TO authenticated;
-
-DO $$
-DECLARE
-  uid UUID;
-BEGIN
-  FOR uid IN SELECT user_id FROM public.user_stats LOOP
-    PERFORM public.compute_user_stats(uid);
-  END LOOP;
-END $$;

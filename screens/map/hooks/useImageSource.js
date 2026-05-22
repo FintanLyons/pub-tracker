@@ -1,4 +1,8 @@
 import { useCallback } from 'react';
+import {
+  getPubPhotoPlaceholderSource,
+  PUB_PHOTO_PLACEHOLDER_URL,
+} from '../../../constants/pubPhotoPlaceholder';
 
 const imageMap = {
   'assets/PubPhotos/Abbey_Arms.jpeg': require('../../../assets/PubPhotos/Abbey_Arms.jpeg'),
@@ -9,11 +13,21 @@ const imageMap = {
   'assets/PubPhotos/Red_Lion_&_Pineapple.jpg': require('../../../assets/PubPhotos/Red_Lion_&_Pineapple.jpg'),
 };
 
-const placeholderImage = require('../../../assets/PubPhotos/Placeholder.jpg');
-
+/** @returns {import('react-native').ImageSourcePropType | null} */
 export function useImageSource() {
   return useCallback((photoUrl) => {
-    if (!photoUrl) return placeholderImage;
+    if (!photoUrl || !String(photoUrl).trim()) return getPubPhotoPlaceholderSource();
+
+    if (photoUrl === '__local_placeholder__') {
+      return getPubPhotoPlaceholderSource();
+    }
+
+    if (
+      PUB_PHOTO_PLACEHOLDER_URL &&
+      photoUrl === PUB_PHOTO_PLACEHOLDER_URL
+    ) {
+      return { uri: PUB_PHOTO_PLACEHOLDER_URL };
+    }
 
     if (photoUrl.startsWith('assets/')) {
       if (imageMap[photoUrl]) return imageMap[photoUrl];
@@ -21,13 +35,13 @@ export function useImageSource() {
       if (imageMap[jpgUrl]) return imageMap[jpgUrl];
       const jpegUrl = photoUrl.replace('.jpg', '.jpeg');
       if (imageMap[jpegUrl]) return imageMap[jpegUrl];
-      return placeholderImage;
+      return null;
     }
 
     if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
       return { uri: photoUrl };
     }
 
-    return placeholderImage;
+    return null;
   }, []);
 }
