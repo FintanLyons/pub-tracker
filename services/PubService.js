@@ -1,7 +1,7 @@
 import { supabase } from '../config/supabase';
 import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import { getPubRatingSummariesCached } from './ReviewService';
 
 // ---------------------------------------------------------------------------
@@ -254,16 +254,16 @@ export const fetchLondonPubs = async (options = {}) => {
 			),
 		);
 
-		const isCoreLondonPostcodeArea = (pub) => {
+		const isSupportedPostcodeArea = (pub) => {
 			const area = pub.postcodeArea || pub.borough;
 			if (!area || typeof area !== 'string') return false;
-			return CORE_LONDON_AREAS.has(area.trim().toUpperCase());
+			return SUPPORTED_POSTCODE_AREAS.has(area.trim().toUpperCase());
 		};
 
-		const londonPubsOnly = formattedPubs.filter(isCoreLondonPostcodeArea);
+		const supportedPubsOnly = formattedPubs.filter(isSupportedPostcodeArea);
 
 		let filteredPubs = hasBounds
-			? londonPubsOnly.filter((pub) => {
+			? supportedPubsOnly.filter((pub) => {
 				if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
 				return (
 					pub.lat <= bounds.north &&
@@ -272,7 +272,7 @@ export const fetchLondonPubs = async (options = {}) => {
 					pub.lon <= bounds.east
 				);
 			})
-			: londonPubsOnly;
+			: supportedPubsOnly;
 
 		if (hasAreaFilter) {
 			const areaSet = new Set(requestedAreas.map((b) => b.toLowerCase()));
@@ -296,7 +296,7 @@ export const fetchPostcodeAreaSummaries = async (userId) => {
 		const { data, error } = await supabase.rpc('get_borough_stats', { p_user_id: userId });
 		if (error) throw error;
 
-	return (data || []).filter((row) => row.postcode_area && CORE_LONDON_AREAS.has(row.postcode_area)).map((row) => {
+	return (data || []).filter((row) => row.postcode_area && SUPPORTED_POSTCODE_AREAS.has(row.postcode_area)).map((row) => {
 		const center = (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
 			? { latitude: row.center_lat, longitude: row.center_lon }
 			: null;
@@ -365,7 +365,7 @@ export const searchPubsByName = async (query, limit = 5) => {
 	return (data || [])
 		.filter((p) => {
 			const pa = p.postcode_area || p.borough;
-			return pa && CORE_LONDON_AREAS.has(pa);
+			return pa && SUPPORTED_POSTCODE_AREAS.has(pa);
 		})
 		.map((p) => {
 			const area = p.postcode_district || p.area;

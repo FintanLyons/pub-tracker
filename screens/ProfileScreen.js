@@ -61,7 +61,7 @@ import {
   POINTS_PUB_CORRECTION_REPORT,
 } from '../utils/levelSystem';
 import { getAchievedTrophyIds } from '../utils/trophyUtils';
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import UserAchievementsPanel from '../components/UserAchievementsPanel';
 
 const SORT_MODES = {
@@ -442,7 +442,7 @@ export default function ProfileScreen({
 
   const sortedPostcodeAreaStats = useMemo(() => {
     const londonOnly = postcodeAreaStatsRaw.filter(
-      (row) => CORE_LONDON_AREAS.has(row.postcodeArea),
+      (row) => SUPPORTED_POSTCODE_AREAS.has(row.postcodeArea),
     );
     return sortStats(londonOnly, VIEW_MODES.POSTCODE_AREA);
   }, [postcodeAreaStatsRaw, sortStats]);

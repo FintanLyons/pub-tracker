@@ -1,0 +1,186 @@
+[
+  {
+    "id": "node/17708621",
+    "name": "Six Bells",
+    "search_query": "Six Bells pub Cambridge High Street CB21",
+    "suggested_website": "https://www.sixbellsfulbourn.co.uk/",
+    "confidence": 0.92,
+    "alternates": [
+      "https://ourlocal.pub/pubs/six-bells-fulbourn/"
+    ],
+    "notes": "Official pub site for 9 High Street, Fulbourn CB21 5DH. Punch Pubs tenant; ourlocal.pub is operator portal."
+  },
+  {
+    "id": "node/20458787",
+    "name": "Earl of Beaconsfield",
+    "search_query": "Earl of Beaconsfield pub Cambridge Mill Road CB1",
+    "suggested_website": "https://www.earlofbeaconsfieldcambridge.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Star Pubs official site; 133 Mill Road CB1 3AA. User-found."
+  },
+  {
+    "id": "node/20458870",
+    "name": "The Empress",
+    "search_query": "The Empress pub Cambridge Thoday Street CB1",
+    "suggested_website": "http://www.empressbadboy.com/",
+    "confidence": 0.5,
+    "alternates": [],
+    "notes": "Listed as official site on pub directory for 72 Thoday Street CB1 3AX, but domain returned 503 when checked; may be intermittently offline."
+  },
+  {
+    "id": "node/20827166",
+    "name": "White Swan",
+    "search_query": "White Swan pub Cambridge Mill Road CB1",
+    "suggested_website": "https://whiteswanpubcambridge.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site with matching name and address 107-109 Mill Road CB1 2AZ."
+  },
+  {
+    "id": "node/20922157",
+    "name": "The Castle Bar",
+    "search_query": "The Castle Bar pub Cambridge St Andrew's Street CB2",
+    "suggested_website": "https://www.thecastlebarcambridge.com/",
+    "confidence": 0.91,
+    "alternates": [],
+    "notes": "Official pub/B&B site for 37 St Andrew's Street CB2 3AR. Greene King freehold but not listed on greeneking.co.uk."
+  },
+  {
+    "id": "node/20940220",
+    "name": "The Punter",
+    "search_query": "The Punter pub Cambridge Pound Hill CB3",
+    "suggested_website": "https://www.thepuntercambridge.com/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site for 3 Pound Hill CB3 0AE coaching-inn pub and restaurant."
+  },
+  {
+    "id": "node/20940431",
+    "name": "Carpenters Arms",
+    "search_query": "Carpenters Arms pub Cambridge Victoria Road CB4",
+    "suggested_website": "https://www.carpentersarmscambridge.com/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Official Brewpoint/Wells craft pub site for 184-186 Victoria Road CB4 3DZ."
+  },
+  {
+    "id": "node/21137287",
+    "name": "Green Dragon",
+    "search_query": "Green Dragon pub Cambridge Water Street CB4",
+    "suggested_website": "https://greendragoncambridge.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site for 5 Water Street, Chesterton CB4 1NZ riverside pub."
+  },
+  {
+    "id": "node/21642213",
+    "name": "Green Man",
+    "search_query": "Green Man pub Cambridge High Street Trumpington CB2",
+    "suggested_website": "https://www.thegreenmantrumpington.com/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Official Mitchells & Butlers pub site for 55 High Street, Trumpington CB2 9HZ."
+  },
+  {
+    "id": "node/24672502",
+    "name": "The Dumpling Tree",
+    "search_query": "The Dumpling Tree pub Cambridge Perne Road CB1",
+    "suggested_website": "https://www.thedumplingtree.com/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site for 59 Perne Road CB1 3RX Chinese bar-restaurant in former pub building."
+  },
+  {
+    "id": "node/24673114",
+    "name": "Rathmore Club",
+    "search_query": "Rathmore Club pub Cambridge Cherry Hinton Road CB1",
+    "suggested_website": "https://rathmore-club.goto-where.com/",
+    "confidence": 0.85,
+    "alternates": [],
+    "notes": "Rathmore Club listing site; 70 Cherry Hinton Road CB1 7AA. User-found."
+  },
+  {
+    "id": "node/25285271",
+    "name": "Salisbury Arms",
+    "search_query": "Salisbury Arms pub Cambridge Tenison Road CB1",
+    "suggested_website": "https://www.salisburyarmscambridge.co.uk/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Official Brewpoint craft pub site for 76 Tenison Road CB1 2DW."
+  },
+  {
+    "id": "node/25285273",
+    "name": "Live & Let Live",
+    "search_query": "Live & Let Live pub Cambridge Mawson Road CB1",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "No dedicated official website found for 40 Mawson Road CB1 2EA. Independent real-ale local; Facebook page only."
+  },
+  {
+    "id": "node/25612057",
+    "name": "King William IV",
+    "search_query": "King William IV pub Cambridge Church Street CB24",
+    "suggested_website": "https://www.kingbillhiston.co.uk/",
+    "confidence": 0.91,
+    "alternates": [],
+    "notes": "Official site for King Bill at 8 Church Street, Histon CB24 9EP (village pub, not central Cambridge)."
+  },
+  {
+    "id": "node/26113438",
+    "name": "Red Lion",
+    "search_query": "Red Lion pub Cambridge CB25",
+    "suggested_website": "https://www.redlion-sp.co.uk/",
+    "confidence": 0.92,
+    "alternates": [
+      "https://www.batemansbrewery.co.uk/find-a-pint/red-lion-swaffham-prior/"
+    ],
+    "notes": "Official pub site for 43 High Street, Swaffham Prior CB25 0LD. Batemans brewery page is chain listing."
+  },
+  {
+    "id": "node/26117016",
+    "name": "Maid's Head",
+    "search_query": "Maid's Head pub Cambridge CB7",
+    "suggested_website": "https://www.maidshead.co.uk/",
+    "confidence": 0.91,
+    "alternates": [],
+    "notes": "Official site for 12 High Street, Wicken CB7 5XR (East Cambs village; OSM postcode CB7 5XU approximate)."
+  },
+  {
+    "id": "node/26531001",
+    "name": "Three Tuns",
+    "search_query": "Three Tuns pub Cambridge CB21",
+    "suggested_website": "https://www.thethreetuns-greatabington.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site for 75 High Street, Great Abington CB21 6AB (Thai restaurant/pub, not Fen Drayton)."
+  },
+  {
+    "id": "node/26660989",
+    "name": "Black Horse",
+    "search_query": "Black Horse pub Cambridge Park Street CB23",
+    "suggested_website": "https://www.blackhorsedrydrayton.com/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Official site for 35 Park Street, Dry Drayton CB23 8DA. New owners Oct 2025; still trading."
+  },
+  {
+    "id": "node/26976846",
+    "name": "Brewery Tap",
+    "search_query": "Brewery Tap pub Cambridge CB25",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "No official website found. Identified as The Taps at 19 Denny End Road, Waterbeach CB25 9PB; reopened Jun 2024, still listed open Oct 2025."
+  },
+  {
+    "id": "node/29676417",
+    "name": "The Three Tuns",
+    "search_query": "The Three Tuns pub Cambridge High Street CB24",
+    "suggested_website": "https://threetunsfendrayton.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Official site for thatched pub on High Street, Fen Drayton CB24 4SJ (distinct from Great Abington Three Tuns)."
+  }
+]

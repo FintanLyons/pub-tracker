@@ -42,9 +42,11 @@ import { useViewportPubs } from './map/hooks/useViewportPubs';
 import { useMapInteraction } from './map/hooks/useMapInteraction';
 import { COLORS } from '../constants/theme';
 import { pubInsideFeature } from './map/mapUtils';
-import postcodeDistrictGeojson from '../data/geo/london_postcode_districts.min.json';
-import postcodeAreaOutlinesGeojson from '../data/geo/london_postcode_areas.min.json';
-import postcodeAreaLabelPointsGeojson from '../data/geo/london_postcode_area_label_points.min.json';
+import {
+  postcodeAreaLabelPointsGeojson,
+  postcodeAreaOutlinesGeojson,
+  postcodeDistrictGeojson,
+} from '../data/geo/supportedPostcodeGeo';
 import { styles as baseStyles } from './map/mapStyles';
 import { getOpeningStatus, isOpenPastMidnight } from '../utils/openingHours';
 import {

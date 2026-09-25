@@ -20,8 +20,10 @@ import {
   findFeatureByPostcodeArea,
   findFeatureContainingCoordinate,
 } from '../mapUtils';
-import postcodeDistrictGeojson from '../../../data/geo/london_postcode_districts.min.json';
-import postcodeAreaOutlinesGeojson from '../../../data/geo/london_postcode_areas.min.json';
+import {
+  postcodeAreaOutlinesGeojson,
+  postcodeDistrictGeojson,
+} from '../../../data/geo/supportedPostcodeGeo';
 
 /**
  * Combined search + selection + deep-link hook.
@@ -94,6 +96,22 @@ export function useMapInteraction({
     }
     return null;
   }, [getQueryVariants]);
+  /** Server/typeahead rows omit `features`; viewport rows from formatPub always include it. */
+  const needsFullPubFetch = useCallback(
+    (pub) => pub?.id != null && !Array.isArray(pub.features),
+    [],
+  );
+
+  const resolvePubForSelection = useCallback(async (pub) => {
+    if (!pub?.id || !needsFullPubFetch(pub)) return pub;
+    try {
+      const full = await fetchPubById(pub.id);
+      return full || pub;
+    } catch {
+      return pub;
+    }
+  }, [needsFullPubFetch]);
+
   const rankPubsForQuery = useCallback((pubs, rawQuery, limit = 8) => {
     const ranked = (Array.isArray(pubs) ? pubs : [])
       .map((pub) => ({ pub, rank: getPubMatchRank(pub?.name, rawQuery) }))
@@ -365,11 +383,14 @@ export function useMapInteraction({
 
     try {
       const serverResults = await searchPubsByName(rawQuery.trim(), 1);
-      if (serverResults?.length > 0) selectPub(serverResults[0], true, true);
+      if (serverResults?.length > 0) {
+        const resolved = await resolvePubForSelection(serverResults[0]);
+        selectPub(resolved, true, true);
+      }
     } catch {
       // server search unavailable
     }
-  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub, rankPubsForQuery]);
+  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub, rankPubsForQuery, resolvePubForSelection]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
@@ -403,11 +424,12 @@ export function useMapInteraction({
     Keyboard.dismiss();
   }, [selectDistrict]);
 
-  const handlePubSuggestionPress = useCallback((pub) => {
+  const handlePubSuggestionPress = useCallback(async (pub) => {
     setShowSuggestions(false);
     Keyboard.dismiss();
-    selectPub(pub, true, true);
-  }, [selectPub]);
+    const resolved = await resolvePubForSelection(pub);
+    selectPub(resolved, true, true);
+  }, [selectPub, resolvePubForSelection]);
 
   const dismissSearchSuggestions = useCallback(() => {
     setShowSuggestions(false);
@@ -419,10 +441,12 @@ export function useMapInteraction({
   // Keyboard tracking
   useEffect(() => {
     const keyboardShow = Keyboard.addListener('keyboardDidShow', (event) => {
-      setKeyboardHeight(event.endCoordinates.height);
-      const top = event.endCoordinates.screenY !== undefined
-        ? event.endCoordinates.screenY
-        : Dimensions.get('window').height - event.endCoordinates.height;
+      const end = event?.endCoordinates;
+      const height = end?.height ?? 0;
+      setKeyboardHeight(height);
+      const top = end?.screenY != null
+        ? end.screenY
+        : Dimensions.get('window').height - height;
       setKeyboardTop(top);
     });
     const keyboardHide = Keyboard.addListener('keyboardDidHide', () => {

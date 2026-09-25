@@ -1,0 +1,74 @@
+[
+  {
+    "id": "way/616021928",
+    "name": "The Plough",
+    "calc_postcode_district": "CB22",
+    "addr_housenumber": "2",
+    "addr_street": "High Street",
+    "website": "",
+    "fc_status": "",
+    "fc_error": "",
+    "has_description": false,
+    "reason": "no_website"
+  },
+  {
+    "id": "way/617703785",
+    "name": "White Lion",
+    "calc_postcode_district": "CB22",
+    "addr_housenumber": "96",
+    "addr_street": "High Street",
+    "website": "http://www.whitelionsawston.co.uk",
+    "fc_status": "scrape_failed",
+    "fc_error": "too_short:42_chars",
+    "has_description": true,
+    "reason": "fc_failed"
+  },
+  {
+    "id": "way/617704032",
+    "name": "The Greyhound",
+    "calc_postcode_district": "CB22",
+    "addr_housenumber": "",
+    "addr_street": "",
+    "website": "https://thegreyhoundsawston.co.uk/",
+    "fc_status": "scrape_failed",
+    "fc_error": "firecrawl:Internal Server Error: Failed to scrape. All scraping engines failed to retrieve content from this URL. Engines tried: [",
+    "has_description": true,
+    "reason": "fc_failed"
+  },
+  {
+    "id": "way/661740178",
+    "name": "Duke of Wellington",
+    "calc_postcode_district": "CB24",
+    "addr_housenumber": "55",
+    "addr_street": "Church Street",
+    "website": "",
+    "fc_status": "",
+    "fc_error": "",
+    "has_description": false,
+    "reason": "no_website"
+  },
+  {
+    "id": "way/771599939",
+    "name": "Crown & Thistle",
+    "calc_postcode_district": "CB10",
+    "addr_housenumber": "",
+    "addr_street": "High Street",
+    "website": "http://www.thecrownandthistle.pub",
+    "fc_status": "scrape_failed",
+    "fc_error": "too_short:42_chars",
+    "has_description": true,
+    "reason": "fc_failed"
+  },
+  {
+    "id": "way/1204234283",
+    "name": "The Regal",
+    "calc_postcode_district": "CB2",
+    "addr_housenumber": "38-39",
+    "addr_street": "St Andrew's Street",
+    "website": "https://www.jdwetherspoon.com/pubs/the-regal-cambridge/",
+    "fc_status": "ok",
+    "fc_error": "",
+    "has_description": false,
+    "reason": "missing_desc"
+  }
+]

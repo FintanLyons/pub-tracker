@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build:geo": "python3 scripts/build_london_postcode_areas.py",
+    "build:geo": "python3 scripts/build_cambridge_postcode_geojson.py /tmp/CB.geojson && python3 scripts/build_london_postcode_areas.py && python3 scripts/generate_postcode_district_display_names.py",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

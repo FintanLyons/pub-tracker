@@ -1,0 +1,188 @@
+[
+  {
+    "id": "node/5676057080",
+    "name": "Old Ticket Office",
+    "search_query": "\"Old Ticket Office\" pub Cambridge Station Road CB1",
+    "suggested_website": "https://www.oldticketoffice.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official City Pub Company site; address Cambridge Railway Station CB1 2JW matches venue."
+  },
+  {
+    "id": "node/8423728790",
+    "name": "The Three Horseshoes",
+    "search_query": "\"The Three Horseshoes\" pub Cambridge CB22",
+    "suggested_website": "https://threehorseshoes-pub.com/",
+    "confidence": 0.9,
+    "alternates": [
+      "https://3horseshoes.co.uk/"
+    ],
+    "notes": "Stapleford village pub at Church St CB22 5DS; two linked official domains operated by same licensee."
+  },
+  {
+    "id": "node/9042161425",
+    "name": "The Bird or Worm?",
+    "search_query": "\"The Bird or Worm?\" pub Cambridge Newmarket Road CB5",
+    "suggested_website": "https://thebirdorworm.com/",
+    "confidence": 0.75,
+    "alternates": [],
+    "notes": "Minimal one-page official site (menu only) for Ninja Theory ground-floor bar at 122 Newmarket Rd CB5 8HE; no full pub website."
+  },
+  {
+    "id": "node/13142721772",
+    "name": "The Regal - JD Wetherspoon",
+    "search_query": "\"The Regal\" JD Wetherspoon pub Cambridge CB2",
+    "suggested_website": "https://www.jdwetherspoon.com/pubs/the-regal-cambridge/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official J D Wetherspoon pub page; 38-39 St Andrews Street CB2 3AR."
+  },
+  {
+    "id": "way/52115600",
+    "name": "Dobblers Inn",
+    "search_query": "\"Dobblers Inn\" pub Cambridge Sturton Street CB1",
+    "suggested_website": "https://www.thedobblers.com/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Official pub website at 184 Sturton Street CB1 2QF; Wells & Co community local."
+  },
+  {
+    "id": "way/67665889",
+    "name": "The Geldart",
+    "search_query": "\"The Geldart\" pub Cambridge Ainsworth Street CB1",
+    "suggested_website": "https://www.the-geldart.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for music/food pub at 1 Ainsworth Street CB1 2PF."
+  },
+  {
+    "id": "way/74341420",
+    "name": "Monkfield Arms",
+    "search_query": "\"Monkfield Arms\" pub Great Cambourne Monkfield Lane CB23",
+    "suggested_website": "https://www.monkfieldarmspub.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official Marston's pub site at 1 Monkfield Lane, Cambourne CB23 6AH."
+  },
+  {
+    "id": "way/96886062",
+    "name": "The Barley Mow",
+    "search_query": "\"The Barley Mow\" pub Cambridge High Street CB24",
+    "suggested_website": "https://www.barleymowhiston.co.uk/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Official Greene King Hive pub site; 7 High Street, Histon CB24 9JD."
+  },
+  {
+    "id": "way/101893151",
+    "name": "The Fox",
+    "search_query": "\"The Fox\" pub Cambridge CB23",
+    "suggested_website": "https://www.foxbarhill.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official Punch Pubs site for The Fox at Gladeside, Bar Hill CB23 8DY."
+  },
+  {
+    "id": "way/110256311",
+    "name": "The Tivoli",
+    "search_query": "\"The Tivoli\" pub Cambridge Chesterton Road CB4",
+    "suggested_website": "https://www.thetivoli.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official venue site at 16 Chesterton Road CB4 3AX; Young's/City Pub Group."
+  },
+  {
+    "id": "way/110256313",
+    "name": "Old Spring",
+    "search_query": "\"Old Spring\" pub Cambridge Ferry Path CB4",
+    "suggested_website": "https://theoldspring.co.uk/",
+    "confidence": 0.95,
+    "alternates": [
+      "https://theoldspring.com/"
+    ],
+    "notes": "Official gastropub site at 1 Ferry Path CB4 1HB; .co.uk and .com both resolve."
+  },
+  {
+    "id": "way/110256317",
+    "name": "The Boathouse",
+    "search_query": "\"The Boathouse\" pub Cambridge Chesterton Road CB4",
+    "suggested_website": "https://www.greeneking.co.uk/pubs/cambridgeshire/boathouse",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official Greene King pub page at 14 Chesterton Road CB4 3AX."
+  },
+  {
+    "id": "way/118943808",
+    "name": "Corner House",
+    "search_query": "\"Corner House\" pub Cambridge Newmarket Road CB5",
+    "suggested_website": "https://www.thecornerhousepub.co/",
+    "confidence": 0.95,
+    "alternates": [
+      "https://www.lapeninns.com/restaurants/the-corner-house"
+    ],
+    "notes": "Official Lapen Inns pub site at 231 Newmarket Road CB5 8JE."
+  },
+  {
+    "id": "way/125553129",
+    "name": "The White Horse",
+    "search_query": "\"The White Horse\" pub Cambridge High Street CB24",
+    "suggested_website": "https://thewhitehorsemilton.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Milton village pub at 20-22 High Street CB24 6AJ; distinct from Barton White Horse."
+  },
+  {
+    "id": "way/125662864",
+    "name": "The Hole in the Wall",
+    "search_query": "\"The Hole in the Wall\" pub Cambridge CB21",
+    "suggested_website": "https://www.holeinthewalldining.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official country gastro pub site at 2 High Street, Little Wilbraham CB21 5JY."
+  },
+  {
+    "id": "way/127367856",
+    "name": "The Ship",
+    "search_query": "\"The Ship\" pub Cambridge Northfield Avenue CB4",
+    "suggested_website": "https://www.theshipcambridge.co.uk/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Official pub site at Northfield Avenue, King's Hedges CB4 2LG."
+  },
+  {
+    "id": "way/127812957",
+    "name": "Sir Isaac Newton",
+    "search_query": "\"Sir Isaac Newton\" pub Cambridge Castle Street CB3",
+    "suggested_website": "https://www.sirisaacnewton-cambridge.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official pub site at 84 Castle Street CB3 0AJ."
+  },
+  {
+    "id": "way/129105260",
+    "name": "The White Horse",
+    "search_query": "\"The White Horse\" pub Cambridge CB23",
+    "suggested_website": "https://www.thewhitehorseinnbarton.co.uk/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Barton village pub (listed as White Horse Inn) at 118 High Street CB23 7BG; OSM name omits 'Inn'."
+  },
+  {
+    "id": "way/134111534",
+    "name": "Royal Standard",
+    "search_query": "\"Royal Standard\" pub Cambridge Mill Road CB1",
+    "suggested_website": "https://cambridge.pub/royal-standard/",
+    "confidence": 0.85,
+    "alternates": [],
+    "notes": "Official venue page on Cambridge Blue Management group site; 292 Mill Road CB1 3NL."
+  },
+  {
+    "id": "way/134385094",
+    "name": "The Blue Moon",
+    "search_query": "\"The Blue Moon\" pub Cambridge Norfolk Street CB1",
+    "suggested_website": "https://cambridge.pub/blue-moon/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Official venue page on Cambridge Blue Management group site; 2 Norfolk Street CB1 2LF."
+  }
+]

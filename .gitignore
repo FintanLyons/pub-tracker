@@ -56,3 +56,7 @@ data/tier_a_extractions/
 # generated native folders
 /ios
 /android
+
+# Python
+__pycache__/
+*.pyc

@@ -1,15 +1,15 @@
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 
 export const isLondonTrophy = (trophy) => {
   const id = typeof trophy.id === 'string' ? trophy.id : '';
   if (trophy.type === 'district' || trophy.type === 'area') {
     const m = id.match(/^district-([A-Z]+)/i);
-    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
+    if (m) return SUPPORTED_POSTCODE_AREAS.has(m[1].toUpperCase());
   }
   if (trophy.type === 'postcode_area' || trophy.type === 'borough') {
     const m = id.match(/^(?:postcode[_-]?area|borough)-([A-Z]+)/i);
-    if (m) return CORE_LONDON_AREAS.has(m[1].toUpperCase());
-    return CORE_LONDON_AREAS.has(id.toUpperCase());
+    if (m) return SUPPORTED_POSTCODE_AREAS.has(m[1].toUpperCase());
+    return SUPPORTED_POSTCODE_AREAS.has(id.toUpperCase());
   }
   return true;
 };

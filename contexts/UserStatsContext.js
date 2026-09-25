@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../config/supabase';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import { getDrinkStats } from '../services/ReviewService';
 
 const EMPTY_DRINK_STATS = { total: 0, byDistrict: {}, byPostcodeArea: {} };
@@ -52,7 +52,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 			percentage: row.percentage,
 			centerLat: row.center_lat ?? null,
 			centerLon: row.center_lon ?? null,
-		})).filter((d) => d.postcodeArea && CORE_LONDON_AREAS.has(d.postcodeArea));
+		})).filter((d) => d.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(d.postcodeArea));
 
 		const mappedPostcodeAreas = rawAreas.map((row) => ({
 			postcodeArea: row.postcode_area,
@@ -63,7 +63,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 			completedDistricts: Number(row.completed_districts),
 			centerLat: row.center_lat ?? null,
 			centerLon: row.center_lon ?? null,
-		})).filter((a) => a.postcodeArea && CORE_LONDON_AREAS.has(a.postcodeArea));
+		})).filter((a) => a.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(a.postcodeArea));
 
 		const totalVisitedCount = mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
 		const totalPubsCount = mappedDistricts.reduce((sum, s) => sum + (s.total || 0), 0);

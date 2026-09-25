@@ -90,9 +90,8 @@ export const ZOOM_LEVELS = {
 
 /**
  * Attach completion stats to postcode-area features (polygons or label points).
- * Polygons: `data/geo/london_postcode_areas.min.json`
- * One label Point per area: `data/geo/london_postcode_area_label_points.min.json`
- * Regenerate both: `python3 scripts/build_london_postcode_areas.py`
+ * Polygons + labels: `data/geo/supportedPostcodeGeo.js` (London + Cambridge).
+ * Regenerate: `npm run build:geo`
  */
 export const buildPostcodeAreaLayerCollection = (geojson, postcodeAreaSummaries = []) => {
   const statsByArea = new Map(

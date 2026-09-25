@@ -13,7 +13,7 @@ const imageMap = {
   'assets/PubPhotos/Red_Lion_&_Pineapple.jpg': require('../../../assets/PubPhotos/Red_Lion_&_Pineapple.jpg'),
 };
 
-/** @returns {import('react-native').ImageSourcePropType | null} */
+/** @returns {import('react-native').ImageSourcePropType} */
 export function useImageSource() {
   return useCallback((photoUrl) => {
     if (!photoUrl || !String(photoUrl).trim()) return getPubPhotoPlaceholderSource();
@@ -35,13 +35,13 @@ export function useImageSource() {
       if (imageMap[jpgUrl]) return imageMap[jpgUrl];
       const jpegUrl = photoUrl.replace('.jpg', '.jpeg');
       if (imageMap[jpegUrl]) return imageMap[jpegUrl];
-      return null;
+      return getPubPhotoPlaceholderSource();
     }
 
     if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
       return { uri: photoUrl };
     }
 
-    return null;
+    return getPubPhotoPlaceholderSource();
   }, []);
 }

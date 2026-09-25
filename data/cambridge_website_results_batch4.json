@@ -1,0 +1,182 @@
+[
+  {
+    "id": "way/136196114",
+    "name": "The Grapes",
+    "search_query": "\"The Grapes\" pub Cambridge Histon Road CB4",
+    "suggested_website": "",
+    "confidence": 0.15,
+    "alternates": [],
+    "notes": "CAMRA lists no website; directory references to thegrapescambridge.co.uk and thegrapes.co.uk appear inactive. Only aggregator listings (inapub, useyourlocal) found."
+  },
+  {
+    "id": "way/147532393",
+    "name": "George Inn",
+    "search_query": "\"George Inn\" pub Cambridge CB22",
+    "suggested_website": "https://www.thegeorgeinnbabraham.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for George Inn at 43 High Street, Babraham CB22 3AG; matches CB22 district and wikidata entry."
+  },
+  {
+    "id": "way/148827006",
+    "name": "The Tram Depot",
+    "search_query": "\"The Tram Depot\" pub Cambridge Dover Street CB1",
+    "suggested_website": "https://thetramcambridge.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official operator site; address 5 Dover Street CB1 1DY matches OSM record."
+  },
+  {
+    "id": "way/152686984",
+    "name": "The Poacher",
+    "search_query": "\"The Poacher\" pub Cambridge Brockley Road CB23",
+    "suggested_website": "http://poacherelsworth.co.uk/",
+    "confidence": 0.85,
+    "alternates": ["https://poacherelsworth.co.uk/"],
+    "notes": "Official site for Elsworth Poacher at 1 Brockley Road CB23 4JS; CAMRA reports pub closed long-term Feb 2026 but site remains operator-owned."
+  },
+  {
+    "id": "way/154730026",
+    "name": "The Green Man",
+    "search_query": "\"The Green Man\" pub Cambridge High Street CB3",
+    "suggested_website": "https://www.grantchestergreenman.com/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Grantchester Green Man at 59 High Street CB3 9NF; distinct from Trumpington Green Man (CB2). URL cited on OpenTable and CAMRA."
+  },
+  {
+    "id": "way/159256001",
+    "name": "George Inn",
+    "search_query": "\"George Inn\" pub Cambridge High Street CB3",
+    "suggested_website": "https://thegeorgegirton.weebly.com/",
+    "confidence": 0.88,
+    "alternates": [],
+    "notes": "Official Weebly site for The George at 71 High Street, Girton CB3 0QD; Thai food and pub menus confirmed."
+  },
+  {
+    "id": "way/159256015",
+    "name": "Old Crown",
+    "search_query": "\"Old Crown\" pub Cambridge High Street CB3",
+    "suggested_website": "https://oldcrowngirton.com/",
+    "confidence": 0.95,
+    "alternates": ["https://www.lapeninns.com/restaurants/the-old-crown"],
+    "notes": "Official pub site at 89 High Street Girton CB3 0QD; Lapen Inns group page is operator site not primary venue URL."
+  },
+  {
+    "id": "way/169444849",
+    "name": "The Bell",
+    "search_query": "\"The Bell\" pub Cambridge High Street CB25",
+    "suggested_website": "https://thebellbottisham.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for Bell Inn at 16 High Street, Bottisham CB25 9DA; booking and menu pages on same domain."
+  },
+  {
+    "id": "way/174752202",
+    "name": "The Red Bull",
+    "search_query": "\"The Red Bull\" pub Cambridge Barton Road CB3",
+    "suggested_website": "https://www.redbullcambridge.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official Charles Wells/Wells & Co pub site at 11 Barton Road CB3 9JZ; live site verified."
+  },
+  {
+    "id": "way/188821806",
+    "name": "Railway Vue",
+    "search_query": "\"Railway Vue\" pub Cambridge Station Road CB24",
+    "suggested_website": "https://railwayvue.co.uk/",
+    "confidence": 0.95,
+    "alternates": ["http://www.therailwayvue.co.uk/"],
+    "notes": "Official community pub site at 163 Station Road, Impington CB24 9NP; Punch Pubs refurbishment 2025."
+  },
+  {
+    "id": "way/190337333",
+    "name": "Waggon and Horses",
+    "search_query": "\"Waggon and Horses\" pub Cambridge Margett Street CB24",
+    "suggested_website": "",
+    "confidence": 0.1,
+    "alternates": [],
+    "notes": "CAMRA and inapub list no website for Cottenham venue at 69 Margett Street CB24 8QY; reopened Nov 2024, presence via Facebook/Instagram only."
+  },
+  {
+    "id": "way/191142638",
+    "name": "Rose & Crown",
+    "search_query": "\"Rose & Crown\" pub Cambridge Glebe Way CB24",
+    "suggested_website": "https://www.individualpubs.co.uk/roseandcrown/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Individual Pub Company (Milton Brewery) official page for 2 Glebe Way, Impington CB24 9JB; reopened Nov 2024."
+  },
+  {
+    "id": "way/200604966",
+    "name": "The Admiral",
+    "search_query": "\"The Admiral\" pub Cambridge High Street CB24",
+    "suggested_website": "",
+    "confidence": 0.1,
+    "alternates": [],
+    "notes": "No dedicated website for 31 High Street Over CB24 5NB; CAMRA lists none. Family-run pub reopened Jul 2024; contact via Facebook and theadmiralover@gmail.com."
+  },
+  {
+    "id": "way/211724201",
+    "name": "Kings Head",
+    "search_query": "\"Kings Head\" pub Cambridge High Street CB5",
+    "suggested_website": "https://thekingsheadfenditton.wordpress.com/",
+    "confidence": 0.85,
+    "alternates": [],
+    "notes": "Official WordPress site for Kings Head at 50 High Street, Fen Ditton CB5 8ST; reopened Jun 2025 under new licensees."
+  },
+  {
+    "id": "way/218983713",
+    "name": "The Rose",
+    "search_query": "\"The Rose\" pub Cambridge London Road CB22",
+    "suggested_website": "https://www.therose-stapleford.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for The Rose at 81 London Road, Stapleford CB22 5DG; Thai food, sister pub to George Inn Babraham."
+  },
+  {
+    "id": "way/219789582",
+    "name": "The Sun",
+    "search_query": "\"The Sun\" pub Cambridge CB25",
+    "suggested_website": "",
+    "confidence": 0.1,
+    "alternates": [],
+    "notes": "Sun Inn at 7 Chapel Street, Waterbeach CB25 9HR has no official website per CAMRA; reopened Oct 2025; Facebook/social only."
+  },
+  {
+    "id": "way/219913530",
+    "name": "George & Dragon",
+    "search_query": "\"George & Dragon\" pub Cambridge Boxworth Road CB23",
+    "suggested_website": "https://www.georgeanddragon-elsworth.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official family-run gastropub site at 41 Boxworth Road, Elsworth CB23 4JQ."
+  },
+  {
+    "id": "way/220571908",
+    "name": "Black Horse Inn",
+    "search_query": "\"Black Horse Inn\" pub Cambridge High Street CB25",
+    "suggested_website": "https://www.theblackhorseswaffhambulbeck.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for Black Horse Inn at 35 High Street, Swaffham Bulbeck CB25 0HP; pub rooms and dining."
+  },
+  {
+    "id": "way/220709642",
+    "name": "Five Miles Inn",
+    "search_query": "\"Five Miles Inn\" pub Cambridge Old School Lane CB7",
+    "suggested_website": "https://www.fivemilesinn.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for Five Miles From Anywhere No Hurry Inn at Old School Lane, Upware CB7 5ZR."
+  },
+  {
+    "id": "way/224082817",
+    "name": "Rose and Crown",
+    "search_query": "\"Rose and Crown\" pub Cambridge Crown Hill CB10",
+    "suggested_website": "https://roseandcrownashdon.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Official site for Rose & Crown at Crown Hill, Ashdon CB10 2HA; free house managed by Ian and Tracy Holt."
+  }
+]
