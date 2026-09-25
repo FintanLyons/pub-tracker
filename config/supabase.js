@@ -23,7 +23,7 @@ if (!isSupabaseConfigured) {
 }
 
 // Guard: createClient throws synchronously if URL is undefined/invalid.
-// Use stub values so the import never crashes — isSupabaseConfigured gates all real usage in App.js.
+// Use stub values so the import never crashes; AuthScreen shows a setup banner when unconfigured.
 const safeUrl = isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co';
 const safeKey = isSupabaseConfigured ? supabaseAnonKey : 'placeholder-key';
 

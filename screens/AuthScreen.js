@@ -23,23 +23,22 @@ import {
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
 import { COLORS } from '../constants/theme';
-import { isSupabaseConfigured, getSupabaseProjectHost } from '../config/supabase';
+import { isSupabaseConfigured } from '../config/supabase';
+import { CONNECTION_ERROR_MESSAGE } from '../services/authErrors';
+import ForgotPasswordModal from '../components/ForgotPasswordModal';
 import { useAppAlert } from '../contexts/AppAlertContext';
 
+/** Developer setup message — only shown in builds missing the Supabase env vars. */
+const MISSING_CONFIG_MESSAGE =
+  'This build cannot reach Supabase. Set EXPO_PUBLIC_SUPABASE_URL and ' +
+  'EXPO_PUBLIC_SUPABASE_ANON_KEY for this EAS environment, then create a new build.';
+
 function authNetworkErrorMessage() {
-  if (!isSupabaseConfigured) {
-    return (
-      'This build cannot reach Supabase. In expo.dev → your project → Environment variables, ' +
-      'set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY for the production ' +
-      'environment (from Supabase → Project Settings → API), then create a new build.'
-    );
-  }
-  const host = getSupabaseProjectHost();
-  return (
-    `Cannot reach Supabase${host ? ` (${host})` : ''}. Check your internet connection, ` +
-    'confirm the Supabase project is active (not paused), and rebuild if you recently changed env vars.'
-  );
+  return isSupabaseConfigured ? CONNECTION_ERROR_MESSAGE : MISSING_CONFIG_MESSAGE;
 }
+
+const isConnectionErrorMessage = (msg) =>
+  msg === CONNECTION_ERROR_MESSAGE || /network request failed|failed to fetch|network error/i.test(msg);
 
 export default function AuthScreen({ onAuthSuccess }) {
   const { showAppAlert } = useAppAlert();
@@ -53,6 +52,7 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,7 +177,7 @@ export default function AuthScreen({ onAuthSuccess }) {
             'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
           tone: 'neutral',
         });
-      } else if (/network request failed|failed to fetch|network error/i.test(msg)) {
+      } else if (isConnectionErrorMessage(msg)) {
         showAppAlert({
           title: 'Connection problem',
           message: authNetworkErrorMessage(),
@@ -207,7 +207,7 @@ export default function AuthScreen({ onAuthSuccess }) {
         return;
       }
       console.error('Apple Sign-In error:', error);
-      if (/network request failed|failed to fetch|network error/i.test(msg)) {
+      if (isConnectionErrorMessage(msg)) {
         showAppAlert({
           title: 'Connection problem',
           message: authNetworkErrorMessage(),
@@ -280,7 +280,7 @@ export default function AuthScreen({ onAuthSuccess }) {
 
       console.error('Google Sign-In error — code:', code, '| message:', msg, '| raw:', error);
 
-      if (/network request failed|failed to fetch|network error/i.test(msg)) {
+      if (isConnectionErrorMessage(msg)) {
         showAppAlert({
           title: 'Connection problem',
           message: authNetworkErrorMessage(),
@@ -373,6 +373,16 @@ export default function AuthScreen({ onAuthSuccess }) {
                 </TouchableOpacity>
               </View>
 
+              {isLogin && (
+                <TouchableOpacity
+                  onPress={() => setShowForgotPassword(true)}
+                  style={styles.forgotRow}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.switchLink}>Forgot password?</Text>
+                </TouchableOpacity>
+              )}
+
               {!isLogin && (
                 <View style={styles.inputRow}>
                   <MaterialCommunityIcons name="lock-check-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
@@ -462,6 +472,12 @@ export default function AuthScreen({ onAuthSuccess }) {
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
+        <ForgotPasswordModal
+          visible={showForgotPassword}
+          initialEmail={email}
+          onClose={() => setShowForgotPassword(false)}
+          onSuccess={onAuthSuccess}
+        />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -682,6 +698,11 @@ const styles = StyleSheet.create({
   switchText: {
     fontSize: 14,
     color: COLORS.mediumGrey,
+  },
+  forgotRow: {
+    alignSelf: 'flex-end',
+    paddingVertical: 2,
+    paddingHorizontal: 4,
   },
   switchLink: {
     color: COLORS.amber,

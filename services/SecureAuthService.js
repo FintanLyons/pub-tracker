@@ -1,12 +1,13 @@
 import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 import { clearVisitedFavoriteCache } from './PubService';
+import { CONNECTION_ERROR_MESSAGE, isNetworkError } from './authErrors';
 
 import { isValidUsernameFormat } from '../utils/usernameValidation';
 
 export { isValidUsernameFormat };
 
-/** public.users columns exposed to the client (email is auth.users only — see tighten_social_rls_migration.sql). */
+/** public.users columns clients may read (column grants hide `email` — see schema baseline §6). */
 export const PUBLIC_USER_PROFILE_COLUMNS =
   'id, username, avatar_url, created_at, updated_at';
 
@@ -68,144 +69,133 @@ export const ensureUserStub = async (userId, email) => {
 
   if (insertError && insertError.code !== '23505') {
     console.warn('ensureUserStub insert:', insertError.message);
-    return;
   }
-
-  try {
-    await syncUserStatsLite(userId);
-  } catch {
-    // best-effort
-  }
+  // user_stats is seeded by the trg_seed_user_stats DB trigger.
 };
 
+/**
+ * Email sign-up. Returns { needsEmailVerification } — true when Supabase requires the
+ * confirmation link before a session exists. The caller loads the profile (refreshUser).
+ */
 export const registerUserSecure = async (email, password) => {
-  try {
-    await supabase.auth.signOut({ scope: 'local' });
-    clearVisitedFavoriteCache();
+  await supabase.auth.signOut({ scope: 'local' });
+  clearVisitedFavoriteCache();
 
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO,
-      },
-    });
+  const { data: authData, error: signUpError } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO,
+    },
+  });
 
-    if (signUpError) {
-      const msg = signUpError.message || '';
-      if (msg.includes('seconds') || msg.includes('rate limit')) {
-        throw new Error('Too many registration attempts. Please wait a minute and try again.');
-      }
-      if (
-        msg.toLowerCase().includes('already') ||
-        msg.toLowerCase().includes('exist') ||
-        msg.toLowerCase().includes('duplicate')
-      ) {
-        throw new Error('This email is already registered. Please use the login tab instead.');
-      }
-      throw signUpError;
-    }
-
-    const userData = authData.user;
-    const sessionData = authData.session;
-    if (!userData?.id) throw new Error('Registration failed — please try again.');
-
-    const emptyIdentities = !userData.identities || userData.identities.length === 0;
-    const createdSecondsAgo = (Date.now() - new Date(userData.created_at).getTime()) / 1000;
-    if (emptyIdentities || (!sessionData && createdSecondsAgo > 5)) {
-      throw new Error('This email is already registered. Please use the login tab instead.');
-    }
-
-    if (!sessionData) {
-      return { user: null, session: null, needsEmailVerification: true };
-    }
-
-    await ensureUserStub(userData.id, email);
-    await clearUsernameForInAppChoice(userData.id);
-    await setAuthUsernamePending();
-
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select(PUBLIC_USER_PROFILE_COLUMNS)
-      .eq('id', userData.id)
-      .single();
-
-    if (profileError) throw profileError;
-
-    return { user: profile, session: sessionData, needsEmailVerification: false };
-  } catch (error) {
-    const msg = error.message || 'Registration failed';
-    if (msg.includes('already registered') || msg.includes('User already registered')) {
-      throw new Error('This email is already registered. Please use the login tab instead.');
-    }
-    if (msg.includes('rate limit') || msg.includes('seconds') || msg.includes('wait')) {
+  if (signUpError) {
+    const msg = (signUpError.message || '').toLowerCase();
+    if (isNetworkError(signUpError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    if (msg.includes('seconds') || msg.includes('rate limit')) {
       throw new Error('Too many attempts. Please wait a minute and try again.');
     }
-    if (msg.includes('invalid')) {
-      throw new Error('Please check your email and password format.');
+    if (msg.includes('already') || msg.includes('exist') || msg.includes('duplicate')) {
+      throw new Error('This email is already registered. Please use the login tab instead.');
     }
-    throw error;
+    if (msg.includes('password')) {
+      throw new Error(signUpError.message);
+    }
+    throw new Error('Registration failed. Please check your email and password and try again.');
   }
+
+  const userData = authData.user;
+  if (!userData?.id) throw new Error('Registration failed. Please try again.');
+
+  // With email confirmation on, Supabase answers a sign-up for an existing confirmed
+  // email with an obfuscated user that has no identities (no error, no email sent).
+  if (!userData.identities || userData.identities.length === 0) {
+    throw new Error('This email is already registered. Please use the login tab instead.');
+  }
+
+  if (!authData.session) {
+    // New (or still unconfirmed) account — Supabase has sent the confirmation link.
+    return { needsEmailVerification: true };
+  }
+
+  await ensureUserStub(userData.id, email);
+  await clearUsernameForInAppChoice(userData.id);
+  await setAuthUsernamePending();
+  return { needsEmailVerification: false };
 };
 
 const isValidEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((text || '').trim());
 
+/** Email + password sign-in. The caller loads the profile (refreshUser). */
 export const loginUserSecure = async (email, password) => {
-  try {
-    if (!isValidEmail(email)) {
-      throw new Error('Please enter a valid email address.');
+  if (!isValidEmail(email)) {
+    throw new Error('Please enter a valid email address.');
+  }
+
+  await supabase.auth.signOut({ scope: 'local' });
+  clearVisitedFavoriteCache();
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+
+  if (signInError) {
+    if (isNetworkError(signInError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (signInError.message || '').toLowerCase();
+    if (m.includes('not confirmed')) {
+      throw new Error('Email not confirmed. Please verify your email before logging in.');
     }
-
-    await supabase.auth.signOut({ scope: 'local' });
-    clearVisitedFavoriteCache();
-
-    const trimmedEmail = email.trim();
-
-    const { data: authData, error: signInError } =
-      await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
-
-    if (signInError) {
-      const m = (signInError.message || '').toLowerCase();
-      if (m.includes('email not confirmed') || m.includes('not confirmed')) {
-        throw new Error('Email not confirmed. Please verify your email before logging in.');
-      }
-      throw new Error('Invalid email or password.');
-    }
-
-    let { data: users } = await supabase
-      .from('users')
-      .select(PUBLIC_USER_PROFILE_COLUMNS)
-      .eq('id', authData.user.id)
-      .limit(1);
-
-    let user;
-    if (!users || users.length === 0) {
-      await ensureUserStub(authData.user.id, authData.user.email);
-      const { data: refetch } = await supabase
-        .from('users')
-        .select(PUBLIC_USER_PROFILE_COLUMNS)
-        .eq('id', authData.user.id)
-        .single();
-      if (!refetch) {
-        throw new Error('Unable to set up your account. Please contact support.');
-      }
-      user = refetch;
-    } else {
-      user = users[0];
-    }
-
-    return { user, session: authData.session };
-  } catch (error) {
-    const msg = error.message || '';
-    if (
-      msg.includes('Invalid email or password') ||
-      msg.includes('valid email') ||
-      msg.includes('Email not confirmed') ||
-      msg.includes('Unable to set up')
-    ) {
-      throw error;
+    if (m.includes('rate limit') || m.includes('too many')) {
+      throw new Error('Too many attempts. Please wait a minute and try again.');
     }
     throw new Error('Invalid email or password.');
+  }
+};
+
+/**
+ * Send a password-reset email containing a one-time code ({{ .Token }} in the
+ * Supabase "Reset Password" email template). Succeeds even for unknown emails.
+ */
+export const requestPasswordReset = async (email) => {
+  const trimmed = (email || '').trim();
+  if (!isValidEmail(trimmed)) {
+    throw new Error('Please enter a valid email address.');
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(trimmed);
+  if (error) {
+    if (isNetworkError(error)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (error.message || '').toLowerCase();
+    if (m.includes('rate limit') || m.includes('seconds')) {
+      throw new Error('Please wait a minute before requesting another code.');
+    }
+    throw new Error("Couldn't send the reset email. Please try again.");
+  }
+};
+
+/** Verify the emailed code, then set the new password. Leaves the user signed in. */
+export const resetPasswordWithCode = async (email, code, newPassword) => {
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    email: (email || '').trim(),
+    token: (code || '').trim(),
+    type: 'recovery',
+  });
+  if (verifyError) {
+    if (isNetworkError(verifyError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    throw new Error('That code is invalid or has expired. Request a new one.');
+  }
+
+  clearVisitedFavoriteCache();
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) {
+    if (isNetworkError(updateError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (updateError.message || '').toLowerCase();
+    if (m.includes('different from the old')) {
+      throw new Error('Choose a password different from your old one.');
+    }
+    if (m.includes('password')) throw new Error(updateError.message);
+    throw new Error("Couldn't update your password. Please try again.");
   }
 };
 
@@ -340,8 +330,34 @@ export const deleteAccountSecure = async () => {
 };
 
 /**
+ * Exchange an Apple/Google ID token for a Supabase session. Brand-new accounts get
+ * their trigger-assigned username cleared so ChooseUsernameScreen runs.
+ * The caller loads the profile (refreshUser).
+ */
+const completeIdTokenSignIn = async (provider, token) => {
+  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
+    provider,
+    token,
+  });
+  if (signInError) {
+    if (isNetworkError(signInError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    throw signInError;
+  }
+
+  const authUser = authData.user;
+  await ensureUserStub(authUser.id, authUser.email);
+
+  // Server timestamps on both sides — independent of the device clock.
+  const createdMs = new Date(authUser.last_sign_in_at).getTime() - new Date(authUser.created_at).getTime();
+  const isBrandNewAuthUser = Number.isFinite(createdMs) && createdMs >= 0 && createdMs < 120_000;
+  if (isBrandNewAuthUser) {
+    await clearUsernameForInAppChoice(authUser.id);
+    await setAuthUsernamePending();
+  }
+};
+
+/**
  * Native Sign in with Apple (iOS only). Requires Supabase Apple provider + bundle ID in dashboard.
- * @returns {Promise<{ user: object, session: object }>}
  */
 export const appleSignInSecure = async () => {
   if (Platform.OS !== 'ios') {
@@ -378,42 +394,7 @@ export const appleSignInSecure = async () => {
     throw new Error('Apple Sign-In failed — no identity token returned.');
   }
 
-  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
-    provider: 'apple',
-    token: credential.identityToken,
-  });
-
-  if (signInError) throw signInError;
-
-  const authUser = authData.user;
-
-  let { data: users } = await supabase
-    .from('users')
-    .select(PUBLIC_USER_PROFILE_COLUMNS)
-    .eq('id', authUser.id)
-    .limit(1);
-
-  if (!users || users.length === 0) {
-    await ensureUserStub(authUser.id, authUser.email);
-  }
-
-  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
-  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
-  if (isBrandNewAuthUser) {
-    await clearUsernameForInAppChoice(authUser.id);
-    await setAuthUsernamePending();
-  }
-
-  const { data: user, error: fetchError } = await supabase
-    .from('users')
-    .select(PUBLIC_USER_PROFILE_COLUMNS)
-    .eq('id', authUser.id)
-    .single();
-  if (fetchError || !user) {
-    throw new Error('Unable to set up your account. Please contact support.');
-  }
-
-  return { user, session: authData.session };
+  await completeIdTokenSignIn('apple', credential.identityToken);
 };
 
 export const googleSignInSecure = async () => {
@@ -455,77 +436,5 @@ export const googleSignInSecure = async () => {
     throw new Error('Google Sign-In failed — no ID token returned.');
   }
 
-  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
-    provider: 'google',
-    token: response.data.idToken,
-  });
-
-  if (signInError) throw signInError;
-
-  const authUser = authData.user;
-
-  let { data: users } = await supabase
-    .from('users')
-    .select(PUBLIC_USER_PROFILE_COLUMNS)
-    .eq('id', authUser.id)
-    .limit(1);
-
-  if (!users || users.length === 0) {
-    await ensureUserStub(authUser.id, authUser.email);
-  }
-
-  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
-  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
-  if (isBrandNewAuthUser) {
-    await clearUsernameForInAppChoice(authUser.id);
-    await setAuthUsernamePending();
-  }
-
-  const { data: user, error: fetchError } = await supabase
-    .from('users')
-    .select(PUBLIC_USER_PROFILE_COLUMNS)
-    .eq('id', authUser.id)
-    .single();
-  if (fetchError || !user) {
-    throw new Error('Unable to set up your account. Please contact support.');
-  }
-
-  return { user, session: authData.session };
-};
-
-export const getCurrentUserSecure = async () => {
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return null;
-
-    const { data: users } = await supabase
-      .from('users')
-      .select(PUBLIC_USER_PROFILE_COLUMNS)
-      .eq('id', session.user.id)
-      .limit(1);
-
-    return users && users.length > 0 ? users[0] : null;
-  } catch {
-    return null;
-  }
-};
-
-const syncUserStatsLite = async (userId) => {
-  const { data: existing } = await supabase
-    .from('user_stats')
-    .select('user_id')
-    .eq('user_id', userId)
-    .limit(1);
-
-  if (!existing || existing.length === 0) {
-    await supabase.from('user_stats').insert({
-      user_id: userId,
-      pubs_visited: 0,
-      total_score: 0,
-      level: 1,
-      last_synced_at: new Date().toISOString(),
-    });
-  }
+  await completeIdTokenSignIn('google', response.data.idToken);
 };

@@ -54,7 +54,8 @@ services/         PubService       — fetch pubs, toggle visited/favourite
                   FriendsService   — send/accept requests, leaderboard
                   LeagueService    — create/join/leave leagues
                   UserService      — username search
-                  SecureAuthService — email/password login & register, Google, `ensureUserStub`, `updatePublicUsername` + deferred auth metadata sync, logout
+                  SecureAuthService — email/password login & register, Apple/Google, password reset (emailed code), `ensureUserStub`, `updatePublicUsername` + deferred auth metadata sync, logout
+                  authErrors       — isNetworkError / isInvalidSessionError classification
                   ReportService    — report pubs / missing pubs
                   LeaderboardCache — in-memory leaderboard cache
 
@@ -135,7 +136,8 @@ The stats RPCs reject calls for another user's id. Everything else (`compute_use
 - **Optimistic UI** — visited and favourite toggles update local state immediately and roll back on server error
 - **Viewport-based pub loading** — `useViewportPubs` fetches only the pubs visible on screen (debounced 400 ms, bounds-cached to prevent duplicate fetches)
 - **Stats are server-computed** — never aggregate visit counts client-side; use the RPCs
-- **Visited/favourite cache** — module-level Sets in `PubService`. Call `clearVisitedFavoriteCache()` on logout (done in `AuthContext`)
+- **Visited/favourite cache** — module-level Sets in `PubService`. Call `clearVisitedFavoriteCache()` on logout (done in `SecureAuthService`)
+- **Auth sessions** — only a definite rejection from the auth server (`isInvalidSessionError`) may sign a user out. Offline / timeouts / 5xx keep the session; `AuthContext` falls back to the last cached profile (`auth:lastProfile:v1`) or shows `ConnectionErrorScreen`. Sign-in functions only create the session — the caller loads the profile via `refreshUser()`.
 - **`useFocusEffect` staleness check** — ProfileScreen refreshes stats if `lastUpdated` is older than 30 s; opening the trophy modal also refreshes when stale
 
 ## Colour theme
