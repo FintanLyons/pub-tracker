@@ -7,6 +7,7 @@ import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ErrorBoundary from './components/ErrorBoundary';
 import OfflineOverlay from './components/OfflineOverlay';
+import ConnectionErrorScreen from './components/ConnectionErrorScreen';
 import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
 import ChooseUsernameScreen from './screens/ChooseUsernameScreen';
@@ -59,7 +60,7 @@ function needsUsername(user) {
 }
 
 function AppContent() {
-  const { user, loading, refreshUser } = useAuth();
+  const { user, loading, connectionError, retryConnection, refreshUser } = useAuth();
   /** null = still reading storage; true/false = done for current user */
   const [userOnboardingDone, setUserOnboardingDone] = useState(null);
 
@@ -115,9 +116,13 @@ function AppContent() {
 
   const completeOnboarding = useCallback(async () => {
     if (!user?.id) return;
-    const key = onboardingKeyForUser(user.id);
-    await AsyncStorage.setItem(key, 'true');
     setUserOnboardingDone(true);
+    try {
+      await AsyncStorage.setItem(onboardingKeyForUser(user.id), 'true');
+    } catch (err) {
+      // Worst case onboarding shows again next launch — never block the user here.
+      console.warn('App: onboarding flag write failed', err?.message ?? err);
+    }
   }, [user?.id]);
 
   if (loading) {
@@ -126,6 +131,10 @@ function AppContent() {
         <ActivityIndicator size="large" color={COLORS.amber} />
       </View>
     );
+  }
+
+  if (!user && connectionError) {
+    return <ConnectionErrorScreen onRetry={retryConnection} />;
   }
 
   if (!user) {

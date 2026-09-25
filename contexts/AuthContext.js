@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useRef,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../config/supabase';
 import {
   logoutUserSecure,
@@ -14,12 +15,19 @@ import {
   PUBLIC_USER_PROFILE_COLUMNS,
 } from '../services/SecureAuthService';
 import { removeAllPushTokensForUser } from '../services/PushNotificationService';
+import { isInvalidSessionError } from '../services/authErrors';
+import { useNetworkStatus } from './NetworkContext';
 import { promiseWithTimeout } from '../utils/promiseWithTimeout';
 
 /** Reading persisted Supabase session from AsyncStorage — hang here often needs local sign-out. */
 const AUTH_SESSION_READ_TIMEOUT_MS = 10000;
+/** Validating the session with the auth server; slower than this is treated as offline. */
+const AUTH_USER_CHECK_TIMEOUT_MS = 8000;
 /** Loading public.users after session is valid — allow longer for slow networks. */
 const AUTH_PROFILE_TIMEOUT_MS = 15000;
+
+/** Last successfully loaded profile, so a signed-in user can open the app offline. */
+const PROFILE_CACHE_KEY = 'auth:lastProfile:v1';
 
 const AuthContext = createContext();
 
@@ -31,53 +39,80 @@ export const useAuth = () => {
   return context;
 };
 
+const readCachedProfile = async (uid) => {
+  try {
+    const raw = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+    const cached = raw ? JSON.parse(raw) : null;
+    return cached?.id === uid ? cached : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedProfile = (profile) => {
+  if (!profile?.id) return;
+  AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile)).catch(() => {});
+};
+
+const clearCachedProfile = () => {
+  AsyncStorage.removeItem(PROFILE_CACHE_KEY).catch(() => {});
+};
+
 /**
  * Load the public.users profile for a given auth user id.
- * Returns null if no profile row exists yet.
+ * Returns null only when no row exists; throws on query/network failure.
  */
 const loadProfile = async (uid) => {
-  if (!uid) return null;
-  const { data: users } = await supabase
+  const { data, error } = await supabase
     .from('users')
     .select(PUBLIC_USER_PROFILE_COLUMNS)
     .eq('id', uid)
     .limit(1);
-  return users && users.length > 0 ? users[0] : null;
+  if (error) throw error;
+  return data?.[0] ?? null;
 };
 
 /**
  * Merge auth user_metadata into the public.users row for gating (ChooseUsername).
  * appUsernameChosen: false = must complete in-app username; true/undefined handled in App.
  */
-const mergeAuthIntoProfile = (authUser, profile) => {
-  if (!profile) return null;
-  const meta = authUser?.user_metadata || {};
-  return {
-    ...profile,
-    appUsernameChosen: meta.app_username_chosen,
-  };
-};
+const mergeAuthIntoProfile = (authUser, profile) => ({
+  ...profile,
+  appUsernameChosen: authUser?.user_metadata?.app_username_chosen,
+});
 
-const resolveProfileForSession = async (session, authUserHint) => {
-  if (!session?.user?.id) return null;
+/** Profile for a live session; creates the public.users row if missing. Throws on failure. */
+const resolveProfileForSession = async (session, authUser) => {
   const { id, email } = session.user;
-
-  let authUser = authUserHint;
-  if (!authUser) {
-    const { data } = await supabase.auth.getUser();
-    authUser = data?.user;
-  }
 
   let profile = await loadProfile(id);
   if (!profile) {
     await ensureUserStub(id, email);
     profile = await loadProfile(id);
   }
-  if (!profile) return null;
-  return mergeAuthIntoProfile(authUser || session.user, profile);
+  if (!profile) {
+    throw new Error("We couldn't set up your profile. Please try again.");
+  }
+
+  const merged = mergeAuthIntoProfile(authUser || session.user, profile);
+  writeCachedProfile(merged);
+  return merged;
 };
 
-/** Restore session + public profile; throws on hard failures (caller handles timeout). */
+/** Signed in locally, but the profile could not be loaded and nothing is cached. */
+class OfflineBootstrapError extends Error {
+  constructor(cause) {
+    super(`Signed in, but the profile could not be loaded: ${cause?.message ?? cause}`);
+    this.name = 'OfflineBootstrapError';
+    this.cause = cause;
+  }
+}
+
+/**
+ * Restore session + public profile. Resolves to { profile, fromCache }.
+ * - No session / server rejected it → profile null (show sign-in).
+ * - Any other failure with a local session → cached profile, else OfflineBootstrapError.
+ */
 async function bootstrapAuthSession() {
   const { data: { session }, error: sessionError } = await promiseWithTimeout(
     supabase.auth.getSession(),
@@ -85,93 +120,152 @@ async function bootstrapAuthSession() {
     'getSession',
   );
   if (sessionError) {
-    const msg = String(sessionError.message || '');
-    if (/refresh token|invalid.*token|jwt|session expired/i.test(msg)) {
+    if (isInvalidSessionError(sessionError)) {
       await supabase.auth.signOut({ scope: 'local' });
+      return { profile: null, fromCache: false };
     }
-    return null;
+    throw sessionError;
+  }
+  if (!session?.user) return { profile: null, fromCache: false };
+
+  // Only a definite rejection from the auth server signs the user out; offline,
+  // timeouts and 5xx responses keep the local session.
+  let authUser = session.user;
+  try {
+    const { data, error } = await promiseWithTimeout(
+      supabase.auth.getUser(),
+      AUTH_USER_CHECK_TIMEOUT_MS,
+      'getUser',
+    );
+    if (error) {
+      if (isInvalidSessionError(error)) {
+        await supabase.auth.signOut({ scope: 'local' });
+        clearCachedProfile();
+        return { profile: null, fromCache: false };
+      }
+      console.warn('AuthContext: session check unavailable', error.message);
+    } else if (data?.user) {
+      authUser = data.user;
+    }
+  } catch (err) {
+    console.warn('AuthContext: session check unavailable', err?.message ?? err);
   }
 
-  if (!session?.user) return null;
-
-  const { data, error } = await supabase.auth.getUser();
-  if (error) {
-    await supabase.auth.signOut({ scope: 'local' });
-    return null;
+  try {
+    const profile = await promiseWithTimeout(
+      resolveProfileForSession(session, authUser),
+      AUTH_PROFILE_TIMEOUT_MS,
+      'profile load',
+    );
+    return { profile, fromCache: false };
+  } catch (err) {
+    const cached = await readCachedProfile(session.user.id);
+    if (cached) return { profile: cached, fromCache: true };
+    throw new OfflineBootstrapError(err);
   }
-
-  return promiseWithTimeout(
-    resolveProfileForSession(session, data?.user),
-    AUTH_PROFILE_TIMEOUT_MS,
-    'profile load',
-  );
 }
 
 export const AuthProvider = ({ children }) => {
+  const { isConnected } = useNetworkStatus();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  /** Signed in locally but could not load the profile (offline, no cache). */
+  const [connectionError, setConnectionError] = useState(false);
   /** Ignore auth-driven profile refresh briefly after local profile apply (avoids stale overwrite). */
   const skipAuthProfileRefreshUntilRef = useRef(0);
+  const mountedRef = useRef(true);
+  /** Profile came from the offline cache; reload it once the connection returns. */
+  const profileFromCacheRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const finishBootstrap = async (profile) => {
-      if (cancelled) return;
+  const runBootstrap = useCallback(async () => {
+    try {
+      const { profile, fromCache } = await bootstrapAuthSession();
+      if (!mountedRef.current) return;
+      profileFromCacheRef.current = fromCache;
       setUser(profile);
-      setLoading(false);
-    };
-
-    const failBootstrap = async (err) => {
-      if (cancelled) return;
+      setConnectionError(false);
+    } catch (err) {
+      if (!mountedRef.current) return;
       const msg = String(err?.message ?? err);
       console.warn('AuthContext: bootstrap failed', msg);
-      if (/getSession timed out/i.test(msg)) {
-        try {
-          await supabase.auth.signOut({ scope: 'local' });
-        } catch {
-          // best-effort — clear corrupt persisted session (same effect as "clear cache")
+      if (err instanceof OfflineBootstrapError) {
+        setConnectionError(true);
+      } else {
+        if (/getSession timed out/i.test(msg)) {
+          // Corrupt persisted session (same effect as "clear cache").
+          await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
         }
+        setUser(null);
+        setConnectionError(false);
       }
-      setUser(null);
-      setLoading(false);
-    };
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
 
-    bootstrapAuthSession()
-      .then((profile) => finishBootstrap(profile))
-      .catch((err) => failBootstrap(err));
+  useEffect(() => {
+    mountedRef.current = true;
+    runBootstrap();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) {
+      if (event === 'SIGNED_OUT') {
+        clearCachedProfile();
         setUser(null);
         return;
       }
+      // Sign-in flows call refreshUser themselves, bootstrap handles INITIAL_SESSION,
+      // and TOKEN_REFRESHED does not change the profile. Only metadata updates matter.
+      if (event !== 'USER_UPDATED' || !session) return;
+
       // Defer: calling getUser()/resolve inside this callback can deadlock the auth
       // client (e.g. right after updateUser from ChooseUsername).
       setTimeout(() => {
-        if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
-          return;
-        }
-        void resolveProfileForSession(session, null)
+        if (Date.now() < skipAuthProfileRefreshUntilRef.current) return;
+        resolveProfileForSession(session, session.user)
           .then((profile) => {
-            if (Date.now() < skipAuthProfileRefreshUntilRef.current) {
-              return;
-            }
+            if (Date.now() < skipAuthProfileRefreshUntilRef.current) return;
             setUser(profile);
           })
           .catch((err) => {
+            // Keep the current user; a failed refresh must never sign them out.
             console.warn('AuthContext: auth state profile refresh failed', err?.message ?? err);
           });
       }, 0);
     });
 
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [runBootstrap]);
+
+  // Signed in but offline at launch: finish loading as soon as the connection returns.
+  useEffect(() => {
+    if (connectionError && isConnected) {
+      runBootstrap();
+    }
+  }, [connectionError, isConnected, runBootstrap]);
+
+  useEffect(() => {
+    if (!isConnected || !profileFromCacheRef.current) return;
+    profileFromCacheRef.current = false;
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => (session ? resolveProfileForSession(session, session.user) : null))
+      .then((profile) => {
+        if (profile && mountedRef.current) setUser(profile);
+      })
+      .catch((err) => {
+        profileFromCacheRef.current = true;
+        console.warn('AuthContext: profile refresh after reconnect failed', err?.message ?? err);
+      });
+  }, [isConnected]);
+
+  const retryConnection = useCallback(() => {
+    setLoading(true);
+    return runBootstrap();
+  }, [runBootstrap]);
 
   const logout = useCallback(async () => {
     const {
@@ -182,14 +276,17 @@ export const AuthProvider = ({ children }) => {
       await removeAllPushTokensForUser(uid);
     }
     await logoutUserSecure();
+    clearCachedProfile();
     setUser(null);
   }, []);
 
   const deleteAccount = useCallback(async () => {
     await deleteAccountSecure();
+    clearCachedProfile();
     setUser(null);
   }, []);
 
+  /** After sign-in: load the profile for the new session. Throws so the caller can show why. */
   const refreshUser = useCallback(async () => {
     const {
       data: { session },
@@ -199,6 +296,7 @@ export const AuthProvider = ({ children }) => {
       return;
     }
     const profile = await resolveProfileForSession(session, null);
+    setConnectionError(false);
     setUser(profile);
   }, []);
 
@@ -206,10 +304,11 @@ export const AuthProvider = ({ children }) => {
   const applyUserProfileRow = useCallback((row) => {
     if (!row?.id) return;
     skipAuthProfileRefreshUntilRef.current = Date.now() + 2500;
-    setUser((prev) => ({
-      ...row,
-      appUsernameChosen: prev?.appUsernameChosen,
-    }));
+    setUser((prev) => {
+      const next = { ...row, appUsernameChosen: prev?.appUsernameChosen };
+      writeCachedProfile(next);
+      return next;
+    });
   }, []);
 
   return (
@@ -217,6 +316,8 @@ export const AuthProvider = ({ children }) => {
       value={{
         user,
         loading,
+        connectionError,
+        retryConnection,
         logout,
         deleteAccount,
         refreshUser,
