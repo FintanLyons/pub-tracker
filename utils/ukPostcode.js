@@ -1,6 +1,6 @@
 /**
  * UK postcode normalisation and parsing (outward → district + letter area).
- * Mirrors `public.uk_postcode_from_address` in scripts/backfill_pub_spatial_postcodes.sql.
+ * Client counterpart of `public.uk_postcode_from_address` (scripts/schema_baseline_2026_09.sql).
  */
 
 /** @returns {string} Normalised postcode e.g. "SW1A 1AA", or "" if invalid. */

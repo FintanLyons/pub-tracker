@@ -1,5 +1,0 @@
--- DEPRECATED: Leaderboard drink totals now come from public.user_stats.total_drinks
--- (maintained by compute_user_stats + trg_pub_drinks_sync_total_drinks).
---
--- Apply: scripts/user_stats_total_drinks_migration.sql
--- That script drops get_user_drink_totals if it exists. No action needed here.

@@ -32,15 +32,17 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 
 ## Scoring system
 
-- Each visited pub → `pub.points` (default 10 if not set; higher for special pubs)
+- Each visited pub → **10** (flat; the legacy `pubs.points` column is not used)
+- Visiting a pub with `pub_achievements` rows → + those rows' `points`
 - Each drink logged (`pub_drinks.count`) → +1
-- Complete every pub in a **postcode district** → +50 bonus
-- Complete every pub in a **postcode area** (e.g. SW) → +1000 bonus
+- Approved report → +20 (`missing_pub`) or +5 (`pub_correction`)
+- Complete every active pub in a **postcode district** → tiered bonus by district size: <10 pubs 40, <20 60, <30 80, else 100
+- Complete every active pub in a **postcode area** (e.g. SW, CB) → +1000
 - Level = `floor(total_score / 50) + 1`
 
 Scoring logic lives in two places — keep them in sync if rules change:
-- Client: `utils/levelSystem.js` — level math plus **exported constants** (`DEFAULT_PUB_VISIT_POINTS`, `POINTS_PER_DRINK`, `DISTRICT_COMPLETION_BONUS_POINTS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_PER_LEVEL`) used by Profile settings scoring copy
-- Server: `scripts/phase6_postcode_migration.sql` (and `scripts/get_achievements_read_user_stats.sql` forward migration; legacy `scripts/phase3_server_functions.sql`) → `compute_user_stats()` and `get_achievements()`
+- Client: `utils/levelSystem.js` — level math plus exported constants (`POINTS_PER_LEVEL`, `DEFAULT_PUB_VISIT_POINTS`, `POINTS_PER_DRINK`, `getPostcodeDistrictCompletionBonusPoints` / `AREA_COMPLETION_SIZE_TIERS`, `POSTCODE_AREA_COMPLETION_BONUS_POINTS`, `POINTS_NEW_PUB_REPORT`, `POINTS_PUB_CORRECTION_REPORT`) used by Profile settings scoring copy
+- Server: `compute_user_stats()` + `postcode_district_completion_bonus()` (see `scripts/schema_baseline_2026_09.sql` §3b). `user_stats` is written **only** by this function via triggers on `visited_pubs`, `pub_drinks` and `reports`.
 
 ## Architecture
 
@@ -80,34 +82,51 @@ components/       DraggablePubCard, PubCardContent, SearchBar,
                   UserAchievementsPanel (trophy grid in Profile modal),
                   PintGlassIcon, RangeSlider
 
-scripts/          SQL migrations and Python data-pipeline scripts.
-                  Not deployed code — run manually against Supabase.
+scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, functions,
+                  RLS, triggers, grants); dated migration files; Python data-pipeline
+                  scripts. Not deployed code — SQL is run manually in the Supabase SQL editor.
 ```
 
-## Database tables
+## Database
+
+**Source of truth:** the live Supabase project (`ddfdwxrnouneqqzactus`). Claude has **read-only** access via the Supabase MCP (`.mcp.json`) — query the catalogs rather than trusting files. `scripts/schema_baseline_2026_09.sql` is a snapshot of the whole `public` schema as of 2026-09-25; older migrations were deleted (they remain in git history).
+
+**Making DB changes:** write a new dated file in `scripts/` (e.g. `scripts/<topic>_YYYY_MM.sql`) wrapped in `BEGIN/COMMIT`, plus a rollback file for anything risky. The user runs it in the SQL editor; Claude then verifies via MCP.
+
+**Security conventions (important):**
+- Supabase auto-grants new tables to `anon`/`authenticated` — **every table must have RLS enabled** with explicit policies.
+- `REVOKE ... FROM PUBLIC` alone does nothing on Supabase. For every new function: `REVOKE ALL ON FUNCTION ... FROM PUBLIC, anon, authenticated;` then `GRANT EXECUTE ... TO authenticated` **only** if the app calls it via `supabase.rpc()`.
+- The app requires login for every screen; `anon` needs no function access.
+
+### Tables
 
 | Table | Purpose |
 |---|---|
-| `pubs_all` | All London pubs — lat/lon, address, legacy area/borough columns, ownership, features, points, achievement |
-| `pub_spatial_assignments` | Per-pub spatial grouping — `postcode_district`, `postcode_area` (primary for map/stats after migration) |
-| `visited_pubs` | User visit records — trigger auto-updates `user_stats` on INSERT/DELETE |
-| `favorite_pubs` | User favourites |
-| `user_stats` | Denormalised score, level, pubs_visited per user — maintained by DB trigger |
-| `users` | User profiles — email; `username` unique when set, **nullable** until user picks one (`scripts/username_nullable_migration.sql`) |
-| `friendships` | Bidirectional friendship rows with status `pending` / `accepted` |
-| `leagues` | Private leagues with a unique 6-character invite code |
-| `league_members` | Membership join table |
+| `Pubs_List` | **The pub catalogue** (London + Cambridge) — text `id`, lat/lon, `postcode_district`, `postcode_area`, address, features, photos (`photo_url1..5`), `is_active`. Public read, no client writes |
+| `pub_achievements` | Optional per-pub milestones (CAMRA awards etc.) with bonus `points` |
+| `visited_pubs` | User visits — trigger recomputes `user_stats` on INSERT/DELETE |
+| `favorite_pubs` | User favourites (visible to accepted friends) |
+| `pub_drinks` | Per-user per-pub drink count — trigger recomputes `user_stats` |
+| `pub_reviews` | 1–5 star review + text, one per user per pub |
+| `user_stats` | Denormalised score / level / pubs_visited / total_drinks — **read-only for clients**, written by `compute_user_stats` |
+| `users` | Profiles — `email` (not readable by clients), `username` (unique, nullable until chosen), `avatar_url` |
+| `friendships` | One row per friendship, status `pending` / `accepted` |
+| `leagues` / `league_members` | Private leagues with a unique 6-character invite `code` |
+| `reports` | User pub corrections / missing-pub submissions. Users insert own `pending` rows; approving (set `status='approved'` in dashboard) auto-applies to `Pubs_List` via trigger |
+| `user_push_tokens` | Expo push tokens |
+| `notification_outbox` / `notification_monthly_digest_log` | Push queue + digest log — server-only (no RLS policies) |
+| `pubs`, `pubs_all`, `pub_spatial_assignments` | **Legacy, unused by the app** — pending removal |
 
-### Server RPCs
-
-After the postcode migration, definitions live in `scripts/phase6_postcode_migration.sql` (run against Supabase). Legacy copies remain in `scripts/phase3_server_functions.sql`.
+### Server RPCs (callable by the app)
 
 - `get_area_stats(user_id)` — per-**postcode district** visited/total/percentage/center + parent `postcode_area`
 - `get_borough_stats(user_id)` — per-**postcode area** stats + district completion counts (`total_districts`, `completed_districts`)
-- `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`, `pubAchievements`); `totalScore` / `level` / `pubsVisited` match `user_stats`
-- `search_pubs(query, limit)` — name search; includes `postcode_district`, `postcode_area`
-- `compute_user_stats(user_id)` — recompute and upsert a user's `user_stats` row
-- Login is **email + password** only (`get_email_by_username` removed — see `scripts/security_high_severity_fixes.sql`)
+- `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`, `pubAchievements`); `totalScore` / `level` / `pubsVisited` read from `user_stats`
+- `search_pubs(query, limit)` — name search over active pubs; includes `postcode_district`, `postcode_area`
+- `delete_my_account()` — removes all of the caller's data and auth user
+- `enqueue_pub_summon_notifications(pub_id, friend_ids, area_label)` — "summon the troops" push to accepted friends
+
+The stats RPCs reject calls for another user's id. Everything else (`compute_user_stats`, report apply/approve, geocoding/HTTP helpers) is server-only. Login is **email + password** (plus Google).
 
 ## Key conventions
 
@@ -125,4 +144,4 @@ All colours are defined in `constants/theme.js` and imported as `COLORS`. Do not
 
 ## Known issues to be aware of
 
-- `get_achievements` still aggregates trophy JSON from `pubs_all` / visits on each call; only `totalScore` / `level` / `pubsVisited` are read from `user_stats` (`scripts/get_achievements_read_user_stats.sql`). Further gains would require sharing work with `get_area_stats` / `get_borough_stats` or materializing trophy rows.
+- `get_achievements` still aggregates trophy JSON from `Pubs_List` / visits on each call; only `totalScore` / `level` / `pubsVisited` are read from `user_stats`. Further gains would require sharing work with `get_area_stats` / `get_borough_stats` or materializing trophy rows.

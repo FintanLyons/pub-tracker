@@ -1,12 +1,11 @@
 /**
  * Scoring & level rules (client).
  *
- * Server source of truth: `compute_user_stats` (`scripts/scoring_postcode_district_tiered_bonus.sql`
- * and earlier migrations)
- * (Pubs_List path: `scripts/pub_list_migration.sql` + `scripts/create_pub_achievements_table.sql`).
+ * Server source of truth: `compute_user_stats` + `postcode_district_completion_bonus`
+ * in scripts/schema_baseline_2026_09.sql (section 3b).
  * `get_achievements` returns the same totalScore/level as `user_stats`.
- * Per-milestone bonus: `pub_achievements.points` when the pub is visited (see create_pub_achievements_table.sql).
- * Contribution points from `reports`: `scripts/scoring_contribution_reports.sql`.
+ * Per-milestone bonus: `pub_achievements.points` when the pub is visited.
+ * Contribution points from approved `reports` (missing pub / correction).
  */
 
 /** Points required to advance one level (total score). */

@@ -319,7 +319,7 @@ export const logoutUserSecure = async () => {
 
 /**
  * Deletes the current user's app data and auth record via the
- * `delete_my_account` RPC (scripts/tier2_security_hardening.sql).
+ * `delete_my_account` RPC (scripts/schema_baseline_2026_09.sql).
  */
 export const deleteAccountSecure = async () => {
   const {
