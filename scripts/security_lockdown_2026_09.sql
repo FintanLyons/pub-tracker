@@ -19,9 +19,13 @@
 --      anon for any user.
 --   6. 10 functions without a fixed search_path.
 --
--- AFTER THIS: new functions are NOT callable by app users by default. Every
--- future function the app calls via supabase.rpc() needs an explicit
+-- AFTER THIS, for every new function in future migrations:
+--   REVOKE ALL ON FUNCTION public.<name>(<args>) FROM PUBLIC, anon, authenticated;
+--   -- and only if the app calls it via supabase.rpc():
 --   GRANT EXECUTE ON FUNCTION public.<name>(<args>) TO authenticated;
+--
+-- Fully reversible: scripts/security_lockdown_2026_09_rollback.sql restores
+-- the previous grants and policies exactly.
 -- =============================================================================
 
 BEGIN;
@@ -42,11 +46,11 @@ GRANT EXECUTE ON FUNCTION public.search_pubs(text, integer)                     
 GRANT EXECUTE ON FUNCTION public.delete_my_account()                               TO authenticated;
 GRANT EXECUTE ON FUNCTION public.enqueue_pub_summon_notifications(text, uuid[], text) TO authenticated;
 
--- Stop future functions from being auto-granted to client roles.
+-- Stop future public-schema functions being auto-granted to client roles.
+-- (A global `REVOKE ... FROM PUBLIC` default was deliberately left out: it
+-- would also apply to extensions enabled later, in every schema.)
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
   REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres
-  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- -----------------------------------------------------------------------------
 -- 2. Tables: TRUNCATE ignores RLS. PostgREST cannot issue it, but clients have
