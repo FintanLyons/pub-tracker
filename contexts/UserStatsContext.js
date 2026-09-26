@@ -1,8 +1,9 @@
-import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
 import { supabase } from '../config/supabase';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import { getDrinkStats } from '../services/ReviewService';
+import { createCoalescedRunner } from '../utils/coalescedRunner';
 
 const EMPTY_DRINK_STATS = { total: 0, byDistrict: {}, byPostcodeArea: {} };
 
@@ -18,12 +19,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState(null);
 	const [lastUpdated, setLastUpdated] = useState(null);
-	const loadingRef = useRef(false);
-
-	const loadUserStats = useCallback(async () => {
-		if (!userId || loadingRef.current) return;
-		loadingRef.current = true;
-		setLoading(true);
+	const fetchUserStatsOnce = useCallback(async () => {
 		setError(null);
 		try {
 			const [districtResult, areaResult, achievementsResult, drinkStatsResult] = await Promise.all([
@@ -65,7 +61,10 @@ export const UserStatsProvider = ({ userId, children }) => {
 			centerLon: row.center_lon ?? null,
 		})).filter((a) => a.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(a.postcodeArea));
 
-		const totalVisitedCount = mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
+		// Pubs visited comes from user_stats (via get_achievements) so Profile and
+		// Leaderboard always show the same number.
+		const totalVisitedCount = Number(achievementsResult.data?.pubsVisited)
+			|| mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
 		const totalPubsCount = mappedDistricts.reduce((sum, s) => sum + (s.total || 0), 0);
 
 		setDistrictStats(mappedDistricts);
@@ -78,11 +77,23 @@ export const UserStatsProvider = ({ userId, children }) => {
 		} catch (err) {
 			console.error('Error loading user stats:', err);
 			setError(err);
-		} finally {
-			loadingRef.current = false;
-			setLoading(false);
 		}
 	}, [userId]);
+
+	/**
+	 * Refresh all stats. Calls made while a refresh is running are merged into a single
+	 * follow-up refresh (never dropped); the returned promise settles after it.
+	 */
+	const runStatsRefresh = useMemo(
+		() => createCoalescedRunner(fetchUserStatsOnce),
+		[fetchUserStatsOnce],
+	);
+
+	const loadUserStats = useCallback(() => {
+		if (!userId) return Promise.resolve();
+		setLoading(true);
+		return runStatsRefresh().finally(() => setLoading(false));
+	}, [userId, runStatsRefresh]);
 
 	useEffect(() => {
 		loadUserStats();
