@@ -35,6 +35,27 @@ export const sendFriendRequest = async (userId, friendId) => {
 };
 
 /**
+ * How the user is connected to everyone they have a friendship row with.
+ * @returns {Promise<Map<string, { kind: 'friends' | 'sent' | 'received', friendshipId: string }>>}
+ */
+export const getFriendshipStatusMap = async (userId) => {
+  const { data, error } = await supabase
+    .from('friendships')
+    .select('id, user_id, friend_id, status')
+    .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+
+  if (error) throw error;
+  const map = new Map();
+  (data || []).forEach((row) => {
+    const iSent = row.user_id === userId;
+    const otherId = iSent ? row.friend_id : row.user_id;
+    const kind = row.status === 'accepted' ? 'friends' : iSent ? 'sent' : 'received';
+    map.set(otherId, { kind, friendshipId: row.id });
+  });
+  return map;
+};
+
+/**
  * Accept a friend request
  */
 export const acceptFriendRequest = async (friendshipId) => {
