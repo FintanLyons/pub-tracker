@@ -3,7 +3,8 @@
 -- =============================================================================
 -- Source of truth for the Supabase `public` schema as it exists in project
 -- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
--- (updated for scripts/signup_username_null_2026_09.sql).
+-- (updated for scripts/signup_username_null_2026_09.sql and
+-- scripts/social_security_phase_a_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -397,6 +398,7 @@ COMMENT ON TABLE public.pub_spatial_assignments IS 'Polygon-based ward and borou
 CREATE INDEX idx_pubs_list_is_active_true ON public."Pubs_List" USING btree (is_active) WHERE (is_active = true);
 CREATE INDEX idx_favorite_pubs_user_id ON public.favorite_pubs USING btree (user_id);
 CREATE INDEX idx_friendships_friend_id ON public.friendships USING btree (friend_id);
+CREATE UNIQUE INDEX friendships_pair_unique ON public.friendships USING btree (LEAST(user_id, friend_id), GREATEST(user_id, friend_id));
 CREATE INDEX idx_friendships_status ON public.friendships USING btree (status);
 CREATE INDEX idx_friendships_user_id ON public.friendships USING btree (user_id);
 CREATE INDEX idx_league_members_league_id ON public.league_members USING btree (league_id);
@@ -767,6 +769,8 @@ DECLARE
   v_pub_lon double precision;
   v_friend_id uuid;
   v_enqueued integer := 0;
+  v_recent_summons integer;
+  v_area_label text;
 BEGIN
   v_summoner_id := auth.uid();
   IF v_summoner_id IS NULL THEN
@@ -784,6 +788,24 @@ BEGIN
   IF cardinality(p_friend_ids) > 50 THEN
     RAISE EXCEPTION 'too many friends selected' USING ERRCODE = '22023';
   END IF;
+
+  -- One summon = one call; its rows share the transaction timestamp.
+  SELECT COUNT(DISTINCT o.created_at)
+    INTO v_recent_summons
+    FROM public.notification_outbox o
+   WHERE o.kind = 'pub_summon'
+     AND o.payload->>'summoner_id' = v_summoner_id::text
+     AND o.created_at > now() - interval '1 hour';
+
+  IF v_recent_summons >= 10 THEN
+    RAISE EXCEPTION 'You''ve summoned friends 10 times in the last hour. Try again later.'
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  v_area_label := NULLIF(
+    left(btrim(regexp_replace(coalesce(p_pub_area_label, ''), '[[:cntrl:]]+', ' ', 'g')), 60),
+    ''
+  );
 
   SELECT pl.name, pl.lat::double precision, pl.lon::double precision
     INTO v_pub_name, v_pub_lat, v_pub_lon
@@ -825,7 +847,7 @@ BEGIN
         'summoner_id', v_summoner_id,
         'pub_id', TRIM(p_pub_id),
         'pub_name', v_pub_name,
-        'pub_area', NULLIF(TRIM(p_pub_area_label), ''),
+        'pub_area', v_area_label,
         'lat', v_pub_lat,
         'lon', v_pub_lon
       )
@@ -839,6 +861,70 @@ BEGIN
   END IF;
 
   RETURN v_enqueued;
+END;
+$function$
+;
+
+-- Join a league by invite code (league codes are not readable by non-members after Phase B).
+CREATE OR REPLACE FUNCTION public.join_league_by_code(p_code text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_league public.leagues%ROWTYPE;
+  v_inserted integer;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO v_league
+    FROM public.leagues
+   WHERE code = upper(btrim(coalesce(p_code, '')));
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'League not found. Check the code and try again.' USING ERRCODE = 'P0002';
+  END IF;
+
+  INSERT INTO public.league_members (league_id, user_id)
+  VALUES (v_league.id, v_uid)
+  ON CONFLICT (league_id, user_id) DO NOTHING;
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
+
+  RETURN jsonb_build_object(
+    'league', to_jsonb(v_league),
+    'already_member', v_inserted = 0
+  );
+END;
+$function$
+;
+
+-- Move this device's Expo push token to the signed-in account.
+CREATE OR REPLACE FUNCTION public.claim_push_token(p_token text, p_platform text DEFAULT NULL)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_token text := btrim(coalesce(p_token, ''));
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501';
+  END IF;
+  IF v_token !~ '^Expo(nent)?PushToken\[[^\]]+\]$' THEN
+    RAISE EXCEPTION 'invalid push token' USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO public.user_push_tokens (user_id, expo_push_token, platform, updated_at)
+  VALUES (v_uid, v_token, left(p_platform, 20), now())
+  ON CONFLICT (expo_push_token) DO UPDATE SET
+    user_id = EXCLUDED.user_id,
+    platform = EXCLUDED.platform,
+    updated_at = EXCLUDED.updated_at;
 END;
 $function$
 ;
@@ -1887,15 +1973,16 @@ CREATE POLICY pub_reviews_update_own ON public.pub_reviews AS PERMISSIVE FOR UPD
 CREATE POLICY friendships_delete ON public.friendships AS PERMISSIVE FOR DELETE TO authenticated
   USING (((( SELECT auth.uid() AS uid) = user_id) OR (( SELECT auth.uid() AS uid) = friend_id)));
 
-CREATE POLICY friendships_insert ON public.friendships AS PERMISSIVE FOR INSERT TO authenticated
-  WITH CHECK ((( SELECT auth.uid() AS uid) = user_id));
+CREATE POLICY friendships_insert_own_pending ON public.friendships AS PERMISSIVE FOR INSERT TO authenticated
+  WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND (friend_id <> ( SELECT auth.uid() AS uid)) AND (status = 'pending'::text)));
 
 CREATE POLICY friendships_select_own ON public.friendships AS PERMISSIVE FOR SELECT TO authenticated
   USING (((user_id = ( SELECT auth.uid() AS uid)) OR (friend_id = ( SELECT auth.uid() AS uid))));
 
-CREATE POLICY friendships_update ON public.friendships AS PERMISSIVE FOR UPDATE TO authenticated
-  USING (((( SELECT auth.uid() AS uid) = user_id) OR (( SELECT auth.uid() AS uid) = friend_id)))
-  WITH CHECK (((( SELECT auth.uid() AS uid) = user_id) OR (( SELECT auth.uid() AS uid) = friend_id)));
+-- Only the recipient accepts; only `status` is updatable (column grant, section 6).
+CREATE POLICY friendships_recipient_accepts ON public.friendships AS PERMISSIVE FOR UPDATE TO authenticated
+  USING (((friend_id = ( SELECT auth.uid() AS uid)) AND (status = 'pending'::text)))
+  WITH CHECK (((friend_id = ( SELECT auth.uid() AS uid)) AND (status = 'accepted'::text)));
 
 -- leagues / league_members
 CREATE POLICY leagues_delete ON public.leagues AS PERMISSIVE FOR DELETE TO authenticated
@@ -1916,10 +2003,13 @@ CREATE POLICY league_members_delete ON public.league_members AS PERMISSIVE FOR D
    FROM leagues
   WHERE (leagues.created_by = ( SELECT auth.uid() AS uid)))) OR (user_id = ( SELECT auth.uid() AS uid))));
 
+-- Self-join kept until Phase B (scripts/social_security_phase_b_2026_09.sql); creators may add accepted friends.
 CREATE POLICY league_members_insert ON public.league_members AS PERMISSIVE FOR INSERT TO authenticated
-  WITH CHECK (((( SELECT auth.uid() AS uid) = user_id) OR (league_id IN ( SELECT leagues.id
-   FROM leagues
-  WHERE (leagues.created_by = ( SELECT auth.uid() AS uid))))));
+  WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) OR ((league_id IN ( SELECT l.id
+   FROM leagues l
+  WHERE (l.created_by = ( SELECT auth.uid() AS uid)))) AND (EXISTS ( SELECT 1
+   FROM friendships f
+  WHERE ((f.status = 'accepted'::text) AND (((f.user_id = ( SELECT auth.uid() AS uid)) AND (f.friend_id = league_members.user_id)) OR ((f.friend_id = ( SELECT auth.uid() AS uid)) AND (f.user_id = league_members.user_id)))))))));
 
 CREATE POLICY league_members_select_all ON public.league_members AS PERMISSIVE FOR SELECT TO authenticated
   USING (true);
@@ -1992,7 +2082,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.visited_pubs                    T
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.favorite_pubs                   TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.pub_drinks                      TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.pub_reviews                     TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.friendships                     TO anon, authenticated;
+GRANT SELECT, INSERT, DELETE         ON public.friendships                     TO authenticated;
+GRANT UPDATE (status)                ON public.friendships                     TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.leagues                         TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.league_members                  TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_push_tokens                TO anon, authenticated;
@@ -2009,13 +2100,15 @@ GRANT SELECT (id, username, created_at, updated_at, avatar_url)        ON public
 GRANT INSERT (id, email, username, created_at, updated_at, avatar_url) ON public.users TO authenticated;
 GRANT UPDATE (username, updated_at, avatar_url)                        ON public.users TO authenticated;
 
--- Function privileges: only the RPCs the app calls
+-- Function privileges: only the RPCs the app calls (plus Phase B's is_league_member when run)
 GRANT EXECUTE ON FUNCTION public.get_area_stats(uuid)                                 TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_borough_stats(uuid)                              TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_achievements(uuid)                               TO authenticated;
 GRANT EXECUTE ON FUNCTION public.search_pubs(text, integer)                           TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_my_account()                                  TO authenticated;
 GRANT EXECUTE ON FUNCTION public.enqueue_pub_summon_notifications(text, uuid[], text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.join_league_by_code(text)                          TO authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_push_token(text, text)                       TO authenticated;
 
 -- Default privileges: new functions in public are not auto-granted to clients.
 -- (New tables/sequences still are — Supabase default — rely on RLS.)
