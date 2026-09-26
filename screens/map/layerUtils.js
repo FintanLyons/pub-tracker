@@ -3,6 +3,7 @@ import { APP_DISPLAY_NAME } from '../../constants/app';
 import { COLORS } from '../../constants/theme';
 import { formatDistrictWithCode } from '../../utils/postcodeDistrictDisplayNames';
 import { interpolateColor } from './utils';
+import BASE_MAP_STYLE from '../../data/map/baseStyle.json';
 
 /**
  * Map district / area completion shading — tune here.
@@ -32,37 +33,18 @@ export const MAP_COMPLETION_STYLE = {
   AREA_FILL_OPACITY: 0.22,
 };
 
+/**
+ * Background map: OpenFreeMap vector tiles (free, no API key), recoloured to the muted
+ * look the app had on CARTO and with all labels removed — markers and district fills
+ * are the focus. Regenerate with `python3 scripts/build_map_base_style.py`.
+ * (CARTO basemaps started requiring an API key in Sept 2026.)
+ */
 export const MAP_STYLE = {
-  version: 8,
-  name: `${APP_DISPLAY_NAME} Raster`,
-  // Required for any symbol layer with text-field; without it Mbgl-HttpRequest logs
-  // "Unable to parse resourceUrl" on Android/iOS native.
+  ...BASE_MAP_STYLE,
+  name: `${APP_DISPLAY_NAME} Base`,
+  // Required for any symbol layer with text-field (district / area labels); without it
+  // Mbgl-HttpRequest logs "Unable to parse resourceUrl" on Android/iOS native.
   glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution:
-        '&copy; OpenStreetMap contributors, &copy; CARTO',
-      maxzoom: 20,
-    },
-  },
-  layers: [
-    {
-      id: 'osm-base',
-      type: 'raster',
-      source: 'osm',
-      minzoom: 0,
-      maxzoom: 22,
-      paint: {
-        'raster-saturation': -0.2,
-        'raster-contrast': -0.1,
-        'raster-brightness-min': 0.12,
-        'raster-brightness-max': 0.96,
-      },
-    },
-  ],
 };
 
 export const DEFAULT_CAMERA = {
