@@ -28,6 +28,7 @@ import { COLORS } from '../constants/theme';
 import { isSupabaseConfigured } from '../config/supabase';
 import { CONNECTION_ERROR_MESSAGE } from '../services/authErrors';
 import ForgotPasswordModal from '../components/ForgotPasswordModal';
+import AppDialogModal from '../components/AppDialog';
 import { useAppAlert } from '../contexts/AppAlertContext';
 
 /** Developer setup message — only shown in builds missing the Supabase env vars. */
@@ -55,19 +56,21 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
-  /** Email awaiting confirmation: { email, availableAt } — drives the resend panel. */
+  /** Email awaiting confirmation: { email, availableAt } — drives the confirm-email dialog. */
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  /** { title, intro } while the confirm-email dialog is open. */
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [resendBusy, setResendBusy] = useState(false);
-  /** { text, tone: 'success' | 'error' } shown inside the resend panel. */
+  /** { text, tone: 'success' | 'error' } shown inside the confirm-email dialog. */
   const [resendNote, setResendNote] = useState(null);
   const [now, setNow] = useState(Date.now());
 
-  // Tick once a second while the resend cooldown is running.
+  // Tick once a second while the dialog is open and the resend cooldown is running.
   useEffect(() => {
-    if (!pendingConfirmation || pendingConfirmation.availableAt <= now) return undefined;
+    if (!confirmDialog || !pendingConfirmation || pendingConfirmation.availableAt <= now) return undefined;
     const t = setTimeout(() => setNow(Date.now()), 1000);
     return () => clearTimeout(t);
-  }, [pendingConfirmation, now]);
+  }, [confirmDialog, pendingConfirmation, now]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +103,11 @@ export default function AuthScreen({ onAuthSuccess }) {
     setPendingConfirmation({ email: targetEmail, availableAt: Date.now() + cooldownSeconds * 1000 });
     setResendNote(null);
     setNow(Date.now());
+  };
+
+  const openConfirmDialog = (content) => {
+    setNow(Date.now());
+    setConfirmDialog(content);
   };
 
   const handleResendConfirmation = async () => {
@@ -168,10 +176,9 @@ export default function AuthScreen({ onAuthSuccess }) {
           awaitConfirmation(trimmedEmail, CONFIRMATION_RESEND_COOLDOWN_SECONDS);
           setIsLogin(true);
           clearForm();
-          showAppAlert({
+          openConfirmDialog({
             title: 'Check your email',
-            message: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.\n\n${SPAM_TIP}`,
-            tone: 'neutral',
+            intro: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.`,
           });
           return;
         }
@@ -208,10 +215,9 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else if (msg.includes('not confirmed')) {
         // Keep an existing cooldown for this address; otherwise allow an immediate resend.
         if (pendingConfirmation?.email !== trimmedEmail) awaitConfirmation(trimmedEmail, 0);
-        showAppAlert({
+        openConfirmDialog({
           title: 'Confirm your email first',
-          message: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in. You can resend it below.`,
-          tone: 'neutral',
+          intro: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in.`,
         });
       } else if (isConnectionErrorMessage(msg)) {
         showAppAlert({
@@ -451,39 +457,6 @@ export default function AuthScreen({ onAuthSuccess }) {
                 }
               </TouchableOpacity>
 
-              {pendingConfirmation ? (
-                <View style={styles.confirmPanel}>
-                  <Text style={styles.confirmTitle}>
-                    Waiting for you to confirm {pendingConfirmation.email}
-                  </Text>
-                  <Text style={styles.confirmHint}>{SPAM_TIP}</Text>
-                  {(() => {
-                    const secondsLeft = Math.ceil((pendingConfirmation.availableAt - now) / 1000);
-                    const coolingDown = secondsLeft > 0;
-                    return (
-                      <TouchableOpacity
-                        style={[styles.confirmResendBtn, (coolingDown || resendBusy) && styles.btnDisabled]}
-                        onPress={handleResendConfirmation}
-                        disabled={coolingDown || resendBusy}
-                        accessibilityRole="button"
-                      >
-                        {resendBusy ? (
-                          <ActivityIndicator size="small" color={COLORS.amber} />
-                        ) : (
-                          <Text style={styles.confirmResendText}>
-                            {coolingDown ? `Resend email in ${secondsLeft}s` : 'Resend email'}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })()}
-                  {resendNote ? (
-                    <Text style={resendNote.tone === 'error' ? styles.confirmNoteError : styles.confirmNoteSuccess}>
-                      {resendNote.text}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
 
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
@@ -535,6 +508,30 @@ export default function AuthScreen({ onAuthSuccess }) {
 
           </ScrollView>
         </KeyboardAvoidingView>
+        {confirmDialog && pendingConfirmation ? (() => {
+          const secondsLeft = Math.max(0, Math.ceil((pendingConfirmation.availableAt - now) / 1000));
+          return (
+            <AppDialogModal
+              visible
+              title={confirmDialog.title}
+              message={`${confirmDialog.intro}\n\n${SPAM_TIP}`}
+              tone="neutral"
+              footnote={resendNote}
+              onClose={() => setConfirmDialog(null)}
+              buttons={[
+                {
+                  // Supabase allows one email a minute — the button unlocks when it will work.
+                  text: resendBusy ? 'Sending…' : secondsLeft > 0 ? `Resend in ${secondsLeft}s` : 'Resend email',
+                  variant: 'secondary',
+                  disabled: secondsLeft > 0 || resendBusy,
+                  keepOpen: true,
+                  onPress: handleResendConfirmation,
+                },
+                { text: 'OK', variant: 'primary' },
+              ]}
+            />
+          );
+        })() : null}
         <ForgotPasswordModal
           visible={showForgotPassword}
           initialEmail={email}
@@ -758,47 +755,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 4,
     paddingHorizontal: 8,
-  },
-  confirmPanel: {
-    backgroundColor: COLORS.white,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
-    padding: 14,
-    gap: 6,
-  },
-  confirmTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.darkGrey,
-  },
-  confirmHint: {
-    fontSize: 13,
-    color: COLORS.mediumGrey,
-  },
-  confirmResendBtn: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.amber,
-    minWidth: 150,
-    alignItems: 'center',
-  },
-  confirmResendText: {
-    color: COLORS.amber,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  confirmNoteSuccess: {
-    fontSize: 13,
-    color: COLORS.successGreen,
-  },
-  confirmNoteError: {
-    fontSize: 13,
-    color: COLORS.errorRed,
   },
   switchLink: {
     color: COLORS.amber,

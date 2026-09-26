@@ -117,6 +117,21 @@ const styles = StyleSheet.create({
     borderColor: COLORS.divider,
     alignSelf: 'stretch',
   },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
+  footnoteSuccess: {
+    marginTop: 10,
+    fontSize: 14,
+    color: COLORS.successGreen,
+    textAlign: 'center',
+  },
+  footnoteError: {
+    marginTop: 10,
+    fontSize: 14,
+    color: COLORS.errorRed,
+    textAlign: 'center',
+  },
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: '600',
@@ -141,7 +156,10 @@ function iconForTone(tone) {
  * @param {string} props.message
  * @param {'success' | 'error' | 'neutral'} [props.tone='neutral']
  * @param {() => void} props.onClose — dismisses the dialog (header X, backdrop tap, after footer button).
- * @param {{ text: string, onPress?: () => void, variant?: 'primary' | 'secondary' }[]} [props.buttons] — default one primary "OK".
+ * @param {{ text: string, onPress?: () => void, variant?: 'primary' | 'secondary',
+ *   disabled?: boolean, keepOpen?: boolean }[]} [props.buttons] — default one primary "OK".
+ *   `keepOpen` buttons don't dismiss the dialog (e.g. "Resend email").
+ * @param {{ text: string, tone?: 'success' | 'error' }} [props.footnote] — status line under the message.
  */
 export function AppDialogCard({
   title,
@@ -149,6 +167,7 @@ export function AppDialogCard({
   tone = 'neutral',
   onClose,
   buttons,
+  footnote,
 }) {
   const resolvedButtons =
     buttons && buttons.length > 0 ? buttons : [{ text: 'OK', variant: 'primary' }];
@@ -179,6 +198,11 @@ export function AppDialogCard({
         showsVerticalScrollIndicator={bodyText.length > 280}
       >
         <Text style={styles.body}>{bodyText}</Text>
+        {footnote?.text ? (
+          <Text style={footnote.tone === 'error' ? styles.footnoteError : styles.footnoteSuccess}>
+            {footnote.text}
+          </Text>
+        ) : null}
       </ScrollView>
       <View style={styles.actions}>
         {resolvedButtons.map((btn, i) => {
@@ -186,15 +210,20 @@ export function AppDialogCard({
           const isPrimary = variant === 'primary';
           return (
             <TouchableOpacity
-              key={`${btn.text}-${i}`}
-              style={isPrimary ? styles.primaryButton : styles.secondaryButton}
+              key={`${isPrimary ? 'p' : 's'}-${i}`}
+              style={[
+                isPrimary ? styles.primaryButton : styles.secondaryButton,
+                btn.disabled && styles.buttonDisabled,
+              ]}
               onPress={() => {
                 btn.onPress?.();
-                onClose();
+                if (!btn.keepOpen) onClose();
               }}
+              disabled={Boolean(btn.disabled)}
               activeOpacity={0.75}
               accessibilityRole="button"
               accessibilityLabel={btn.text}
+              accessibilityState={{ disabled: Boolean(btn.disabled) }}
             >
               <Text style={isPrimary ? styles.primaryButtonText : styles.secondaryButtonText}>
                 {btn.text}
@@ -214,6 +243,7 @@ export function AppDialogOverlay({
   tone = 'neutral',
   onClose,
   buttons,
+  footnote,
 }) {
   return (
     <View style={overlayStyles.layer} pointerEvents="box-none">
@@ -229,6 +259,7 @@ export function AppDialogOverlay({
         tone={tone}
         onClose={onClose}
         buttons={buttons}
+        footnote={footnote}
       />
     </View>
   );
@@ -251,6 +282,7 @@ export default function AppDialogModal({
   tone = 'neutral',
   onClose,
   buttons,
+  footnote,
 }) {
   if (!visible) return null;
 
@@ -274,6 +306,7 @@ export default function AppDialogModal({
           tone={tone}
           onClose={onClose}
           buttons={buttons}
+          footnote={footnote}
         />
       </View>
     </Modal>
