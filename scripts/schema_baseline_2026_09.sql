@@ -2,7 +2,8 @@
 -- Pub Tracker — live database schema baseline (captured 2026-09-25)
 -- =============================================================================
 -- Source of truth for the Supabase `public` schema as it exists in project
--- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied.
+-- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
+-- (updated for scripts/signup_username_null_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -1019,22 +1020,13 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-  -- Create user profile in public.users table
+  -- Username is chosen in the app (ChooseUsernameScreen); never derive it from the email.
   INSERT INTO public.users (id, email, username, created_at, updated_at)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    COALESCE(
-      NEW.raw_user_meta_data->>'username',  -- Try to get username from metadata
-      split_part(NEW.email, '@', 1)         -- Fallback to email prefix
-    ),
-    NOW(),
-    NOW()
-  )
+  VALUES (NEW.id, NEW.email, NULL, NOW(), NOW())
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     updated_at = NOW();
-  
+
   RETURN NEW;
 END;
 $function$
