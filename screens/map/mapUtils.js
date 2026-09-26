@@ -136,13 +136,14 @@ export const findDistrictFeatureBySearchQuery = (featureCollection, rawQuery) =>
       if (!code || typeof code !== 'string') return false;
       return formatDistrictWithCode(code).toLowerCase() === q;
     })
-    || features.find((f) => {
+    // Partial matches need 3+ characters, otherwise "b" jumps to the first district containing a "b".
+    || (q.length >= 3 && features.find((f) => {
       const code = f?.properties?.name;
       if (!code || typeof code !== 'string') return false;
       const label = getPostcodeDistrictDisplayName(code).toLowerCase();
       const full = formatDistrictWithCode(code).toLowerCase();
       return label.includes(q) || full.includes(q);
-    })
+    }))
     || null
   );
 };

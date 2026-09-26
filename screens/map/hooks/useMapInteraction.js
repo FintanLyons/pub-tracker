@@ -478,15 +478,14 @@ export function useMapInteraction({
     setShowSuggestions(false);
     Keyboard.dismiss();
 
+    // Area codes (E, SW, CB…) only on an exact match — "b" must not jump to Cambridge.
     const exactArea = allPostcodeAreaNames.find((n) => n.toLowerCase() === query);
     if (exactArea) { selectPostcodeArea(exactArea, true); return; }
-    const partialArea = allPostcodeAreaNames.find((n) => n.toLowerCase().includes(query));
-    if (partialArea) { selectPostcodeArea(partialArea, true); return; }
 
     const districtMatch = findDistrictFeatureBySearchQuery(postcodeDistrictGeojson, rawQuery.trim())
-      || postcodeDistrictGeojson.features.find(
-        (feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query),
-      );
+      || (query.length >= 2 && postcodeDistrictGeojson.features.find(
+        (feature) => feature?.properties?.name?.toLowerCase?.().startsWith?.(query),
+      ));
     if (districtMatch) { selectDistrict(districtMatch, true); return; }
 
     const localPubMatch = rankPubsForQuery(allPubs, rawQuery, 1)[0];
