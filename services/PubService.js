@@ -384,75 +384,78 @@ export const searchPubsByName = async (query, limit = 5) => {
 };
 
 // ---------------------------------------------------------------------------
-// Toggle visited / favorite
+// Set visited / favorite (idempotent — safe to repeat, never "flips")
 // ---------------------------------------------------------------------------
 
-export const togglePubVisited = async (pubId) => {
-	if (!pubId) throw new Error('togglePubVisited called without pubId');
+/** Per-key promise chains so writes for the same pub reach the server in tap order. */
+const _writeQueues = new Map();
 
-	const session = await getCurrentSession();
-	if (!session?.userId) {
-		throw new Error('You need to be logged in and online to track visited pubs.');
-	}
-
-	if (!_visitedSet || _cacheUserId !== session.userId) {
-		const { visitedSet } = await loadVisitedAndFavoriteSets();
-		_visitedSet = visitedSet;
-		_cacheUserId = session.userId;
-	}
-
-	const isCurrentlyVisited = _visitedSet.has(pubId);
-
-	if (isCurrentlyVisited) {
-		const { error } = await supabase
-			.from('visited_pubs')
-			.delete()
-			.eq('user_id', session.userId)
-			.eq('pub_id', pubId);
-		if (error) throw error;
-		_visitedSet.delete(pubId);
-	} else {
-		const { error } = await supabase
-			.from('visited_pubs')
-			.insert({ user_id: session.userId, pub_id: pubId });
-		if (error) throw error;
-		_visitedSet.add(pubId);
-	}
-
-	return _visitedSet;
+const enqueueWrite = (key, task) => {
+	const previous = _writeQueues.get(key) || Promise.resolve();
+	const next = previous.catch(() => {}).then(task);
+	_writeQueues.set(key, next);
+	next.finally(() => {
+		if (_writeQueues.get(key) === next) _writeQueues.delete(key);
+	}).catch(() => {});
+	return next;
 };
 
-export const togglePubFavorite = async (pubId) => {
-	if (!pubId) throw new Error('togglePubFavorite called without pubId');
+const setMembership = async (table, pubId, shouldBeMember) => {
+	if (!pubId) throw new Error(`set ${table} called without pubId`);
 
 	const session = await getCurrentSession();
 	if (!session?.userId) {
-		throw new Error('You need to be logged in and online to track favourite pubs.');
+		throw new Error('You need to be signed in to save this.');
 	}
+	const { userId } = session;
 
-	if (!_favoritesSet || _cacheUserId !== session.userId) {
-		const { favoritesSet } = await loadVisitedAndFavoriteSets();
-		_favoritesSet = favoritesSet;
-		_cacheUserId = session.userId;
-	}
-
-	const isCurrentlyFavorite = _favoritesSet.has(pubId);
-
-	if (isCurrentlyFavorite) {
-		const { error } = await supabase
-			.from('favorite_pubs')
-			.delete()
-			.eq('user_id', session.userId)
-			.eq('pub_id', pubId);
+	return enqueueWrite(`${table}:${pubId}`, async () => {
+		const { error } = shouldBeMember
+			? await supabase
+				.from(table)
+				.upsert(
+					{ user_id: userId, pub_id: pubId },
+					{ onConflict: 'user_id,pub_id', ignoreDuplicates: true },
+				)
+			: await supabase
+				.from(table)
+				.delete()
+				.eq('user_id', userId)
+				.eq('pub_id', pubId);
 		if (error) throw error;
-		_favoritesSet.delete(pubId);
-	} else {
-		const { error } = await supabase
-			.from('favorite_pubs')
-			.insert({ user_id: session.userId, pub_id: pubId });
-		if (error) throw error;
-		_favoritesSet.add(pubId);
-	}
 
-	return _favoritesSet;
+		if (_cacheUserId === userId) {
+			const set = table === 'visited_pubs' ? _visitedSet : _favoritesSet;
+			if (set) {
+				if (shouldBeMember) set.add(pubId);
+				else set.delete(pubId);
+			}
+		}
+	});
+};
+
+/** Mark a pub visited (true) or not visited (false). */
+export const setPubVisited = (pubId, visited) => setMembership('visited_pubs', pubId, visited);
+
+/** Add (true) or remove (false) a pub from favourites. */
+export const setPubFavorite = (pubId, favorite) => setMembership('favorite_pubs', pubId, favorite);
+
+/**
+ * Re-read the signed-in user's visited / favourite ids from the server (e.g. when the
+ * app returns to the foreground, to pick up changes made on another device).
+ * Resolves to null on failure.
+ */
+export const reloadVisitedFavoriteSets = async () => {
+	const session = await getCurrentSession();
+	if (!session?.userId) return null;
+	const [visited, favorites] = await Promise.all([
+		fetchServerIdSet('visited_pubs', session.userId),
+		fetchServerIdSet('favorite_pubs', session.userId),
+	]);
+	// On failure keep the existing cache rather than reporting "no visits".
+	if (visited === null || favorites === null) return null;
+	_visitedSet = visited;
+	_favoritesSet = favorites;
+	_cacheUserId = session.userId;
+	return { visitedSet: visited, favoritesSet: favorites };
 };

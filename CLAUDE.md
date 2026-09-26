@@ -133,7 +133,9 @@ The stats RPCs reject calls for another user's id. Everything else (`compute_use
 
 - **Accent colour** — amber `#D4A017` for all interactive / brand elements
 - **Primary text / surfaces** — dark charcoal `#1C1C1C` / `#2C2C2C`
-- **Optimistic UI** — visited and favourite toggles update local state immediately and roll back on server error
+- **Optimistic UI** — visited / favourite update local state immediately, then call the idempotent `setPubVisited(pubId, bool)` / `setPubFavorite` (never "toggle" on the server; writes per pub are queued in tap order). On failure only that pub is reverted and `useToast().showToast(...)` explains it didn't save. Toasts don't show above RN `<Modal>`s — use inline errors there
+- **Counters** — use `createLatestValueSync` (`utils/latestValueSync.js`): controls stay disabled until the real value loads; only the latest value is saved, in order
+- **Stats refresh** — `refreshUserStats()` merges overlapping calls (`utils/coalescedRunner.js`); callers that fire on every tap should debounce first
 - **Viewport-based pub loading** — `useViewportPubs` fetches only the pubs visible on screen (debounced 400 ms, bounds-cached to prevent duplicate fetches)
 - **Stats are server-computed** — never aggregate visit counts client-side; use the RPCs
 - **Visited/favourite cache** — module-level Sets in `PubService`. Call `clearVisitedFavoriteCache()` on logout (done in `SecureAuthService`)

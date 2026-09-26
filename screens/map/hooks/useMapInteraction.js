@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard } from 'react-native';
-import { Dimensions } from 'react-native';
+import { AppState, Dimensions, Keyboard } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   fetchPubById,
+  reloadVisitedFavoriteSets,
   searchPubsByName,
-  togglePubFavorite,
-  togglePubVisited,
+  setPubFavorite,
+  setPubVisited,
 } from '../../../services/PubService';
+import { useToast } from '../../../contexts/ToastContext';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../../utils/postcodeDistrictDisplayNames';
 import { distanceMeters } from '../../../utils/geo';
 import { getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
@@ -24,6 +25,10 @@ import {
   postcodeAreaOutlinesGeojson,
   postcodeDistrictGeojson,
 } from '../../../data/geo/supportedPostcodeGeo';
+
+const SAVE_FAILED_MESSAGE = "Couldn't save — check your connection and try again.";
+/** Wait for taps to settle before recomputing stats (one refresh for several taps). */
+const STATS_REFRESH_DELAY_MS = 1200;
 
 /**
  * Combined search + selection + deep-link hook.
@@ -284,52 +289,110 @@ export function useMapInteraction({
     }
   }, [focusCameraOnPub, hasUserInteractedRef, setAllPubs]);
 
-  // ── Toggle callbacks (optimistic) ────────────────────────────
+  // ── Visited / favourite (optimistic, idempotent) ─────────────
 
-  const handleToggleVisited = useCallback(async (pubId) => {
-    const originalPubs = [...allPubs];
-    const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const prev =
-      selectedPub?.id === pubId
-        ? selectedPub
-        : allPubs.find((pub) => pub.id === pubId);
-    const newState = !prev?.isVisited;
+  const { showToast } = useToast();
+  const statsRefreshTimerRef = useRef(null);
+  /** `${field}:${pubId}` → sequence number of the latest tap, so stale failures don't revert newer taps. */
+  const latestWriteSeqRef = useRef(new Map());
+  const writeSeqCounterRef = useRef(0);
 
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isVisited: newState });
-    setAllPubs((current) => current.map((pub) => (
-      pub.id === pubId ? { ...pub, isVisited: newState } : pub
-    )));
+  useEffect(() => () => {
+    if (statsRefreshTimerRef.current) clearTimeout(statsRefreshTimerRef.current);
+  }, []);
 
-    try {
-      await togglePubVisited(pubId);
+  const scheduleStatsRefresh = useCallback(() => {
+    if (statsRefreshTimerRef.current) clearTimeout(statsRefreshTimerRef.current);
+    statsRefreshTimerRef.current = setTimeout(() => {
+      statsRefreshTimerRef.current = null;
       refreshUserStats();
-    } catch {
-      setAllPubs(originalPubs);
-      if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
-    }
-  }, [allPubs, refreshUserStats, selectedPub, setAllPubs]);
+    }, STATS_REFRESH_DELAY_MS);
+  }, [refreshUserStats]);
 
-  const handleToggleFavorite = useCallback(async (pubId) => {
-    const originalPubs = [...allPubs];
-    const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const prev =
-      selectedPub?.id === pubId
-        ? selectedPub
-        : allPubs.find((pub) => pub.id === pubId);
-    const newState = !prev?.isFavorite;
-
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isFavorite: newState });
+  /** Update one flag on one pub in both the map list and the open card. */
+  const applyPubFlag = useCallback((pubId, field, value) => {
     setAllPubs((current) => current.map((pub) => (
-      pub.id === pubId ? { ...pub, isFavorite: newState } : pub
+      pub.id === pubId && pub[field] !== value ? { ...pub, [field]: value } : pub
     )));
+    setSelectedPub((current) => (
+      current?.id === pubId && current[field] !== value ? { ...current, [field]: value } : current
+    ));
+  }, [setAllPubs]);
 
+  const setPubFlag = useCallback(async (pubId, field, desired, saveFn) => {
+    const key = `${field}:${pubId}`;
+    const seq = ++writeSeqCounterRef.current;
+    latestWriteSeqRef.current.set(key, seq);
+
+    applyPubFlag(pubId, field, desired);
     try {
-      await togglePubFavorite(pubId);
-    } catch {
-      setAllPubs(originalPubs);
-      if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
+      await saveFn(pubId, desired);
+      if (field === 'isVisited') scheduleStatsRefresh();
+    } catch (err) {
+      console.warn(`useMapInteraction: saving ${field} failed`, err?.message ?? err);
+      // Only undo if no newer tap on this pub has happened since.
+      if (latestWriteSeqRef.current.get(key) === seq) {
+        applyPubFlag(pubId, field, !desired);
+        showToast(SAVE_FAILED_MESSAGE);
+      }
+    } finally {
+      if (latestWriteSeqRef.current.get(key) === seq) latestWriteSeqRef.current.delete(key);
     }
-  }, [allPubs, selectedPub, setAllPubs]);
+  }, [applyPubFlag, scheduleStatsRefresh, showToast]);
+
+  const currentPubFlag = useCallback((pubId, field) => {
+    const pub = selectedPub?.id === pubId ? selectedPub : allPubs.find((p) => p.id === pubId);
+    return Boolean(pub?.[field]);
+  }, [allPubs, selectedPub]);
+
+  /**
+   * Toggle visited, or pass `visited` to set it explicitly (drinks / reviews mark a pub
+   * visited without toggling).
+   */
+  const handleToggleVisited = useCallback((pubId, visited) => {
+    const desired = typeof visited === 'boolean' ? visited : !currentPubFlag(pubId, 'isVisited');
+    return setPubFlag(pubId, 'isVisited', desired, setPubVisited);
+  }, [currentPubFlag, setPubFlag]);
+
+  const handleToggleFavorite = useCallback((pubId) => {
+    const desired = !currentPubFlag(pubId, 'isFavorite');
+    return setPubFlag(pubId, 'isFavorite', desired, setPubFavorite);
+  }, [currentPubFlag, setPubFlag]);
+
+  // Returning to the app: pick up visits/favourites changed on another device.
+  useEffect(() => {
+    let lastState = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const cameToForeground = lastState !== 'active' && next === 'active';
+      lastState = next;
+      if (!cameToForeground) return;
+      reloadVisitedFavoriteSets()
+        .then((sets) => {
+          if (!sets) return;
+          const pending = latestWriteSeqRef.current;
+          const sync = (pub) => {
+            if (!pub?.id) return pub;
+            const isVisited = pending.has(`isVisited:${pub.id}`) ? pub.isVisited : sets.visitedSet.has(pub.id);
+            const isFavorite = pending.has(`isFavorite:${pub.id}`) ? pub.isFavorite : sets.favoritesSet.has(pub.id);
+            return isVisited === pub.isVisited && isFavorite === pub.isFavorite
+              ? pub
+              : { ...pub, isVisited, isFavorite };
+          };
+          setAllPubs((current) => {
+            let changed = false;
+            const next = current.map((pub) => {
+              const synced = sync(pub);
+              if (synced !== pub) changed = true;
+              return synced;
+            });
+            return changed ? next : current;
+          });
+          setSelectedPub((current) => (current ? sync(current) : current));
+        })
+        .catch((err) => console.warn('useMapInteraction: visited/favourite reload failed', err?.message ?? err));
+    });
+    return () => sub.remove();
+  }, [setAllPubs]);
 
   // ── Layer press handlers ──────────────────────────────────────
 

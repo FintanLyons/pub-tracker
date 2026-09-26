@@ -17,6 +17,7 @@ import { AppAlertProvider } from './contexts/AppAlertContext';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { COLORS } from './constants/theme';
 import { isValidUsernameFormat } from './services/SecureAuthService';
 import {
@@ -164,7 +165,9 @@ function AppContent() {
         <View style={styles.appContainer}>
           <LocationProvider userId={user.id}>
             <UserStatsProvider userId={user.id}>
-              <TabNavigator />
+              <ToastProvider>
+                <TabNavigator />
+              </ToastProvider>
             </UserStatsProvider>
           </LocationProvider>
           <OfflineOverlay />
