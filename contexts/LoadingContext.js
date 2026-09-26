@@ -5,7 +5,5 @@ export const LoadingContext = createContext({
   setIsLocationLoaded: () => {},
   isInitialPubsLoaded: false,
   setIsInitialPubsLoaded: () => {},
-  postcodeAreaSummaries: [],
-  isLoadingPostcodeAreas: true,
 });
 

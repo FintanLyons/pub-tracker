@@ -8,9 +8,7 @@ import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { fetchPostcodeAreaSummaries } from '../services/PubService';
 import { prefetchLeaderboardCache } from '../services/leaderboardData';
-import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
@@ -48,8 +46,6 @@ export default function TabNavigator() {
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   const [minSplashElapsed, setMinSplashElapsed] = useState(false);
-  const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
-  const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
   const [mapReturnToProfile, setMapReturnToProfile] = useState({
     key: 0,
     baselineScore: 0,
@@ -76,33 +72,6 @@ export default function TabNavigator() {
   useEffect(() => {
     latestDrinksTotalRef.current = drinkStats?.total ?? 0;
   }, [drinkStats?.total]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const loadPostcodeAreaSummaries = async () => {
-      try {
-        setIsLoadingPostcodeAreas(true);
-        const summaries = await fetchPostcodeAreaSummaries(user?.id);
-        if (!isCancelled) {
-          setPostcodeAreaSummaries((prev) => {
-            const nextArray = Array.isArray(summaries) ? summaries : [];
-            if (serializePostcodeAreaSummaries(prev) === serializePostcodeAreaSummaries(nextArray)) return prev;
-            return nextArray;
-          });
-        }
-      } catch (error) {
-        console.error('Error loading postcode area summaries:', error);
-        if (!isCancelled) setPostcodeAreaSummaries([]);
-      } finally {
-        if (!isCancelled) setIsLoadingPostcodeAreas(false);
-      }
-    };
-
-    loadPostcodeAreaSummaries();
-
-    return () => { isCancelled = true; };
-  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -132,8 +101,6 @@ export default function TabNavigator() {
       setIsLocationLoaded,
       isInitialPubsLoaded,
       setIsInitialPubsLoaded,
-      postcodeAreaSummaries,
-      isLoadingPostcodeAreas,
     }}>
       <View style={styles.container}>
         <Tab.Navigator

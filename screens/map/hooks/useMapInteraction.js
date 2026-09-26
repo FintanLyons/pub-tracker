@@ -9,6 +9,11 @@ import {
   setPubVisited,
 } from '../../../services/PubService';
 import { useToast } from '../../../contexts/ToastContext';
+import {
+  markVisitSaved,
+  pruneVisitChanges,
+  recordVisitChange,
+} from '../../../utils/pendingVisitChanges';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../../utils/postcodeDistrictDisplayNames';
 import { distanceMeters } from '../../../utils/geo';
 import { getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
@@ -50,6 +55,7 @@ export function useMapInteraction({
   postcodeAreaSummaries,
   currentLocation,
   refreshUserStats,
+  statsAsOf,
   navigation,
   route,
 }) {
@@ -101,9 +107,9 @@ export function useMapInteraction({
     }
     return null;
   }, [getQueryVariants]);
-  /** Server/typeahead rows omit `features`; viewport rows from formatPub always include it. */
+  /** Map/typeahead rows carry only what markers and filters need; the card needs full details. */
   const needsFullPubFetch = useCallback(
-    (pub) => pub?.id != null && !Array.isArray(pub.features),
+    (pub) => pub?.id != null && !pub.detailsLoaded,
     [],
   );
 
@@ -287,12 +293,34 @@ export function useMapInteraction({
     if (pub.id != null) {
       setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
     }
+    // Open the card straight away, then fill in description / contact / photos.
+    if (pub.id != null && !pub.detailsLoaded) {
+      fetchPubById(pub.id)
+        .then((full) => {
+          if (!full) return;
+          const merge = (current) => ({
+            ...full,
+            // Keep optimistic state from taps made while details were loading.
+            isVisited: current.isVisited,
+            isFavorite: current.isFavorite,
+          });
+          setSelectedPub((current) => (current?.id === full.id ? merge(current) : current));
+          setAllPubs((current) => current.map((p) => (p.id === full.id ? merge(p) : p)));
+        })
+        .catch((err) => console.warn('useMapInteraction: loading pub details failed', err?.message ?? err));
+    }
   }, [focusCameraOnPub, hasUserInteractedRef, setAllPubs]);
 
   // ── Visited / favourite (optimistic, idempotent) ─────────────
 
   const { showToast } = useToast();
   const statsRefreshTimerRef = useRef(null);
+  /** Visited taps the server stats don't include yet (see utils/pendingVisitChanges). */
+  const [pendingVisitChanges, setPendingVisitChanges] = useState(() => new Map());
+
+  useEffect(() => {
+    setPendingVisitChanges((current) => pruneVisitChanges(current, statsAsOf || 0));
+  }, [statsAsOf]);
   /** `${field}:${pubId}` → sequence number of the latest tap, so stale failures don't revert newer taps. */
   const latestWriteSeqRef = useRef(new Map());
   const writeSeqCounterRef = useRef(0);
@@ -319,20 +347,39 @@ export function useMapInteraction({
     ));
   }, [setAllPubs]);
 
-  const setPubFlag = useCallback(async (pubId, field, desired, saveFn) => {
+  const setPubFlag = useCallback(async (pubId, field, desired, saveFn, pub) => {
     const key = `${field}:${pubId}`;
     const seq = ++writeSeqCounterRef.current;
     latestWriteSeqRef.current.set(key, seq);
+    const isVisitField = field === 'isVisited';
 
+    if (isVisitField) {
+      setPendingVisitChanges((current) => recordVisitChange(current, {
+        pubId,
+        district: pub?.area,
+        area: pub?.postcodeArea,
+        previous: Boolean(pub?.isVisited),
+        desired,
+      }));
+    }
     applyPubFlag(pubId, field, desired);
     try {
       await saveFn(pubId, desired);
-      if (field === 'isVisited') scheduleStatsRefresh();
+      if (isVisitField) {
+        if (latestWriteSeqRef.current.get(key) === seq) {
+          setPendingVisitChanges((current) => markVisitSaved(current, pubId, { desired, at: Date.now() }));
+        }
+        scheduleStatsRefresh();
+      }
     } catch (err) {
       console.warn(`useMapInteraction: saving ${field} failed`, err?.message ?? err);
       // Only undo if no newer tap on this pub has happened since.
       if (latestWriteSeqRef.current.get(key) === seq) {
         applyPubFlag(pubId, field, !desired);
+        if (isVisitField) {
+          setPendingVisitChanges((current) => markVisitSaved(current, pubId, { desired: !desired, at: Date.now() }));
+          scheduleStatsRefresh();
+        }
         showToast(SAVE_FAILED_MESSAGE);
       }
     } finally {
@@ -340,24 +387,25 @@ export function useMapInteraction({
     }
   }, [applyPubFlag, scheduleStatsRefresh, showToast]);
 
-  const currentPubFlag = useCallback((pubId, field) => {
-    const pub = selectedPub?.id === pubId ? selectedPub : allPubs.find((p) => p.id === pubId);
-    return Boolean(pub?.[field]);
-  }, [allPubs, selectedPub]);
+  const findPub = useCallback(
+    (pubId) => (selectedPub?.id === pubId ? selectedPub : allPubs.find((p) => p.id === pubId)),
+    [allPubs, selectedPub],
+  );
 
   /**
    * Toggle visited, or pass `visited` to set it explicitly (drinks / reviews mark a pub
    * visited without toggling).
    */
   const handleToggleVisited = useCallback((pubId, visited) => {
-    const desired = typeof visited === 'boolean' ? visited : !currentPubFlag(pubId, 'isVisited');
-    return setPubFlag(pubId, 'isVisited', desired, setPubVisited);
-  }, [currentPubFlag, setPubFlag]);
+    const pub = findPub(pubId);
+    const desired = typeof visited === 'boolean' ? visited : !pub?.isVisited;
+    return setPubFlag(pubId, 'isVisited', desired, setPubVisited, pub);
+  }, [findPub, setPubFlag]);
 
   const handleToggleFavorite = useCallback((pubId) => {
-    const desired = !currentPubFlag(pubId, 'isFavorite');
-    return setPubFlag(pubId, 'isFavorite', desired, setPubFavorite);
-  }, [currentPubFlag, setPubFlag]);
+    const pub = findPub(pubId);
+    return setPubFlag(pubId, 'isFavorite', !pub?.isFavorite, setPubFavorite, pub);
+  }, [findPub, setPubFlag]);
 
   // Returning to the app: pick up visits/favourites changed on another device.
   useEffect(() => {
@@ -693,6 +741,7 @@ export function useMapInteraction({
     selectPub,
     handleToggleVisited,
     handleToggleFavorite,
+    pendingVisitChanges,
     handlePostcodeAreaLayerPress,
     handlePostcodeDistrictLayerPress,
     handlePubPress,

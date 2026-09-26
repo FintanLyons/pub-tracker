@@ -19,8 +19,11 @@ export const UserStatsProvider = ({ userId, children }) => {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState(null);
 	const [lastUpdated, setLastUpdated] = useState(null);
+	/** When the fetch behind the current stats *started* — changes made before this are included. */
+	const [statsAsOf, setStatsAsOf] = useState(0);
 	const fetchUserStatsOnce = useCallback(async () => {
 		setError(null);
+		const startedAt = Date.now();
 		try {
 			const [districtResult, areaResult, achievementsResult, drinkStatsResult] = await Promise.all([
 				supabase.rpc('get_area_stats', { p_user_id: userId }),
@@ -59,6 +62,9 @@ export const UserStatsProvider = ({ userId, children }) => {
 			completedDistricts: Number(row.completed_districts),
 			centerLat: row.center_lat ?? null,
 			centerLon: row.center_lon ?? null,
+			bounds: [row.min_lat, row.max_lat, row.min_lon, row.max_lon].every(Number.isFinite)
+				? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
+				: null,
 		})).filter((a) => a.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(a.postcodeArea));
 
 		// Pubs visited comes from user_stats (via get_achievements) so Profile and
@@ -74,6 +80,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 			setAchievements(achievementsResult.data || null);
 			setDrinkStats(drinkStatsResult || EMPTY_DRINK_STATS);
 			setLastUpdated(Date.now());
+			setStatsAsOf(startedAt);
 		} catch (err) {
 			console.error('Error loading user stats:', err);
 			setError(err);
@@ -111,6 +118,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 				loading,
 				error,
 				lastUpdated,
+				statsAsOf,
 				refreshUserStats: loadUserStats,
 			}}
 		>

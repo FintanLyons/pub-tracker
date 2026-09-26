@@ -26,41 +26,43 @@ const getCurrentSession = async () => {
 	}
 };
 
-const fetchServerIdSet = async (table, userId) => {
-	const { data, error } = await supabase
-		.from(table)
-		.select('pub_id')
-		.eq('user_id', userId);
+/** PostgREST returns at most 1000 rows per request — read the user's ids in pages. */
+const ID_PAGE_SIZE = 1000;
 
-	if (error) return null;
-	return new Set((data || []).map((r) => r.pub_id));
+const fetchServerIdSet = async (table, userId) => {
+	const ids = new Set();
+	for (let from = 0; ; from += ID_PAGE_SIZE) {
+		const { data, error } = await supabase
+			.from(table)
+			.select('pub_id')
+			.eq('user_id', userId)
+			.order('pub_id', { ascending: true })
+			.range(from, from + ID_PAGE_SIZE - 1);
+		if (error) return null;
+		(data || []).forEach((r) => ids.add(r.pub_id));
+		if (!data || data.length < ID_PAGE_SIZE) return ids;
+	}
 };
 
 const loadVisitedAndFavoriteSets = async () => {
 	const session = await getCurrentSession();
+	if (!session?.userId) return { visitedSet: new Set(), favoritesSet: new Set() };
 
-	if (session?.userId) {
-		if (_cacheUserId === session.userId && _visitedSet && _favoritesSet) {
-			return { visitedSet: _visitedSet, favoritesSet: _favoritesSet };
-		}
-		try {
-			const [visited, favorites] = await Promise.all([
-				fetchServerIdSet('visited_pubs', session.userId),
-				fetchServerIdSet('favorite_pubs', session.userId),
-			]);
-			if (visited !== null && favorites !== null) {
-				_visitedSet = visited;
-				_favoritesSet = favorites;
-				_cacheUserId = session.userId;
-				return { visitedSet: visited, favoritesSet: favorites };
-			}
-		} catch (e) {
-			console.warn('Server visited/favorite fetch failed:', e.message);
-		}
+	if (_cacheUserId === session.userId && _visitedSet && _favoritesSet) {
+		return { visitedSet: _visitedSet, favoritesSet: _favoritesSet };
 	}
-
-	// No authenticated user or server fetch failed – treat as no visits/favourites.
-	return { visitedSet: new Set(), favoritesSet: new Set() };
+	const [visited, favorites] = await Promise.all([
+		fetchServerIdSet('visited_pubs', session.userId),
+		fetchServerIdSet('favorite_pubs', session.userId),
+	]);
+	// Never fall back to "no visits" — every pub would wrongly show as unvisited.
+	if (visited === null || favorites === null) {
+		throw new Error('Could not load your visited / favourite pubs');
+	}
+	_visitedSet = visited;
+	_favoritesSet = favorites;
+	_cacheUserId = session.userId;
+	return { visitedSet: visited, favoritesSet: favorites };
 };
 
 const loadPubAchievementsByPubId = async () => {
@@ -120,10 +122,21 @@ export const fetchFavoritePubIdsForUsers = async (userIds) => {
 const PAGE_SIZE = 500;
 const SAFETY_LIMIT = 5000;
 
+/**
+ * Columns the map needs for markers, filters and the card's first paint. Description,
+ * contact details and extra photos load when a pub is opened (fetchPubById) —
+ * about 70% less data per pub than select('*').
+ */
+const MAP_PUB_COLUMNS = [
+	'id', 'name', 'lat', 'lon', 'postcode_district', 'postcode_area',
+	'ownership', 'founded', 'opening_hours', 'is_active', 'photo_url1',
+	...PUB_FEATURE_CHIPS.map((f) => f.flag),
+].join(',');
+
 const convertFeaturesToArray = (pub) =>
 	PUB_FEATURE_CHIPS.filter((f) => pub[f.flag] === true).map((f) => f.name);
 
-const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
+const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}, { detailsLoaded = true } = {}) => {
 	// postcode_district / postcode_area live directly on pub_list rows
 	const postcodeDistrict =
 		typeof pub.postcode_district === 'string' && pub.postcode_district.trim().length > 0
@@ -159,10 +172,7 @@ const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
 		phone: pub.phone,
 		description: pub.description,
 		// Card UI reads `history`; Pubs_List stores enriched copy in `description`.
-		history:
-			(typeof pub.description === 'string' && pub.description.trim()) ||
-			(typeof pub.history === 'string' && pub.history.trim()) ||
-			null,
+		history: (typeof pub.description === 'string' && pub.description.trim()) || null,
 		founded: pub.founded,
 		area,
 		borough,
@@ -173,16 +183,14 @@ const formatPub = (pub, visitedSet, favoritesSet, achievementsByPubId = {}) => {
 		website: pub.website || null,
 		photoUrl: photoUrls[0] || null,
 		photoUrls,
-		opening_hours:
-			(typeof pub.opening_hours === 'string' && pub.opening_hours.trim()) ||
-			(typeof pub.openning_hours === 'string' && pub.openning_hours.trim()) ||
-			null,
-		points: 10,
+		opening_hours: (typeof pub.opening_hours === 'string' && pub.opening_hours.trim()) || null,
 		features: convertFeaturesToArray(pub),
 		achievements: achievementsByPubId[pub.id] || [],
 		isActive: pub.is_active !== false,
 		isVisited: visitedSet.has(pub.id),
 		isFavorite: favoritesSet.has(pub.id),
+		/** false for map rows (MAP_PUB_COLUMNS) — the card fetches full details on open. */
+		detailsLoaded,
 		avgRating: null,
 		reviewCount: 0,
 	};
@@ -194,134 +202,94 @@ const attachRatingSummary = (pub, summary) => ({
 	reviewCount: summary?.reviewCount ?? 0,
 });
 
+/** Pubs for the map (optionally within bounds). Throws on failure so callers can retry. */
 export const fetchLondonPubs = async (options = {}) => {
-	try {
-		const { bounds, postcodeAreas } = options || {};
-		const hasBounds =
-			bounds &&
-			typeof bounds === 'object' &&
-			['north', 'south', 'east', 'west'].every((key) => Number.isFinite(bounds[key]));
-		const requestedAreas = Array.isArray(postcodeAreas)
-			? postcodeAreas.filter((b) => typeof b === 'string' && b.trim().length > 0)
-			: [];
-		const hasAreaFilter = requestedAreas.length > 0;
+	const { bounds, postcodeAreas } = options || {};
+	const hasBounds =
+		bounds &&
+		typeof bounds === 'object' &&
+		['north', 'south', 'east', 'west'].every((key) => Number.isFinite(bounds[key]));
+	const requestedAreas = Array.isArray(postcodeAreas)
+		? postcodeAreas.filter((b) => typeof b === 'string' && b.trim().length > 0)
+		: [];
+	const hasAreaFilter = requestedAreas.length > 0;
 
-		const [{ visitedSet, favoritesSet }, achievementsByPubId] = await Promise.all([
-			loadVisitedAndFavoriteSets(),
-			loadPubAchievementsByPubId(),
-		]);
+	const [{ visitedSet, favoritesSet }, achievementsByPubId] = await Promise.all([
+		loadVisitedAndFavoriteSets(),
+		loadPubAchievementsByPubId(),
+	]);
 
-		let allPubs = [];
-		let from = 0;
-		let hasMore = true;
+	let allPubs = [];
+	let from = 0;
+	let hasMore = true;
 
-		while (hasMore) {
-			let query = supabase.from('Pubs_List').select('*').eq('is_active', true);
+	while (hasMore) {
+		let query = supabase.from('Pubs_List').select(MAP_PUB_COLUMNS).eq('is_active', true);
 
-			if (hasBounds) {
-				query = query
-					.lte('lat', bounds.north)
-					.gte('lat', bounds.south)
-					.gte('lon', bounds.west)
-					.lte('lon', bounds.east);
-			}
-			const to = from + PAGE_SIZE - 1;
-			query = query.range(from, to);
-
-			const { data: batch, error } = await query;
-
-			if (error) throw error;
-
-			if (batch && batch.length > 0) {
-				allPubs = allPubs.concat(batch);
-				from += batch.length;
-				hasMore = batch.length === PAGE_SIZE;
-
-				if (allPubs.length > SAFETY_LIMIT) {
-					console.warn('Reached safety limit of pubs, stopping pagination');
-					hasMore = false;
-				}
-			} else {
-				hasMore = false;
-			}
+		if (hasBounds) {
+			query = query
+				.lte('lat', bounds.north)
+				.gte('lat', bounds.south)
+				.gte('lon', bounds.west)
+				.lte('lon', bounds.east);
 		}
+		const to = from + PAGE_SIZE - 1;
+		query = query.range(from, to);
 
-		const ratingSummaries = await getPubRatingSummariesCached();
-		const formattedPubs = allPubs.map((p) =>
-			attachRatingSummary(
-				formatPub(p, visitedSet, favoritesSet, achievementsByPubId),
-				ratingSummaries[p.id],
-			),
-		);
+		const { data: batch, error } = await query;
 
-		const isSupportedPostcodeArea = (pub) => {
-			const area = pub.postcodeArea || pub.borough;
-			if (!area || typeof area !== 'string') return false;
-			return SUPPORTED_POSTCODE_AREAS.has(area.trim().toUpperCase());
-		};
-
-		const supportedPubsOnly = formattedPubs.filter(isSupportedPostcodeArea);
-
-		let filteredPubs = hasBounds
-			? supportedPubsOnly.filter((pub) => {
-				if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
-				return (
-					pub.lat <= bounds.north &&
-					pub.lat >= bounds.south &&
-					pub.lon >= bounds.west &&
-					pub.lon <= bounds.east
-				);
-			})
-			: supportedPubsOnly;
-
-		if (hasAreaFilter) {
-			const areaSet = new Set(requestedAreas.map((b) => b.toLowerCase()));
-			filteredPubs = filteredPubs.filter(
-				(pub) => pub.postcodeArea && areaSet.has(pub.postcodeArea.toLowerCase()),
-			);
-		}
-
-		return filteredPubs;
-	} catch (error) {
-		console.error('fetchLondonPubs error:', error);
-		return [];
-	}
-};
-
-/** Summaries for map colouring at postcode-area zoom (uses get_borough_stats RPC). */
-export const fetchPostcodeAreaSummaries = async (userId) => {
-	try {
-		if (!userId) return [];
-
-		const { data, error } = await supabase.rpc('get_borough_stats', { p_user_id: userId });
 		if (error) throw error;
 
-	return (data || []).filter((row) => row.postcode_area && SUPPORTED_POSTCODE_AREAS.has(row.postcode_area)).map((row) => {
-		const center = (Number.isFinite(row.center_lat) && Number.isFinite(row.center_lon))
-			? { latitude: row.center_lat, longitude: row.center_lon }
-			: null;
+		if (batch && batch.length > 0) {
+			allPubs = allPubs.concat(batch);
+			from += batch.length;
+			hasMore = batch.length === PAGE_SIZE;
 
-		const hasBounds =
-			Number.isFinite(row.min_lat) && Number.isFinite(row.min_lon) &&
-			Number.isFinite(row.max_lat) && Number.isFinite(row.max_lon);
-
-		return {
-			postcodeArea: row.postcode_area,
-			center,
-			bounds: hasBounds
-				? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
-				: null,
-			totalPubs: Number(row.total_pubs),
-			visitedPubs: Number(row.visited_pubs),
-			completionPercentage: Number(row.percentage),
-			totalDistricts: Number(row.total_districts),
-			completedDistricts: Number(row.completed_districts),
-		};
-	});
-	} catch (error) {
-		console.error('fetchPostcodeAreaSummaries error:', error);
-		return [];
+			if (allPubs.length > SAFETY_LIMIT) {
+				console.warn('Reached safety limit of pubs, stopping pagination');
+				hasMore = false;
+			}
+		} else {
+			hasMore = false;
+		}
 	}
+
+	const ratingSummaries = await getPubRatingSummariesCached();
+	const formattedPubs = allPubs.map((p) =>
+		attachRatingSummary(
+			formatPub(p, visitedSet, favoritesSet, achievementsByPubId, { detailsLoaded: false }),
+			ratingSummaries[p.id],
+		),
+	);
+
+	const isSupportedPostcodeArea = (pub) => {
+		const area = pub.postcodeArea || pub.borough;
+		if (!area || typeof area !== 'string') return false;
+		return SUPPORTED_POSTCODE_AREAS.has(area.trim().toUpperCase());
+	};
+
+	const supportedPubsOnly = formattedPubs.filter(isSupportedPostcodeArea);
+
+	let filteredPubs = hasBounds
+		? supportedPubsOnly.filter((pub) => {
+			if (!Number.isFinite(pub.lat) || !Number.isFinite(pub.lon)) return false;
+			return (
+				pub.lat <= bounds.north &&
+				pub.lat >= bounds.south &&
+				pub.lon >= bounds.west &&
+				pub.lon <= bounds.east
+			);
+		})
+		: supportedPubsOnly;
+
+	if (hasAreaFilter) {
+		const areaSet = new Set(requestedAreas.map((b) => b.toLowerCase()));
+		filteredPubs = filteredPubs.filter(
+			(pub) => pub.postcodeArea && areaSet.has(pub.postcodeArea.toLowerCase()),
+		);
+	}
+
+	return filteredPubs;
 };
 
 // ---------------------------------------------------------------------------

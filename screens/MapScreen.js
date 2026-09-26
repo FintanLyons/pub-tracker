@@ -43,6 +43,13 @@ import { useMapInteraction } from './map/hooks/useMapInteraction';
 import { COLORS } from '../constants/theme';
 import { pubInsideFeature } from './map/mapUtils';
 import {
+  areaSummariesWithDeltas,
+  districtStatsWithDeltas,
+  visitDeltas,
+} from '../utils/pendingVisitChanges';
+
+const NO_DELTAS = { byDistrict: new Map(), byArea: new Map() };
+import {
   postcodeAreaLabelPointsGeojson,
   postcodeAreaOutlinesGeojson,
   postcodeDistrictGeojson,
@@ -81,9 +88,18 @@ export default function MapScreen() {
   const {
     setIsLocationLoaded,
     setIsInitialPubsLoaded,
-    postcodeAreaSummaries,
   } = useContext(LoadingContext);
-  const { refreshUserStats } = useUserStats();
+  const {
+    refreshUserStats,
+    districtStats,
+    postcodeAreaStats,
+    statsAsOf,
+  } = useUserStats();
+  /** Server postcode-area stats (bounds / centres for camera moves). */
+  const baseAreaSummaries = useMemo(
+    () => areaSummariesWithDeltas(postcodeAreaStats, NO_DELTAS),
+    [postcodeAreaStats],
+  );
   const getImageSource = useImageSource();
 
   // ── Hooks ─────────────────────────────────────────────────────
@@ -170,8 +186,9 @@ export default function MapScreen() {
     fitFeature,
     fitBoundsObject,
     currentLocation,
-    postcodeAreaSummaries,
+    postcodeAreaSummaries: baseAreaSummaries,
     refreshUserStats,
+    statsAsOf,
     navigation,
     route,
   });
@@ -196,6 +213,7 @@ export default function MapScreen() {
     closeCard,
     handleToggleVisited,
     handleToggleFavorite,
+    pendingVisitChanges,
     handlePostcodeAreaLayerPress,
     handlePostcodeDistrictLayerPress,
     handlePubPress,
@@ -279,19 +297,18 @@ export default function MapScreen() {
     [filteredPubs, mapHighlightedPubId],
   );
 
-  const districtStatsMap = useMemo(() => {
-    if (!allPubs.length) return null;
-    const statsMap = new Map();
-    allPubs.forEach((pub) => {
-      const district = typeof pub.area === 'string' ? pub.area.trim().toLowerCase() : '';
-      if (!district) return;
-      let entry = statsMap.get(district);
-      if (!entry) { entry = { total: 0, visited: 0 }; statsMap.set(district, entry); }
-      entry.total += 1;
-      if (pub.isVisited) entry.visited += 1;
-    });
-    return statsMap;
-  }, [allPubs]);
+  // Completion colours / area labels: server totals + taps the server hasn't counted yet.
+  const pendingDeltas = useMemo(() => visitDeltas(pendingVisitChanges), [pendingVisitChanges]);
+
+  const districtStatsMap = useMemo(
+    () => (districtStats?.length ? districtStatsWithDeltas(districtStats, pendingDeltas) : null),
+    [districtStats, pendingDeltas],
+  );
+
+  const postcodeAreaSummaries = useMemo(
+    () => areaSummariesWithDeltas(postcodeAreaStats, pendingDeltas),
+    [postcodeAreaStats, pendingDeltas],
+  );
 
   const postcodeAreaLayerFeatures = useMemo(
     () => buildPostcodeAreaLayerCollection(postcodeAreaOutlinesGeojson, postcodeAreaSummaries),

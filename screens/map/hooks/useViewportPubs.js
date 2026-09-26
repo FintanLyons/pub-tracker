@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchLondonPubs } from '../../../services/PubService';
+import { useNetworkStatus } from '../../../contexts/NetworkContext';
+import { useToast } from '../../../contexts/ToastContext';
 import {
   approximateBoundsFromCenter,
   boundsContain,
@@ -9,7 +11,15 @@ import {
   parseVisibleBounds,
 } from '../mapUtils';
 
+const LOAD_FAILED_MESSAGE = "Couldn't load pubs — retrying when you're back online.";
+/** Retry a failed area load after this long (also retried on the next pan / reconnect). */
+const RETRY_DELAY_MS = 8000;
+/** Don't repeat the failure message more often than this. */
+const FAILURE_TOAST_INTERVAL_MS = 30000;
+
 export function useViewportPubs({ isFocused, mapZoomRef }) {
+  const { isConnected } = useNetworkStatus();
+  const { showToast } = useToast();
   const [allPubs, setAllPubs] = useState([]);
   const [initialPubsReady, setInitialPubsReady] = useState(false);
   const [viewportBounds, setViewportBounds] = useState(null);
@@ -22,9 +32,14 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
   const pendingPubFetchBoundsRef = useRef(null);
   const awaitingInitialPubLoadRef = useRef(false);
   const initialPubsReadyRef = useRef(false);
+  /** Bounds whose last load failed — never marked as loaded, retried later. */
+  const failedBoundsRef = useRef(null);
+  const retryTimeoutRef = useRef(null);
+  const lastFailureToastAtRef = useRef(0);
 
   useEffect(() => () => {
     if (pubFetchTimeoutRef.current) clearTimeout(pubFetchTimeoutRef.current);
+    if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
   }, []);
 
   const mergeFetchedPubs = useCallback((incomingPubs) => {
@@ -59,9 +74,22 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
         if (latestPubFetchTokenRef.current !== token) return;
         mergeFetchedPubs(pubs);
         loadedPubBoundsRef.current = mergeBounds(loadedPubBoundsRef.current, boundsToFetch);
+        failedBoundsRef.current = null;
       })
       .catch((error) => {
-        console.error('Failed to load viewport pubs:', error);
+        // Leave these bounds unloaded so the next pan, the retry timer or reconnecting fetches again.
+        console.warn('Failed to load viewport pubs:', error?.message ?? error);
+        failedBoundsRef.current = boundsToFetch;
+        if (Date.now() - lastFailureToastAtRef.current > FAILURE_TOAST_INTERVAL_MS) {
+          lastFailureToastAtRef.current = Date.now();
+          showToast(LOAD_FAILED_MESSAGE);
+        }
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = setTimeout(() => {
+          retryTimeoutRef.current = null;
+          const failed = failedBoundsRef.current;
+          if (failed && !boundsContain(loadedPubBoundsRef.current, failed)) requestViewportPubsRef.current?.(failed);
+        }, RETRY_DELAY_MS);
       })
       .finally(() => {
         if (latestPubFetchTokenRef.current === token) {
@@ -79,7 +107,17 @@ export function useViewportPubs({ isFocused, mapZoomRef }) {
           requestViewportPubs(pending);
         }
       });
-  }, [markInitialPubsReady, mergeFetchedPubs]);
+  }, [markInitialPubsReady, mergeFetchedPubs, showToast]);
+
+  const requestViewportPubsRef = useRef(requestViewportPubs);
+  requestViewportPubsRef.current = requestViewportPubs;
+
+  // Connection back: reload whatever failed while offline.
+  useEffect(() => {
+    if (!isConnected) return;
+    const failed = failedBoundsRef.current;
+    if (failed && !boundsContain(loadedPubBoundsRef.current, failed)) requestViewportPubs(failed);
+  }, [isConnected, requestViewportPubs]);
 
   const requestInitialViewportPubs = useCallback(({ latitude, longitude, zoom }) => {
     if (initialPubsReadyRef.current) return;
