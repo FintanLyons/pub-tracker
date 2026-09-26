@@ -3,6 +3,7 @@ import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
 import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import { getPubRatingSummariesCached } from './ReviewService';
+import { parseFoundedYear } from '../utils/foundedYear';
 
 // ---------------------------------------------------------------------------
 // Server-side visited / favorite tracking
@@ -319,8 +320,8 @@ export const fetchFilterOptions = () => {
 				for (const row of data || []) {
 					const owner = typeof row.ownership === 'string' ? row.ownership.trim() : '';
 					if (owner) counts[owner] = (counts[owner] || 0) + 1;
-					const year = parseInt(row.founded, 10);
-					if (Number.isFinite(year)) {
+					const year = parseFoundedYear(row.founded);
+					if (year != null) {
 						minYear = Math.min(minYear, year);
 						maxYear = Math.max(maxYear, year);
 					}

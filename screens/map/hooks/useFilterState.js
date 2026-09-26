@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { fetchFilterOptions } from '../../../services/PubService';
+import { parseFoundedYear } from '../../../utils/foundedYear';
 
 export function useFilterState(allPubs) {
   const [selectedFeatures, setSelectedFeatures] = useState([]);
@@ -42,16 +43,18 @@ export function useFilterState(allPubs) {
   const allOwnerships = serverOptions?.ownerships?.length ? serverOptions.ownerships : loadedOwnerships;
 
   const availableYearRange = useMemo(() => {
-    if (serverOptions?.yearRange) return serverOptions.yearRange;
+    // Upper end is always this year, so the slider reaches "today" even if no pub is that new.
+    const currentYear = new Date().getFullYear();
+    if (serverOptions?.yearRange) return { min: serverOptions.yearRange.min, max: currentYear };
     const years = [];
     allPubs.forEach(pub => {
       if (pub.founded) {
-        const year = parseInt(pub.founded, 10);
-        if (!isNaN(year)) years.push(year);
+        const year = parseFoundedYear(pub.founded);
+        if (year != null) years.push(year);
       }
     });
-    if (years.length === 0) return { min: 1800, max: new Date().getFullYear() };
-    return { min: Math.min(...years), max: Math.max(...years) };
+    if (years.length === 0) return { min: 1800, max: currentYear };
+    return { min: Math.min(...years), max: currentYear };
   }, [allPubs, serverOptions]);
 
   const handleFilterApply = useCallback((filters) => {

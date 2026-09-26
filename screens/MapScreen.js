@@ -43,6 +43,7 @@ import { useViewportPubs } from './map/hooks/useViewportPubs';
 import { useMapInteraction } from './map/hooks/useMapInteraction';
 import { COLORS } from '../constants/theme';
 import { pubInsideFeature } from './map/mapUtils';
+import { parseFoundedYear } from '../utils/foundedYear';
 import {
   areaSummariesWithDeltas,
   districtStatsWithDeltas,
@@ -259,7 +260,7 @@ export default function MapScreen() {
       if (hasFeatures && (!pub.features || !selectedFeatures.every((f) => pub.features.includes(f)))) return false;
       if (hasOwnerships && (!pub.ownership || !selectedOwnerships.includes(pub.ownership))) return false;
       if (hasYearRange) {
-        const foundedYear = parseInt(pub.founded, 10);
+        const foundedYear = parseFoundedYear(pub.founded);
         if (!Number.isFinite(foundedYear) || foundedYear < yearRange.min || foundedYear > yearRange.max) return false;
       }
       if (hasFavoritesFilter) {

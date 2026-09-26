@@ -10,66 +10,75 @@ const SLIDER_HEIGHT = 50;
 export default function RangeSlider({ min, max, minValue, maxValue, onValueChange, step = 1 }) {
   const [localMinValue, setLocalMinValue] = useState(minValue);
   const [localMaxValue, setLocalMaxValue] = useState(maxValue);
-  const sliderRef = useRef(null);
-  const [sliderLayout, setSliderLayout] = useState({ width: 0, x: 0 });
+  const [trackWidth, setTrackWidth] = useState(0);
+
+  // Latest values/props for the gesture handlers, which are created once (recreating
+  // PanResponders on every render made dragging jittery).
+  const valuesRef = useRef({ min: minValue, max: maxValue });
+  const propsRef = useRef({ min, max, step, onValueChange, trackWidth: 0 });
+  propsRef.current = { min, max, step, onValueChange, trackWidth };
+  /** Value of the dragged handle when the drag started. */
+  const dragStartRef = useRef(0);
 
   useEffect(() => {
     setLocalMinValue(minValue);
     setLocalMaxValue(maxValue);
+    valuesRef.current = { min: minValue, max: maxValue };
   }, [minValue, maxValue]);
 
   const trackY = (SLIDER_HEIGHT - TRACK_HEIGHT) / 2;
   const trackCenterY = trackY + TRACK_HEIGHT / 2;
 
-  const getValueFromPageX = (pageX) => {
-    const trackWidth = sliderLayout.width - HANDLE_SIZE;
-    if (trackWidth <= 0) return min;
-
-    const relativeX = pageX - sliderLayout.x - HANDLE_SIZE / 2;
-    const adjustedX = Math.max(0, Math.min(trackWidth, relativeX));
-    const ratio = adjustedX / trackWidth;
-    const value = min + (max - min) * ratio;
-    return Math.round(value / step) * step;
-  };
-
   const getPositionFromValue = (value) => {
-    const trackWidth = sliderLayout.width - HANDLE_SIZE;
-    if (trackWidth <= 0) return HANDLE_SIZE / 2;
+    if (trackWidth <= 0 || max <= min) return HANDLE_SIZE / 2;
     const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
     return HANDLE_SIZE / 2 + ratio * trackWidth;
   };
 
-  const minHandlePanResponder = PanResponder.create({
+  /**
+   * Drag handler for one handle. Uses the finger's distance moved (dx) rather than its
+   * absolute position, so a stale measurement (e.g. taken mid slide-in animation) can't
+   * make the handle jump. Only this component re-renders while dragging; the parent gets
+   * the final range on release.
+   */
+  const makeResponder = (which) => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
-    onPanResponderMove: (evt) => {
-      if (sliderLayout.width === 0) return;
-      const newValue = getValueFromPageX(evt.nativeEvent.pageX);
-      const clampedValue = Math.max(min, Math.min(max, newValue));
-      const newMin = Math.min(clampedValue, localMaxValue - step);
-
-      if (newMin !== localMinValue) {
-        setLocalMinValue(newMin);
-        onValueChange({ min: newMin, max: localMaxValue });
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => {
+      dragStartRef.current = valuesRef.current[which];
+    },
+    onPanResponderMove: (_evt, gesture) => {
+      const { min: lo, max: hi, step: st, trackWidth: width } = propsRef.current;
+      if (width <= 0 || hi <= lo) return;
+      const raw = dragStartRef.current + (gesture.dx / width) * (hi - lo);
+      const snapped = Math.round(raw / st) * st;
+      const current = valuesRef.current;
+      if (which === 'min') {
+        const next = Math.max(lo, Math.min(snapped, current.max - st));
+        if (next !== current.min) {
+          valuesRef.current = { ...current, min: next };
+          setLocalMinValue(next);
+        }
+      } else {
+        const next = Math.min(hi, Math.max(snapped, current.min + st));
+        if (next !== current.max) {
+          valuesRef.current = { ...current, max: next };
+          setLocalMaxValue(next);
+        }
       }
     },
+    onPanResponderRelease: () => propsRef.current.onValueChange?.({ ...valuesRef.current }),
+    onPanResponderTerminate: () => propsRef.current.onValueChange?.({ ...valuesRef.current }),
   });
 
-  const maxHandlePanResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderMove: (evt) => {
-      if (sliderLayout.width === 0) return;
-      const newValue = getValueFromPageX(evt.nativeEvent.pageX);
-      const clampedValue = Math.max(min, Math.min(max, newValue));
-      const newMax = Math.max(clampedValue, localMinValue + step);
-
-      if (newMax !== localMaxValue) {
-        setLocalMaxValue(newMax);
-        onValueChange({ min: localMinValue, max: newMax });
-      }
-    },
-  });
+  // Lazy: build each responder once (useRef(makeResponder(...)) would rebuild it every render).
+  const respondersRef = useRef(null);
+  if (!respondersRef.current) {
+    respondersRef.current = { min: makeResponder('min'), max: makeResponder('max') };
+  }
+  const minHandlePanResponder = respondersRef.current.min;
+  const maxHandlePanResponder = respondersRef.current.max;
 
   const minPosition = getPositionFromValue(localMinValue);
   const maxPosition = getPositionFromValue(localMaxValue);
@@ -84,12 +93,7 @@ export default function RangeSlider({ min, max, minValue, maxValue, onValueChang
 
       <View
         style={styles.sliderContainer}
-        ref={sliderRef}
-        onLayout={() => {
-          sliderRef.current?.measure((fx, fy, fwidth, fheight, px, py) => {
-            setSliderLayout({ width: fwidth, x: px });
-          });
-        }}
+        onLayout={(e) => setTrackWidth(Math.max(0, e.nativeEvent.layout.width - HANDLE_SIZE))}
       >
         <View
           style={[
