@@ -20,7 +20,7 @@ export const STORE_LINKS_TEXT = `iPhone: ${APP_STORE_LISTING_URL}\nAndroid: ${PL
 export function buildFriendInviteMessage(username) {
   const trimmed = typeof username === 'string' ? username.trim() : '';
   const lines = [
-    `Join me on ${APP_DISPLAY_NAME} — track the pubs you've visited in London and Cambridge and compete with friends.`,
+    `Join me on ${APP_DISPLAY_NAME} — track the pubs you've visited in London and compete with friends.`,
   ];
   if (trimmed) {
     lines.push(`Once you join, search for ${trimmed} on the leaderboard tab`);
