@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { fetchFilterOptions } from '../../../services/PubService';
 
 export function useFilterState(allPubs) {
   const [selectedFeatures, setSelectedFeatures] = useState([]);
@@ -11,7 +12,22 @@ export function useFilterState(allPubs) {
   const [minRating, setMinRating] = useState(null);
   const [showFilterScreen, setShowFilterScreen] = useState(false);
 
-  const allOwnerships = useMemo(() => {
+  /** Options from every active pub (server); loaded pubs are only a fallback until they arrive. */
+  const [serverOptions, setServerOptions] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFilterOptions()
+      .then((options) => {
+        if (!cancelled) setServerOptions(options);
+      })
+      .catch((err) => console.warn('useFilterState: filter options failed', err?.message ?? err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loadedOwnerships = useMemo(() => {
     const counts = {};
     allPubs.forEach(pub => {
       if (pub.ownership && pub.ownership.trim()) {
@@ -23,7 +39,10 @@ export function useFilterState(allPubs) {
       .map(([ownership]) => ownership);
   }, [allPubs]);
 
+  const allOwnerships = serverOptions?.ownerships?.length ? serverOptions.ownerships : loadedOwnerships;
+
   const availableYearRange = useMemo(() => {
+    if (serverOptions?.yearRange) return serverOptions.yearRange;
     const years = [];
     allPubs.forEach(pub => {
       if (pub.founded) {
@@ -31,9 +50,9 @@ export function useFilterState(allPubs) {
         if (!isNaN(year)) years.push(year);
       }
     });
-    if (years.length === 0) return { min: 1800, max: 2025 };
+    if (years.length === 0) return { min: 1800, max: new Date().getFullYear() };
     return { min: Math.min(...years), max: Math.max(...years) };
-  }, [allPubs]);
+  }, [allPubs, serverOptions]);
 
   const handleFilterApply = useCallback((filters) => {
     setSelectedFeatures(filters.features || []);
@@ -64,6 +83,5 @@ export function useFilterState(allPubs) {
     handleFilterApply,
     handleFilterPress,
     handleFilterClose,
-    setSelectedArea: null, // placeholder; area filter lives in MapScreen
   };
 }

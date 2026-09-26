@@ -17,6 +17,8 @@ import FavoritesFilterModal from '../components/FavoritesFilterModal';
 import { COLORS } from '../constants/theme';
 import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 const CLOSING_TIME_OPTIONS = [
   { label: 'Open now', value: 'open_now', icon: 'clock-check-outline' },
   { label: 'Open past midnight', value: 'past_midnight', icon: 'weather-night' },
@@ -80,7 +82,7 @@ export default function FilterScreen({
   }, [visible, sheetTranslateY, windowHeight]);
   const filterChipWidth =
     Math.floor((windowWidth - FILTER_SECTION_PAD * 2 - FILTER_CHIP_GAP) / 2);
-  const defaultYearRange = { min: minYear || 1800, max: maxYear || 2025 };
+  const defaultYearRange = { min: minYear || 1800, max: maxYear || CURRENT_YEAR };
   const [localSelectedFeatures, setLocalSelectedFeatures] = useState(new Set(selectedFeatures));
   const [localSelectedOwnerships, setLocalSelectedOwnerships] = useState(new Set(selectedOwnerships || []));
   const [localYearRange, setLocalYearRange] = useState(yearRange || defaultYearRange);
@@ -176,7 +178,7 @@ export default function FilterScreen({
   };
 
   const handleApply = () => {
-    const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || 2025);
+    const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || CURRENT_YEAR);
     onApply({
       features: Array.from(localSelectedFeatures),
       ownerships: Array.from(localSelectedOwnerships),
@@ -466,7 +468,7 @@ export default function FilterScreen({
             <Text style={[styles.sectionTitle, styles.sectionTitleTight]}>Founded Year</Text>
             <RangeSlider
               min={minYear || 1800}
-              max={maxYear || 2025}
+              max={maxYear || CURRENT_YEAR}
               minValue={localYearRange.min}
               maxValue={localYearRange.max}
               onValueChange={handleYearRangeChange}

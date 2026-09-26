@@ -293,6 +293,55 @@ export const fetchLondonPubs = async (options = {}) => {
 };
 
 // ---------------------------------------------------------------------------
+// Filter options (from every active pub, not just those loaded on the map)
+// ---------------------------------------------------------------------------
+
+let _filterOptionsPromise = null;
+
+/**
+ * Ownership values (most common first) and founded-year range across all active pubs,
+ * so the filter screen's choices don't change as the user pans. Cached per session.
+ */
+export const fetchFilterOptions = () => {
+	if (!_filterOptionsPromise) {
+		_filterOptionsPromise = (async () => {
+			const counts = {};
+			let minYear = Infinity;
+			let maxYear = -Infinity;
+			for (let from = 0; ; from += PAGE_SIZE) {
+				const { data, error } = await supabase
+					.from('Pubs_List')
+					.select('ownership, founded')
+					.eq('is_active', true)
+					.order('id', { ascending: true })
+					.range(from, from + PAGE_SIZE - 1);
+				if (error) throw error;
+				for (const row of data || []) {
+					const owner = typeof row.ownership === 'string' ? row.ownership.trim() : '';
+					if (owner) counts[owner] = (counts[owner] || 0) + 1;
+					const year = parseInt(row.founded, 10);
+					if (Number.isFinite(year)) {
+						minYear = Math.min(minYear, year);
+						maxYear = Math.max(maxYear, year);
+					}
+				}
+				if (!data || data.length < PAGE_SIZE) break;
+			}
+			return {
+				ownerships: Object.entries(counts)
+					.sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0])))
+					.map(([owner]) => owner),
+				yearRange: Number.isFinite(minYear) ? { min: minYear, max: maxYear } : null,
+			};
+		})().catch((err) => {
+			_filterOptionsPromise = null; // retry next time
+			throw err;
+		});
+	}
+	return _filterOptionsPromise;
+};
+
+// ---------------------------------------------------------------------------
 // Server-side pub search (uses search_pubs RPC)
 // ---------------------------------------------------------------------------
 
