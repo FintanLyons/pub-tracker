@@ -99,6 +99,10 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 - `REVOKE ... FROM PUBLIC` alone does nothing on Supabase. For every new function: `REVOKE ALL ON FUNCTION ... FROM PUBLIC, anon, authenticated;` then `GRANT EXECUTE ... TO authenticated` **only** if the app calls it via `supabase.rpc()`.
 - The app requires login for every screen; `anon` needs no function access.
 
+### ⚠️ Pending database migrations
+
+- **`scripts/social_security_phase_b_2026_09.sql` — NOT YET RUN (deliberately).** Hides leagues and invite codes from non-members. Run it only once most users have updated to a build that joins leagues via `join_league_by_code()` (commit "Join leagues by code on the server"); older builds can't join leagues after it runs. Remind the user about this whenever database or release work comes up. After running: verify via MCP, update the schema baseline, and delete this bullet.
+
 ### Tables
 
 | Table | Purpose |
