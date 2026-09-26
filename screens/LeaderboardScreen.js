@@ -11,6 +11,12 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
+import {
+  consumeSocialAction,
+  markNotificationPromptShown,
+  shouldOfferNotificationPrompt,
+} from '../services/notificationPrompt';
+import { registerPushNotificationsForUser } from '../services/PushNotificationService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppAlert } from '../contexts/AppAlertContext';
@@ -138,6 +144,33 @@ export default function LeaderboardScreen() {
       setLoading(false);
     }
   };
+
+  /**
+   * After a friend request / league action, offer notifications once (with a reason)
+   * instead of asking at first launch. Delay lets the closing modal finish animating.
+   */
+  const offerNotificationsAfterSocialAction = useCallback(() => {
+    if (!consumeSocialAction()) return;
+    setTimeout(async () => {
+      if (!(await shouldOfferNotificationPrompt())) return;
+      markNotificationPromptShown();
+      showAppAlert({
+        title: 'Turn on notifications?',
+        message: 'Get a notification when friends accept your request, add you to a league or summon you to the pub.',
+        tone: 'neutral',
+        buttons: [
+          { text: 'Not now', variant: 'secondary' },
+          {
+            text: 'Turn on',
+            variant: 'primary',
+            onPress: () => {
+              if (authUser?.id) registerPushNotificationsForUser(authUser.id, { prompt: true });
+            },
+          },
+        ],
+      });
+    }, 450);
+  }, [authUser?.id, showAppAlert]);
 
   const confirmLeaveLeague = async () => {
     if (!selectedLeague || !currentUser || leavingLeague) {
@@ -479,6 +512,7 @@ export default function LeaderboardScreen() {
         onClose={() => {
           setShowAddFriendModal(false);
           setOpenAddFriendOnRequests(false);
+          offerNotificationsAfterSocialAction();
         }}
         currentUserId={currentUser?.id}
         currentUsername={currentUser?.username}
@@ -496,13 +530,19 @@ export default function LeaderboardScreen() {
       />
       <CreateLeagueModal
         visible={showCreateLeagueModal}
-        onClose={() => setShowCreateLeagueModal(false)}
+        onClose={() => {
+          setShowCreateLeagueModal(false);
+          offerNotificationsAfterSocialAction();
+        }}
         currentUserId={currentUser?.id}
         onLeagueCreated={loadData}
       />
       <JoinLeagueModal
         visible={showJoinLeagueModal}
-        onClose={() => setShowJoinLeagueModal(false)}
+        onClose={() => {
+          setShowJoinLeagueModal(false);
+          offerNotificationsAfterSocialAction();
+        }}
         currentUserId={currentUser?.id}
         onJoined={loadData}
       />

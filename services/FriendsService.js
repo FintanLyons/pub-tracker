@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase';
+import { noteSocialAction } from './notificationPrompt';
 
 /**
  * Send a friend request
@@ -29,6 +30,7 @@ export const sendFriendRequest = async (userId, friendId) => {
     .select();
 
   if (error) throw error;
+  noteSocialAction();
   return { alreadyExists: false, data };
 };
 
@@ -43,6 +45,7 @@ export const acceptFriendRequest = async (friendshipId) => {
     .select();
 
   if (error) throw error;
+  noteSocialAction();
   return data;
 };
 

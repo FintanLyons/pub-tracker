@@ -63,9 +63,23 @@ function logPushDiag(stage, detail) {
   console.warn(`[Push] ${stage}${line ? `: ${line}` : ''}`);
 }
 
-export async function registerPushNotificationsForUser(userId) {
+/**
+ * @param {string} userId
+ * @param {{ prompt?: boolean }} [options] prompt=false (default): register only if permission
+ *   was already granted — never shows an OS dialog. prompt=true: ask the OS first.
+ */
+export async function registerPushNotificationsForUser(userId, { prompt = false } = {}) {
   if (!userId || Platform.OS === 'web') return;
   ensureHandler();
+
+  if (!prompt) {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') return;
+    } catch {
+      return;
+    }
+  }
 
   try {
     const { data: authData, error: authErr } = await supabase.auth.getUser();

@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../config/supabase';
+import { noteSocialAction } from './notificationPrompt';
 
 /** 32 chars: 256 % 32 === 0 so uniform index = byte % 32 */
 const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -48,6 +49,7 @@ export const createLeague = async (userId, leagueName) => {
   if (!data) throw new Error('Unable to create the league. Please try again.');
 
   await addLeagueMember(data.id, userId);
+  noteSocialAction();
   return data;
 };
 
@@ -94,6 +96,7 @@ export const joinLeagueByCode = async (userId, code) => {
     if (error.code === 'P0002') throw new Error('League not found. Check the code and try again.');
     throw error;
   }
+  noteSocialAction();
   return { league: data.league, alreadyMember: Boolean(data.already_member) };
 };
 
