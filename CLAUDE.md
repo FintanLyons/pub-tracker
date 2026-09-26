@@ -147,6 +147,12 @@ The stats RPCs reject calls for another user's id. Everything else (`compute_use
 - **Auth sessions** — only a definite rejection from the auth server (`isInvalidSessionError`) may sign a user out. Offline / timeouts / 5xx keep the session; `AuthContext` falls back to the last cached profile (`auth:lastProfile:v1`) or shows `ConnectionErrorScreen`. Sign-in functions only create the session — the caller loads the profile via `refreshUser()`.
 - **`useFocusEffect` staleness check** — ProfileScreen refreshes stats if `lastUpdated` is older than 30 s; opening the trophy modal also refreshes when stale
 
+## Checks before committing
+
+There are no tests or linter. At minimum run:
+- `npm run check:undefined` — identifiers used but never declared/imported (runtime `ReferenceError`; Metro bundling does not catch these)
+- `npx expo export --platform android --output-dir /tmp/…` — the app bundles
+
 ## Colour theme
 
 All colours are defined in `constants/theme.js` and imported as `COLORS`. Do not declare colour constants locally in component files.
