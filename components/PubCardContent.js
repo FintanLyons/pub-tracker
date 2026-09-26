@@ -16,6 +16,9 @@ import { COLORS } from '../constants/theme';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useUserStats } from '../contexts/UserStatsContext';
+import { createLatestValueSync } from '../utils/latestValueSync';
 import {
   getDrinkCount,
   upsertDrinkCount,
@@ -29,6 +32,12 @@ import { getOpeningStatus } from '../utils/openingHours';
 import { resolvePubPhotoUrls } from '../constants/pubPhotoPlaceholder';
 import PubReviewsModal from './PubReviewsModal';
 import PubSummonTroopsModal from './PubSummonTroopsModal';
+
+const DRINK_SAVE_FAILED_MESSAGE = "Couldn't save your drinks — check your connection and try again.";
+const REVIEW_SAVE_FAILED_MESSAGE = "Couldn't save your review. Check your connection and try again.";
+const REVIEW_DELETE_FAILED_MESSAGE = "Couldn't delete your review. Check your connection and try again.";
+/** Wait for drink taps to settle before recomputing stats. */
+const DRINK_STATS_REFRESH_DELAY_MS = 1500;
 
 const openDirections = async (lat, lon) => {
   const destination = `${lat},${lon}`;
@@ -82,6 +91,8 @@ export default function PubCardContent({
   onBlockingOverlayVisibleChange,
 }) {
   const { showAppAlert } = useAppAlert();
+  const { showToast } = useToast();
+  const { refreshUserStats } = useUserStats();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
@@ -100,11 +111,21 @@ export default function PubCardContent({
 
   // ── Drinks ─────────────────────────────────────────────────────────────────
   const [drinkCount, setDrinkCount] = useState(0);
-  const [drinkCountLoading, setDrinkCountLoading] = useState(false);
+  /** 'loading' | 'loaded' | 'error' — +/− stay disabled until the real count is known. */
+  const [drinkLoadState, setDrinkLoadState] = useState('loading');
+  /** { pubId, sync } — sync sends only the latest count, one request at a time, in order. */
+  const drinkSyncRef = useRef(null);
+  const drinkStatsTimerRef = useRef(null);
+  // Latest callbacks for save handlers created once per pub load.
+  const refreshUserStatsRef = useRef(refreshUserStats);
+  const showToastRef = useRef(showToast);
+  refreshUserStatsRef.current = refreshUserStats;
+  showToastRef.current = showToast;
 
   // ── Reviews ────────────────────────────────────────────────────────────────
   const [reviews, setReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsLoadFailed, setReviewsLoadFailed] = useState(false);
   const [userReview, setUserReview] = useState(null);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
   const [showSummonModal, setShowSummonModal] = useState(false);
@@ -114,6 +135,55 @@ export default function PubCardContent({
   const [galleryScrollLock, setGalleryScrollLock] = useState(false);
   const galleryRef = useRef(null);
   const galleryTouchStart = useRef({ x: 0, y: 0 });
+
+  const loadDrinkCount = useCallback((pubId) => {
+    if (!userId || !pubId) return;
+    const entry = { pubId, sync: null };
+    drinkSyncRef.current = entry;
+    setDrinkLoadState('loading');
+    getDrinkCount(userId, pubId)
+      .then((count) => {
+        if (drinkSyncRef.current !== entry) return;
+        entry.sync = createLatestValueSync({
+          confirmed: count,
+          save: (value) => upsertDrinkCount(userId, pubId, value),
+          onSaved: () => {
+            if (drinkStatsTimerRef.current) clearTimeout(drinkStatsTimerRef.current);
+            drinkStatsTimerRef.current = setTimeout(() => {
+              drinkStatsTimerRef.current = null;
+              refreshUserStatsRef.current?.();
+            }, DRINK_STATS_REFRESH_DELAY_MS);
+          },
+          onFailure: (confirmed) => {
+            // Fall back to what the server has; never leave an unsaved number on screen.
+            if (drinkSyncRef.current === entry) setDrinkCount(confirmed);
+            showToastRef.current?.(DRINK_SAVE_FAILED_MESSAGE);
+          },
+        });
+        setDrinkCount(count);
+        setDrinkLoadState('loaded');
+      })
+      .catch(() => {
+        if (drinkSyncRef.current === entry) setDrinkLoadState('error');
+      });
+  }, [userId]);
+
+  const loadReviews = useCallback(async (pubId) => {
+    setReviewsLoading(true);
+    setReviewsLoadFailed(false);
+    try {
+      const [allReviews, mine] = await Promise.all([
+        getReviews(pubId),
+        userId ? getUserReview(userId, pubId) : Promise.resolve(null),
+      ]);
+      setReviews(allReviews);
+      setUserReview(mine);
+    } catch {
+      setReviewsLoadFailed(true);
+    } finally {
+      setReviewsLoading(false);
+    }
+  }, [userId]);
 
   // Reset and re-fetch when the pub changes
   useEffect(() => {
@@ -127,34 +197,13 @@ export default function PubCardContent({
     galleryRef.current?.scrollTo({ x: 0, animated: false });
 
     if (!pub?.id) return;
+    loadDrinkCount(pub.id);
+    loadReviews(pub.id);
+  }, [pub?.id, loadDrinkCount, loadReviews]);
 
-    // Drinks
-    if (userId) {
-      setDrinkCountLoading(true);
-      getDrinkCount(userId, pub.id)
-        .then(setDrinkCount)
-        .catch(() => {})
-        .finally(() => setDrinkCountLoading(false));
-    }
-
-    // Reviews
-    setReviewsLoading(true);
-    const fetchReviews = async () => {
-      try {
-        const [allReviews, mine] = await Promise.all([
-          getReviews(pub.id),
-          userId ? getUserReview(userId, pub.id) : Promise.resolve(null),
-        ]);
-        setReviews(allReviews);
-        setUserReview(mine);
-      } catch {
-        // silently ignore fetch errors
-      } finally {
-        setReviewsLoading(false);
-      }
-    };
-    fetchReviews();
-  }, [pub?.id, userId]);
+  useEffect(() => () => {
+    if (drinkStatsTimerRef.current) clearTimeout(drinkStatsTimerRef.current);
+  }, []);
 
   const blockingOverlayOpen = showReviewsModal || showSummonModal;
 
@@ -179,22 +228,18 @@ export default function PubCardContent({
 
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {
-    if (!userId) return;
-    let shouldMarkVisited = false;
-    setDrinkCount((prev) => {
-      const next = Math.max(0, prev + delta);
-      shouldMarkVisited = delta > 0 && prev === 0 && !pub.isVisited;
-      upsertDrinkCount(userId, pub.id, next).catch(() => {
-        setDrinkCount(prev);
-      });
-      return next;
-    });
-    // Never call onToggleVisited inside the setDrinkCount updater — that updates MapScreen
-    // during PubCardContent's state flush ("Cannot update MapScreen while rendering").
-    if (shouldMarkVisited && onToggleVisited) {
-      queueMicrotask(() => onToggleVisited(pub.id));
+    const entry = drinkSyncRef.current;
+    const sync = entry?.sync;
+    if (!userId || !sync || entry.pubId !== pub?.id || drinkLoadState !== 'loaded') return;
+    const next = Math.max(0, sync.desired + delta);
+    if (next === sync.desired) return;
+    const firstDrink = sync.desired === 0 && delta > 0;
+    sync.set(next);
+    setDrinkCount(next);
+    if (firstDrink && !pub.isVisited && onToggleVisited) {
+      onToggleVisited(pub.id, true);
     }
-  }, [userId, pub?.id, pub?.isVisited, onToggleVisited]);
+  }, [userId, pub?.id, pub?.isVisited, drinkLoadState, onToggleVisited]);
 
   // ── Review handlers ────────────────────────────────────────────────────────
   const handleSubmitReview = useCallback(async (rating, body) => {
@@ -204,31 +249,26 @@ export default function PubCardContent({
     const wasVisited = pub?.isVisited;
     try {
       await upsertReview(userId, pubId, rating, body);
-      const [allReviews, mine] = await Promise.all([
-        getReviews(pubId),
-        getUserReview(userId, pubId),
-      ]);
-      setReviews(allReviews);
-      setUserReview(mine);
-      if (isNewReview && !wasVisited && onToggleVisited) {
-        onToggleVisited(pubId);
-      }
     } catch {
-      // silently ignore
+      // Thrown to PubReviewsModal, which shows it inline and keeps the form open.
+      throw new Error(REVIEW_SAVE_FAILED_MESSAGE);
     }
-  }, [userId, pub?.id, pub?.isVisited, userReview, onToggleVisited]);
+    if (isNewReview && !wasVisited && onToggleVisited) {
+      onToggleVisited(pubId, true);
+    }
+    await loadReviews(pubId);
+  }, [userId, pub?.id, pub?.isVisited, userReview, onToggleVisited, loadReviews]);
 
   const handleDeleteReview = useCallback(async () => {
     if (!userId) return;
     try {
       await deleteReview(userId, pub.id);
-      const allReviews = await getReviews(pub.id);
-      setReviews(allReviews);
-      setUserReview(null);
     } catch {
-      // silently ignore
+      throw new Error(REVIEW_DELETE_FAILED_MESSAGE);
     }
-  }, [userId, pub?.id]);
+    setUserReview(null);
+    await loadReviews(pub.id);
+  }, [userId, pub?.id, loadReviews]);
 
   // ── Derived review stats ───────────────────────────────────────────────────
   const reviewCount = reviews.length;
@@ -344,6 +384,14 @@ export default function PubCardContent({
                 <MaterialCommunityIcons name="account-group-outline" size={15} color={COLORS.mediumGrey} />
               </View>
             </>
+          ) : reviewsLoadFailed ? (
+            <TouchableOpacity
+              onPress={() => loadReviews(pub.id)}
+              accessibilityRole="button"
+              accessibilityLabel="Couldn't load reviews. Tap to retry."
+            >
+              <Text style={styles.noReviewsYetCompact}>Couldn't load reviews · Retry</Text>
+            </TouchableOpacity>
           ) : (
             <Text style={styles.noReviewsYetCompact}>No reviews</Text>
           )}
@@ -512,10 +560,11 @@ export default function PubCardContent({
               <TouchableOpacity
                 style={[
                   styles.actionRectButton,
-                  (drinkCount === 0 || drinkCountLoading) && styles.actionRectButtonDisabled,
+                  (drinkCount === 0 || drinkLoadState !== 'loaded') && styles.actionRectButtonDisabled,
                 ]}
                 onPress={() => handleChangeDrink(-1)}
-                disabled={drinkCount === 0 || drinkCountLoading}
+                disabled={drinkCount === 0 || drinkLoadState !== 'loaded'}
+                accessibilityLabel="Remove a drink"
                 activeOpacity={0.7}
               >
                 <MaterialCommunityIcons
@@ -532,8 +581,16 @@ export default function PubCardContent({
                   color={COLORS.amber}
                 />
                 <View style={styles.drinkCountSlot}>
-                  {drinkCountLoading ? (
+                  {drinkLoadState === 'loading' ? (
                     <ActivityIndicator size="small" color={COLORS.amber} />
+                  ) : drinkLoadState === 'error' ? (
+                    <TouchableOpacity
+                      onPress={() => loadDrinkCount(pub.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Couldn't load your drinks. Tap to retry."
+                    >
+                      <MaterialCommunityIcons name="refresh" size={24} color={COLORS.amber} />
+                    </TouchableOpacity>
                   ) : (
                     <Text
                       style={[
@@ -552,10 +609,11 @@ export default function PubCardContent({
                 style={[
                   styles.actionRectButton,
                   styles.reviewsRowSpaced,
-                  drinkCountLoading && styles.actionRectButtonDisabled,
+                  drinkLoadState !== 'loaded' && styles.actionRectButtonDisabled,
                 ]}
                 onPress={() => handleChangeDrink(1)}
-                disabled={drinkCountLoading}
+                disabled={drinkLoadState !== 'loaded'}
+                accessibilityLabel="Add a drink"
                 activeOpacity={0.7}
               >
                 <MaterialCommunityIcons name="plus" size={26} color="#FFFFFF" />
@@ -571,6 +629,8 @@ export default function PubCardContent({
         pubName={pub.name}
         reviews={reviews}
         reviewsLoading={reviewsLoading}
+        reviewsLoadFailed={reviewsLoadFailed}
+        onRetryLoadReviews={() => loadReviews(pub.id)}
         userReview={userReview}
         userId={userId}
         avgRating={avgRatingNumeric}
