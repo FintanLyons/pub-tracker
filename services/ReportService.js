@@ -97,7 +97,7 @@ export async function submitPubReport({
 
   if (reportType === 'missing_pub') {
     if (!addr_housenumber) {
-      throw new Error('House number is required.');
+      throw new Error('Enter the building number or name.');
     }
     if (!addr_street) {
       throw new Error('Street is required.');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -96,6 +96,8 @@ export default function PubReportFormModal({
   const [photoPermissionDialog, setPhotoPermissionDialog] = useState(false);
   /** pub_correction only: true = still operating, false = permanently closed (not opening hours). */
   const [pubStillOpen, setPubStillOpen] = useState(true);
+  /** Correction mode: the pre-filled values, to tell whether anything was actually changed. */
+  const prefillSnapshotRef = useRef(null);
 
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const modalW = Math.min(screenW - 24, 440);
@@ -121,7 +123,21 @@ export default function PubReportFormModal({
       setOpeningHours(openingHoursPrefillFromPub(initialPub));
       setHistory(historyPrefillFromPub(initialPub));
       setFeatures(featureMapFromPubFeatureArray(initialPub.features));
+      prefillSnapshotRef.current = JSON.stringify({
+        pubName: initialPub.name || '',
+        chainOrIndependent: initialPub.ownership || '',
+        foundedYear: foundedYearFromPub(initialPub),
+        housenumber: initialPub.addrHousenumber || '',
+        street: initialPub.addrStreet || '',
+        postcode: '',
+        website: initialPub.website ? String(initialPub.website) : '',
+        phone: digitsOnlyPhone(initialPub.phone),
+        openingHours: openingHoursPrefillFromPub(initialPub),
+        history: historyPrefillFromPub(initialPub),
+        features: featureMapFromPubFeatureArray(initialPub.features),
+      });
     } else {
+      prefillSnapshotRef.current = null;
       setPubName('');
       setChainOrIndependent('');
       setFoundedYear(null);
@@ -139,7 +155,7 @@ export default function PubReportFormModal({
     setErrorMessage(null);
     setFoundedPickerVisible(false);
     setPhotoPermissionDialog(false);
-  }, [visible, mode, initialPub?.id]);
+  }, [visible, mode, initialPub?.id, initialPub?.detailsLoaded]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -195,13 +211,23 @@ export default function PubReportFormModal({
     if (normalised) setPostcode(normalised);
   }, [postcode]);
 
+  // Corrections must change something (blank ones used to reach review and earn points).
+  const correctionHasChanges = mode === 'pub_correction' && (
+    !pubStillOpen
+    || imageUris.length > 0
+    || prefillSnapshotRef.current !== JSON.stringify({
+      pubName, chainOrIndependent, foundedYear, housenumber, street, postcode,
+      website, phone, openingHours, history, features,
+    })
+  );
+
   const canSubmit =
     mode === 'missing_pub'
       ? pubName.trim().length > 0
         && housenumber.trim().length > 0
         && street.trim().length > 0
         && postcode.trim().length > 0
-      : true;
+      : correctionHasChanges;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isSubmitting) return;
@@ -338,7 +364,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Pub name *</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. The Crown"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={pubName}
                 onChangeText={setPubName}
@@ -350,7 +376,7 @@ export default function PubReportFormModal({
               <Text style={styles.sectionHint}>Chain, brewery, or independent operator</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. Fuller's, Greene King or Independent"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={chainOrIndependent}
                 onChangeText={setChainOrIndependent}
@@ -379,14 +405,14 @@ export default function PubReportFormModal({
               <Text style={styles.sectionTitle}>Address</Text>
 
               <Text style={styles.label}>
-                House number{mode === 'missing_pub' ? ' *' : ' (optional)'}
+                Number or building name{mode === 'missing_pub' ? ' *' : ' (optional)'}
               </Text>
               {mode !== 'missing_pub' ? (
                 <Text style={styles.sectionHint}>Building number or name, if known</Text>
               ) : null}
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. 12 or The Old Bank"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={housenumber}
                 onChangeText={setHousenumber}
@@ -399,7 +425,7 @@ export default function PubReportFormModal({
               </Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. High Street"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={street}
                 onChangeText={setStreet}
@@ -425,7 +451,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Website</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. thecrown.co.uk"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={website}
                 onChangeText={setWebsite}
@@ -438,7 +464,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Phone number</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. 020 7946 0000"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={phone}
                 onChangeText={handlePhoneChange}
@@ -483,7 +509,7 @@ export default function PubReportFormModal({
               <Text style={styles.sectionHint}>Shown on the pub card as the main description</Text>
               <TextInput
                 style={[styles.textInput, styles.textInputTall]}
-                placeholder=""
+                placeholder="What makes this pub special? History, atmosphere, what it's known for…"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={history}
                 onChangeText={setHistory}
@@ -524,6 +550,9 @@ export default function PubReportFormModal({
               </View>
 
               {errorMessage ? <Text style={styles.errorMessage}>{errorMessage}</Text> : null}
+              {mode === 'pub_correction' && !canSubmit && !errorMessage ? (
+                <Text style={styles.submitHint}>Change at least one detail to send a correction.</Text>
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.submitButton, (!canSubmit || isSubmitting) && styles.submitButtonDisabled]}
@@ -868,7 +897,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   errorMessage: {
-    color: '#D9534F',
+    color: COLORS.errorRed,
+    marginBottom: 12,
+  },
+  submitHint: {
+    color: COLORS.mediumGrey,
+    fontSize: 13,
     marginBottom: 12,
   },
   submitButton: {
