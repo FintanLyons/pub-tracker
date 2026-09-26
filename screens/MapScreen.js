@@ -24,6 +24,7 @@ import {
   Map as MLRNMap,
 } from '@maplibre/maplibre-react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { submitPubReport } from '../services/ReportService';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
@@ -49,6 +50,10 @@ import {
 } from '../utils/pendingVisitChanges';
 
 const NO_DELTAS = { byDistrict: new Map(), byArea: new Map() };
+
+/** One-time hint pointing at the "report a missing pub" button. */
+const REPORT_PUB_HINT_KEY = 'hint:reportMissingPub:v1';
+const REPORT_PUB_HINT_MS = 8000;
 import {
   postcodeAreaLabelPointsGeojson,
   postcodeAreaOutlinesGeojson,
@@ -153,6 +158,14 @@ export default function MapScreen() {
   } = useFilterState(allPubs);
 
   const [favoritesFilterPubIds, setFavoritesFilterPubIds] = useState(null);
+
+  // "Open now" depends on the clock: re-evaluate every minute while that filter is on.
+  const [openNowTick, setOpenNowTick] = useState(0);
+  useEffect(() => {
+    if (closingTimeMin !== 'open_now') return undefined;
+    const timer = setInterval(() => setOpenNowTick((t) => t + 1), 60 * 1000);
+    return () => clearInterval(timer);
+  }, [closingTimeMin]);
 
   useEffect(() => {
     if (!favoritesFilterUserIds?.length) {
@@ -278,6 +291,7 @@ export default function MapScreen() {
     showOnlyAchievements,
     closingTimeMin,
     minRating,
+    openNowTick,
   ]);
 
   // Deselect pub when it falls outside the active filter set.
@@ -473,9 +487,35 @@ export default function MapScreen() {
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
   const [missingPubReportSubmittedVisible, setMissingPubReportSubmittedVisible] = useState(false);
 
-  const openMissingPubModal = useCallback(() => {
-    setIsMissingPubModalVisible(true);
+  const [showReportPubHint, setShowReportPubHint] = useState(false);
+
+  const dismissReportPubHint = useCallback(() => {
+    setShowReportPubHint(false);
+    AsyncStorage.setItem(REPORT_PUB_HINT_KEY, 'true').catch(() => {});
   }, []);
+
+  // First time the map has pubs on it, point out what the flag button does.
+  useEffect(() => {
+    if (!initialPubsReady) return undefined;
+    let cancelled = false;
+    let timer = null;
+    AsyncStorage.getItem(REPORT_PUB_HINT_KEY)
+      .then((seen) => {
+        if (cancelled || seen === 'true') return;
+        setShowReportPubHint(true);
+        timer = setTimeout(dismissReportPubHint, REPORT_PUB_HINT_MS);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [initialPubsReady, dismissReportPubHint]);
+
+  const openMissingPubModal = useCallback(() => {
+    if (showReportPubHint) dismissReportPubHint();
+    setIsMissingPubModalVisible(true);
+  }, [showReportPubHint, dismissReportPubHint]);
 
   const closeMissingPubModal = useCallback(() => {
     setIsMissingPubModalVisible(false);
@@ -801,7 +841,24 @@ export default function MapScreen() {
         renderToHardwareTextureAndroid
         style={[screenStyles.floatingLeft, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
-        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={openMissingPubModal}>
+        {showReportPubHint ? (
+          <TouchableOpacity
+            style={screenStyles.hintBubble}
+            onPress={dismissReportPubHint}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss hint"
+          >
+            <Text style={screenStyles.hintText}>Pub missing from the map? Tap here to add it.</Text>
+            <View style={screenStyles.hintArrow} />
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          style={baseStyles.mapFloatingButton}
+          onPress={openMissingPubModal}
+          accessibilityRole="button"
+          accessibilityLabel="Report a missing pub"
+        >
           <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
@@ -811,7 +868,12 @@ export default function MapScreen() {
         renderToHardwareTextureAndroid
         style={[screenStyles.floatingRight, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
-        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={handleCurrentLocation}>
+        <TouchableOpacity
+          style={baseStyles.mapFloatingButton}
+          onPress={handleCurrentLocation}
+          accessibilityRole="button"
+          accessibilityLabel="Go to my location"
+        >
           <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
@@ -840,6 +902,30 @@ const screenStyles = StyleSheet.create({
     left: 16,
     zIndex: 1001,
     elevation: 6,
+  },
+  hintBubble: {
+    position: 'absolute',
+    bottom: MAP_FLOATING_BUTTON_SIZE + 10,
+    left: 0,
+    width: 210,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.charcoal,
+  },
+  hintText: {
+    color: COLORS.white,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  hintArrow: {
+    position: 'absolute',
+    bottom: -6,
+    left: MAP_FLOATING_BUTTON_SIZE / 2 - 6,
+    width: 12,
+    height: 12,
+    backgroundColor: COLORS.charcoal,
+    transform: [{ rotate: '45deg' }],
   },
   floatingRight: {
     position: 'absolute',
