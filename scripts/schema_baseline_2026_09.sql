@@ -5,7 +5,7 @@
 -- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
 -- (updated for scripts/signup_username_null_2026_09.sql and
 -- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql,
--- scripts/username_case_insensitive_2026_09.sql).
+-- scripts/username_case_insensitive_2026_09.sql, scripts/league_ownership_transfer_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -1214,6 +1214,41 @@ END;
 $function$
 ;
 
+-- When a league's owner leaves, hand it to the longest-standing member.
+CREATE OR REPLACE FUNCTION public.tr_transfer_league_ownership()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_next_owner uuid;
+BEGIN
+  -- Only when the departing member owns the league (and the league still exists).
+  IF NOT EXISTS (
+    SELECT 1 FROM public.leagues
+     WHERE id = OLD.league_id AND created_by = OLD.user_id
+  ) THEN
+    RETURN OLD;
+  END IF;
+
+  SELECT m.user_id INTO v_next_owner
+    FROM public.league_members m
+   WHERE m.league_id = OLD.league_id
+   ORDER BY m.joined_at NULLS LAST, m.user_id
+   LIMIT 1;
+
+  IF v_next_owner IS NOT NULL THEN
+    UPDATE public.leagues
+       SET created_by = v_next_owner
+     WHERE id = OLD.league_id;
+  END IF;
+
+  RETURN OLD;
+END;
+$function$
+;
+
 CREATE OR REPLACE FUNCTION public.notification_jwt_user_id()
  RETURNS uuid
  LANGUAGE sql
@@ -1902,6 +1937,7 @@ CREATE TRIGGER trg_reports_after_status_change AFTER UPDATE OF status ON public.
 CREATE TRIGGER tr_friend_request_notification AFTER INSERT ON public.friendships FOR EACH ROW EXECUTE FUNCTION tr_enqueue_friend_request_notification();
 CREATE TRIGGER tr_league_member_added_notification AFTER INSERT ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_enqueue_league_added_notification();
 CREATE TRIGGER tr_delete_league_if_empty AFTER DELETE ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_delete_league_if_empty();
+CREATE TRIGGER tr_transfer_league_ownership AFTER DELETE ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_transfer_league_ownership();
 CREATE TRIGGER update_leagues_updated_at BEFORE UPDATE ON public.leagues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 
