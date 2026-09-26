@@ -34,6 +34,19 @@ import ShareLeagueModal from '../components/ShareLeagueModal';
 import AppFeedbackModal from '../components/AppFeedbackModal';
 import { COLORS } from '../constants/theme';
 
+/** What leaving does: last member deletes the league; an owner hands it on. */
+function leaveLeagueMessage(league, members, userId) {
+  const others = (members || []).filter((m) => m.id !== userId).length;
+  if (others === 0) {
+    return `You're the last member of "${league.name}" — leaving deletes the league for good.`;
+  }
+  if (league.created_by === userId) {
+    return `You'll leave "${league.name}" and ownership passes to the longest-standing member. `
+      + 'You can rejoin later with the code.';
+  }
+  return `You'll leave "${league.name}" and disappear from its leaderboard until you join again with the code.`;
+}
+
 export default function LeaderboardScreen() {
   const { showAppAlert } = useAppAlert();
   const { user: authUser } = useAuth();
@@ -447,7 +460,8 @@ export default function LeaderboardScreen() {
                       accessibilityLabel="Leave league"
                       accessibilityRole="button"
                     >
-                      <Text style={styles.leagueLeaveMinus}>-</Text>
+                      <MaterialCommunityIcons name="exit-to-app" size={18} color={COLORS.errorRed} />
+                      <Text style={styles.leagueLeaveText}>Leave</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -479,17 +493,29 @@ export default function LeaderboardScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {activeTab === 'friends' && (
-          friendsLeaderboard.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="account-group-outline" size={64} color={COLORS.mediumGrey} />
-              <Text style={styles.emptyText}>No friends yet</Text>
-              <Text style={styles.emptySubtext}>Add friends to compete with them!</Text>
-            </View>
-          ) : (
-            <View style={styles.leaderboardContainer}>
-              {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
-            </View>
-          )
+          <>
+            {friendsLeaderboard.length > 0 ? (
+              <View style={styles.leaderboardContainer}>
+                {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
+              </View>
+            ) : null}
+            {/* The board always includes you, so "no friends" means one row or fewer. */}
+            {friendsLeaderboard.length <= 1 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialCommunityIcons name="account-group-outline" size={56} color={COLORS.mediumGrey} />
+                <Text style={styles.emptyText}>It's just you so far</Text>
+                <Text style={styles.emptySubtext}>Add friends to see who's visited the most pubs.</Text>
+                <TouchableOpacity
+                  style={styles.emptyActionButton}
+                  onPress={() => setShowAddFriendModal(true)}
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons name="account-plus" size={18} color={COLORS.white} />
+                  <Text style={styles.emptyActionText}>Add friends</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </>
         )}
 
         {activeTab === 'leagues' && selectedLeague && (
@@ -609,9 +635,7 @@ export default function LeaderboardScreen() {
             </View>
 
             <Text style={styles.leaveLeagueBody}>
-              {selectedLeague
-                ? `You will leave "${selectedLeague.name}" and disappear from its leaderboard until you join again.`
-                : ''}
+              {selectedLeague ? leaveLeagueMessage(selectedLeague, leagueLeaderboard, currentUser?.id) : ''}
             </Text>
 
             <View style={styles.leaveLeagueActions}>
@@ -834,11 +858,12 @@ const styles = StyleSheet.create({
     borderColor: COLORS.divider,
   },
   leagueLeaveIconButton: {
-    width: 44,
     height: 44,
+    paddingHorizontal: 14,
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: COLORS.divider,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: COLORS.white,
@@ -846,11 +871,26 @@ const styles = StyleSheet.create({
   leagueLeaveIconButtonDisabled: {
     opacity: 0.5,
   },
-  leagueLeaveMinus: {
-    fontSize: 26,
+  emptyActionButton: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: COLORS.amber,
+  },
+  emptyActionText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  leagueLeaveText: {
+    marginLeft: 4,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.errorRed,
-    lineHeight: 28,
   },
   leagueEmptyCardInner: {
     paddingVertical: 4,
