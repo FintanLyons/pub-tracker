@@ -133,11 +133,18 @@ export const resendConfirmationEmail = async (email) => {
     if (isNetworkError(error)) throw new Error(CONNECTION_ERROR_MESSAGE);
     const m = (error.message || '').toLowerCase();
     if (m.includes('rate limit') || m.includes('seconds')) {
-      throw new Error('Please wait a minute before requesting another email.');
+      // e.g. "you can only request this after 45 seconds"
+      const seconds = Number((m.match(/after (\d+) seconds?/) || [])[1]) || 60;
+      const err = new Error(`You can request another email in ${seconds} seconds.`);
+      err.retryAfterSeconds = seconds;
+      throw err;
     }
     throw new Error("Couldn't resend the email. Please try again.");
   }
 };
+
+/** Supabase allows one confirmation email per address per minute. */
+export const CONFIRMATION_RESEND_COOLDOWN_SECONDS = 60;
 
 /**
  * Send a password-reset email containing a one-time code ({{ .Token }} in the

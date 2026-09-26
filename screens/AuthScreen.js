@@ -20,6 +20,7 @@ import {
   googleSignInSecure,
   appleSignInSecure,
   resendConfirmationEmail,
+  CONFIRMATION_RESEND_COOLDOWN_SECONDS,
 } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
@@ -54,6 +55,19 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  /** Email awaiting confirmation: { email, availableAt } — drives the resend panel. */
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  const [resendBusy, setResendBusy] = useState(false);
+  /** { text, tone: 'success' | 'error' } shown inside the resend panel. */
+  const [resendNote, setResendNote] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  // Tick once a second while the resend cooldown is running.
+  useEffect(() => {
+    if (!pendingConfirmation || pendingConfirmation.availableAt <= now) return undefined;
+    const t = setTimeout(() => setNow(Date.now()), 1000);
+    return () => clearTimeout(t);
+  }, [pendingConfirmation, now]);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,34 +96,26 @@ export default function AuthScreen({ onAuthSuccess }) {
 
   const SPAM_TIP = "Can't find it? Check your spam or junk folder.";
 
-  const offerResend = (targetEmail, { title, intro }) => {
-    showAppAlert({
-      title,
-      message: `${intro}\n\n${SPAM_TIP}`,
-      tone: 'neutral',
-      buttons: [
-        { text: 'Resend email', variant: 'secondary', onPress: () => handleResendConfirmation(targetEmail) },
-        {
-          text: 'OK',
-          variant: 'primary',
-          onPress: () => {
-            setIsLogin(true);
-            clearForm();
-          },
-        },
-      ],
-    });
+  const awaitConfirmation = (targetEmail, cooldownSeconds) => {
+    setPendingConfirmation({ email: targetEmail, availableAt: Date.now() + cooldownSeconds * 1000 });
+    setResendNote(null);
+    setNow(Date.now());
   };
 
-  const handleResendConfirmation = async (targetEmail) => {
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmation || resendBusy) return;
+    const targetEmail = pendingConfirmation.email;
+    setResendBusy(true);
+    setResendNote(null);
     try {
       await resendConfirmationEmail(targetEmail);
-      offerResend(targetEmail, {
-        title: 'Email sent again',
-        intro: `We've sent a new confirmation link to ${targetEmail}.`,
-      });
+      awaitConfirmation(targetEmail, CONFIRMATION_RESEND_COOLDOWN_SECONDS);
+      setResendNote({ text: 'Sent again — check your inbox and spam folder.', tone: 'success' });
     } catch (e) {
-      showAppAlert({ title: "Couldn't resend", message: e.message, tone: 'error' });
+      if (e.retryAfterSeconds) awaitConfirmation(targetEmail, e.retryAfterSeconds);
+      setResendNote({ text: e.message, tone: 'error' });
+    } finally {
+      setResendBusy(false);
     }
   };
 
@@ -159,9 +165,13 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else {
         const { needsEmailVerification } = await registerUserSecure(trimmedEmail, password);
         if (needsEmailVerification) {
-          offerResend(trimmedEmail, {
+          awaitConfirmation(trimmedEmail, CONFIRMATION_RESEND_COOLDOWN_SECONDS);
+          setIsLogin(true);
+          clearForm();
+          showAppAlert({
             title: 'Check your email',
-            intro: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.`,
+            message: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.\n\n${SPAM_TIP}`,
+            tone: 'neutral',
           });
           return;
         }
@@ -196,9 +206,12 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else if (msg.includes('valid email')) {
         showAppAlert({ title: 'Check your email address', message: msg, tone: 'error' });
       } else if (msg.includes('not confirmed')) {
-        offerResend(trimmedEmail, {
+        // Keep an existing cooldown for this address; otherwise allow an immediate resend.
+        if (pendingConfirmation?.email !== trimmedEmail) awaitConfirmation(trimmedEmail, 0);
+        showAppAlert({
           title: 'Confirm your email first',
-          intro: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in.`,
+          message: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in. You can resend it below.`,
+          tone: 'neutral',
         });
       } else if (isConnectionErrorMessage(msg)) {
         showAppAlert({
@@ -437,6 +450,40 @@ export default function AuthScreen({ onAuthSuccess }) {
                   : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign in' : 'Create account'}</Text>
                 }
               </TouchableOpacity>
+
+              {pendingConfirmation ? (
+                <View style={styles.confirmPanel}>
+                  <Text style={styles.confirmTitle}>
+                    Waiting for you to confirm {pendingConfirmation.email}
+                  </Text>
+                  <Text style={styles.confirmHint}>{SPAM_TIP}</Text>
+                  {(() => {
+                    const secondsLeft = Math.ceil((pendingConfirmation.availableAt - now) / 1000);
+                    const coolingDown = secondsLeft > 0;
+                    return (
+                      <TouchableOpacity
+                        style={[styles.confirmResendBtn, (coolingDown || resendBusy) && styles.btnDisabled]}
+                        onPress={handleResendConfirmation}
+                        disabled={coolingDown || resendBusy}
+                        accessibilityRole="button"
+                      >
+                        {resendBusy ? (
+                          <ActivityIndicator size="small" color={COLORS.amber} />
+                        ) : (
+                          <Text style={styles.confirmResendText}>
+                            {coolingDown ? `Resend email in ${secondsLeft}s` : 'Resend email'}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })()}
+                  {resendNote ? (
+                    <Text style={resendNote.tone === 'error' ? styles.confirmNoteError : styles.confirmNoteSuccess}>
+                      {resendNote.text}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
 
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
@@ -707,6 +754,52 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 
+  forgotRow: {
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  confirmPanel: {
+    backgroundColor: COLORS.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    padding: 14,
+    gap: 6,
+  },
+  confirmTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  confirmHint: {
+    fontSize: 13,
+    color: COLORS.mediumGrey,
+  },
+  confirmResendBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.amber,
+    minWidth: 150,
+    alignItems: 'center',
+  },
+  confirmResendText: {
+    color: COLORS.amber,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  confirmNoteSuccess: {
+    fontSize: 13,
+    color: COLORS.successGreen,
+  },
+  confirmNoteError: {
+    fontSize: 13,
+    color: COLORS.errorRed,
+  },
   switchLink: {
     color: COLORS.amber,
     fontWeight: '700',
