@@ -15,7 +15,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import {
   updatePublicUsername,
-  scheduleAuthUsernameMetadataSync,
   isValidUsernameFormat,
 } from '../services/SecureAuthService';
 import { presignAndPutImage } from '../services/r2Upload';
@@ -88,7 +87,6 @@ export default function ChooseUsernameScreen() {
         ...(avatarUrl ? { avatarUrl } : {}),
       });
       applyUserProfileRow(row);
-      scheduleAuthUsernameMetadataSync();
     } catch (e) {
       const msg = e.message || 'Something went wrong';
       if (msg.includes('Username already taken')) {

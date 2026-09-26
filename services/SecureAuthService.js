@@ -15,38 +15,9 @@ export const PUBLIC_USER_PROFILE_COLUMNS =
 const EMAIL_CONFIRM_REDIRECT_TO =
   process.env.EXPO_PUBLIC_EMAIL_CONFIRM_REDIRECT_URL ?? 'https://fintanlyons.com/pub';
 
-/** Auth user_metadata key — false = must complete ChooseUsernameScreen (set on new signup). */
-const META_APP_USERNAME_CHOSEN = 'app_username_chosen';
-
-const setAuthUsernamePending = async () => {
-  const { error } = await supabase.auth.updateUser({
-    data: { [META_APP_USERNAME_CHOSEN]: false },
-  });
-  if (error) {
-    console.warn('setAuthUsernamePending:', error.message);
-  }
-};
-
 /**
- * Supabase projects often have a trigger on auth.users that INSERTs public.users
- * with a placeholder username (e.g. email local-part) before the client runs.
- * ensureUserStub then sees an existing row and skips — ChooseUsername never shows.
- * Call after sign-up / brand-new OAuth so the app owns the first username set.
- */
-const clearUsernameForInAppChoice = async (userId) => {
-  if (!userId) return;
-  const { error } = await supabase
-    .from('users')
-    .update({ username: null, updated_at: new Date().toISOString() })
-    .eq('id', userId);
-  if (error) {
-    console.warn('clearUsernameForInAppChoice:', error.message);
-  }
-};
-
-/**
- * Ensure a public.users row exists for this auth user (username may be NULL).
- * Call when session exists but SELECT returned no row (cold start / race).
+ * Ensure a public.users row exists for this auth user (username NULL until chosen).
+ * Normally the on_auth_user_created trigger creates it; this is the fallback.
  */
 export const ensureUserStub = async (userId, email) => {
   if (!userId) return;
@@ -113,15 +84,9 @@ export const registerUserSecure = async (email, password) => {
     throw new Error('This email is already registered. Please use the login tab instead.');
   }
 
-  if (!authData.session) {
-    // New (or still unconfirmed) account — Supabase has sent the confirmation link.
-    return { needsEmailVerification: true };
-  }
-
-  await ensureUserStub(userData.id, email);
-  await clearUsernameForInAppChoice(userData.id);
-  await setAuthUsernamePending();
-  return { needsEmailVerification: false };
+  // No session yet = new (or still unconfirmed) account; Supabase sent the confirmation link.
+  // New accounts have no username, so ChooseUsernameScreen runs after first sign-in.
+  return { needsEmailVerification: !authData.session };
 };
 
 const isValidEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((text || '').trim());
@@ -200,8 +165,7 @@ export const resetPasswordWithCode = async (email, code, newPassword) => {
 };
 
 /**
- * Persist username to public.users only — no getSession/getUser/updateUser here.
- * Avoids Supabase auth client deadlocks during ChooseUsername submit (see AuthContext).
+ * Persist the chosen username (and optional avatar) to public.users.
  *
  * @param {string} userId
  * @param {string} username
@@ -281,22 +245,6 @@ export const updatePublicAvatarUrl = async (userId, avatarUrl) => {
   return data;
 };
 
-/**
- * Sync app_username_chosen to auth metadata after a delay — do not await from UI;
- * updateUser can deadlock with onAuthStateChange if called inline with getSession/getUser.
- */
-export const scheduleAuthUsernameMetadataSync = () => {
-  setTimeout(() => {
-    void supabase.auth
-      .updateUser({
-        data: { [META_APP_USERNAME_CHOSEN]: true },
-      })
-      .then(({ error }) => {
-        if (error) console.warn('scheduleAuthUsernameMetadataSync:', error.message);
-      });
-  }, 250);
-};
-
 export const logoutUserSecure = async () => {
   try {
     await supabase.auth.signOut();
@@ -330,29 +278,14 @@ export const deleteAccountSecure = async () => {
 };
 
 /**
- * Exchange an Apple/Google ID token for a Supabase session. Brand-new accounts get
- * their trigger-assigned username cleared so ChooseUsernameScreen runs.
+ * Exchange an Apple/Google ID token for a Supabase session.
  * The caller loads the profile (refreshUser).
  */
 const completeIdTokenSignIn = async (provider, token) => {
-  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
-    provider,
-    token,
-  });
+  const { error: signInError } = await supabase.auth.signInWithIdToken({ provider, token });
   if (signInError) {
     if (isNetworkError(signInError)) throw new Error(CONNECTION_ERROR_MESSAGE);
     throw signInError;
-  }
-
-  const authUser = authData.user;
-  await ensureUserStub(authUser.id, authUser.email);
-
-  // Server timestamps on both sides — independent of the device clock.
-  const createdMs = new Date(authUser.last_sign_in_at).getTime() - new Date(authUser.created_at).getTime();
-  const isBrandNewAuthUser = Number.isFinite(createdMs) && createdMs >= 0 && createdMs < 120_000;
-  if (isBrandNewAuthUser) {
-    await clearUsernameForInAppChoice(authUser.id);
-    await setAuthUsernamePending();
   }
 };
 

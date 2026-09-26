@@ -34,29 +34,13 @@ function onboardingKeyForUser(userId) {
 }
 
 /**
- * Choose username before onboarding/tabs when:
- * - New signup set app_username_chosen === false in auth metadata, or
- * - DB username missing/empty, or
- * - DB username is not a valid app handle (common trigger placeholders e.g. email local-part with dots).
- *
- * If metadata is still false but public.users already has a valid handle (e.g. metadata sync deferred),
- * do not block — avoids spinner after successful UPDATE.
+ * Choose username before onboarding/tabs when the profile has none (every new account —
+ * the sign-up trigger leaves it NULL) or an invalid legacy handle (e.g. containing dots).
  */
 function needsUsername(user) {
   if (!user) return false;
-
-  const raw = user.username;
-  const trimmed = raw == null ? '' : String(raw).trim();
-  const hasValidHandle = trimmed !== '' && isValidUsernameFormat(trimmed);
-
-  if (user.appUsernameChosen === false) {
-    if (hasValidHandle) return false;
-    return true;
-  }
-
-  if (trimmed === '') return true;
-  if (!isValidUsernameFormat(trimmed)) return true;
-  return false;
+  const trimmed = String(user.username ?? '').trim();
+  return !isValidUsernameFormat(trimmed);
 }
 
 function AppContent() {
