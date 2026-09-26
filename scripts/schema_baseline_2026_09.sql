@@ -4,7 +4,8 @@
 -- Source of truth for the Supabase `public` schema as it exists in project
 -- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
 -- (updated for scripts/signup_username_null_2026_09.sql and
--- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql).
+-- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql,
+-- scripts/username_case_insensitive_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -426,6 +427,7 @@ CREATE INDEX idx_user_stats_score ON public.user_stats USING btree (total_score 
 CREATE UNIQUE INDEX idx_user_stats_user_id_unique ON public.user_stats USING btree (user_id);  -- duplicate of PK
 CREATE INDEX idx_users_email ON public.users USING btree (email);
 CREATE INDEX idx_users_username ON public.users USING btree (username);
+CREATE UNIQUE INDEX users_username_lower_key ON public.users USING btree (lower(username));  -- unique regardless of capitals
 CREATE INDEX idx_visited_pubs_pub_id ON public.visited_pubs USING btree (pub_id);
 CREATE INDEX idx_visited_pubs_user_id ON public.visited_pubs USING btree (user_id);
 -- Legacy tables
