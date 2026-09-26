@@ -120,8 +120,35 @@ export const getPubRatingSummariesCached = async () => {
   return _ratingSummariesPromise;
 };
 
-/** pub_id → { avgRating, reviewCount } for map filtering */
-export const getPubRatingSummaries = async () => {
+/** Relation missing (view not created yet): Postgres 42P01 / PostgREST PGRST205. */
+const isMissingRelation = (error) => error?.code === '42P01' || error?.code === 'PGRST205';
+
+/** One row per reviewed pub from the pub_rating_summaries view (paged). Null if the view is missing. */
+const fetchRatingSummariesFromView = async () => {
+  const summaries = {};
+  for (let from = 0; ; from += RATING_SUMMARY_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('pub_rating_summaries')
+      .select('pub_id, avg_rating, review_count')
+      .order('pub_id', { ascending: true })
+      .range(from, from + RATING_SUMMARY_PAGE_SIZE - 1);
+    if (error) {
+      if (isMissingRelation(error)) return null;
+      throw error;
+    }
+    for (const row of data || []) {
+      if (!row.pub_id) continue;
+      summaries[row.pub_id] = {
+        avgRating: Number(row.avg_rating),
+        reviewCount: Number(row.review_count) || 0,
+      };
+    }
+    if (!data || data.length < RATING_SUMMARY_PAGE_SIZE) return summaries;
+  }
+};
+
+/** Fallback: aggregate every review row on the device (before the view existed). */
+const aggregateRatingsFromReviews = async () => {
   const byPub = {};
   let from = 0;
 
@@ -152,6 +179,10 @@ export const getPubRatingSummaries = async () => {
   }
   return summaries;
 };
+
+/** pub_id → { avgRating, reviewCount } for map filtering */
+const getPubRatingSummaries = async () =>
+  (await fetchRatingSummariesFromView()) ?? aggregateRatingsFromReviews();
 
 // ---------------------------------------------------------------------------
 // Drink stats (for Profile screen)
