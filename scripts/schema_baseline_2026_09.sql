@@ -4,7 +4,7 @@
 -- Source of truth for the Supabase `public` schema as it exists in project
 -- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
 -- (updated for scripts/signup_username_null_2026_09.sql and
--- scripts/social_security_phase_a_2026_09.sql).
+-- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -390,6 +390,19 @@ CREATE TABLE public.pub_spatial_assignments (
 );
 ALTER TABLE public.pub_spatial_assignments ENABLE ROW LEVEL SECURITY;
 COMMENT ON TABLE public.pub_spatial_assignments IS 'Polygon-based ward and borough assignments for pubs, generated from pub lat/lon against the bundled London ward and borough GeoJSON files.';
+
+
+-- --- Views ----------------------------------------------------------------------
+
+-- Average rating / review count per pub (map rating filter). Caller's RLS applies.
+CREATE OR REPLACE VIEW public.pub_rating_summaries
+  WITH (security_invoker = true) AS
+ SELECT pub_id,
+    (avg(rating))::double precision AS avg_rating,
+    (count(*))::integer AS review_count
+   FROM pub_reviews
+  GROUP BY pub_id;
+COMMENT ON VIEW public.pub_rating_summaries IS 'Average star rating and review count per pub (map rating filter).';
 
 
 -- =============================================================================
@@ -2094,6 +2107,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.pubs_all                        T
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.pub_spatial_assignments         TO anon, authenticated;
 GRANT SELECT                         ON public.user_stats                      TO anon, authenticated;
 GRANT SELECT, INSERT                 ON public.reports                         TO authenticated;
+GRANT SELECT                         ON public.pub_rating_summaries            TO authenticated;
 
 -- users: column-level so clients can never read email or change id/created_at
 GRANT SELECT (id, username, created_at, updated_at, avatar_url)        ON public.users TO authenticated;
