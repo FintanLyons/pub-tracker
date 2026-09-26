@@ -1,5 +1,7 @@
 import { supabase } from '../config/supabase';
 
+const UPLOAD_FAILED_MESSAGE = "Couldn't upload the photo. Check your connection and try again.";
+
 /** Must match the Edge Function slug in Supabase (default: presign-r2-upload). */
 const PRESIGN_FUNCTION =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_PRESIGN_FUNCTION) ||
@@ -61,21 +63,19 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
       }
     }
     const statusBit = status ? ` [HTTP ${status}]` : '';
-    const hint = `${error.message || String(error)}${detail}${statusBit}`;
-    throw new Error(
-      hint.includes('Failed to send') || hint.includes('fetch')
-        ? `Upload service unavailable. Check network and that Edge Function "${PRESIGN_FUNCTION}" exists (404 = wrong name).`
-        : hint
-    );
+    // Technical detail for debugging; users get a plain message.
+    console.warn(`r2Upload: presign failed (${PRESIGN_FUNCTION})`, `${error.message || String(error)}${detail}${statusBit}`);
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
 
   if (!data?.uploadUrl || !data?.publicUrl) {
-    throw new Error(data?.error || 'Could not get upload URL.');
+    console.warn('r2Upload: presign returned no URL', data?.error);
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
 
   const res = await fetch(localUri);
   if (!res.ok) {
-    throw new Error('Could not read photo file.');
+    throw new Error("Couldn't read that photo. Try a different one.");
   }
   const buf = await res.arrayBuffer();
 
@@ -87,9 +87,8 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
 
   if (!put.ok) {
     const t = await put.text().catch(() => '');
-    throw new Error(
-      `Upload to storage failed (${put.status}). ${t.slice(0, 120)}`.trim()
-    );
+    console.warn(`r2Upload: storage PUT failed (${put.status})`, t.slice(0, 200));
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
 
   return data.publicUrl;

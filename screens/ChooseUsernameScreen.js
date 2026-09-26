@@ -23,6 +23,7 @@ import {
   AVATAR_LIBRARY_PERMISSION_ALERT,
 } from '../utils/avatarImagePrep';
 import { useAuth } from '../contexts/AuthContext';
+import { CONNECTION_ERROR_MESSAGE, isNetworkError as isConnectionError } from '../services/authErrors';
 import { useAppAlert } from '../contexts/AppAlertContext';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { COLORS } from '../constants/theme';
@@ -45,8 +46,8 @@ export default function ChooseUsernameScreen() {
         });
       } else if (res.reason === 'processing') {
         showAppAlert({
-          title: 'Error',
-          message: res.message || 'Could not process photo.',
+          title: "Couldn't use that photo",
+          message: res.message || 'Try a different photo.',
           tone: 'error',
         });
       }
@@ -60,7 +61,7 @@ export default function ChooseUsernameScreen() {
   const handleSubmit = async () => {
     const trimmed = username.trim();
     if (!trimmed) {
-      showAppAlert({ title: 'Error', message: 'Please enter a username', tone: 'error' });
+      showAppAlert({ title: 'Username needed', message: 'Choose a username to continue.', tone: 'error' });
       return;
     }
     if (!isValidUsernameFormat(trimmed)) {
@@ -73,7 +74,7 @@ export default function ChooseUsernameScreen() {
     }
 
     if (!user?.id) {
-      showAppAlert({ title: 'Error', message: 'Not signed in', tone: 'error' });
+      showAppAlert({ title: 'Signed out', message: 'Please sign in again.', tone: 'error' });
       return;
     }
 
@@ -91,12 +92,17 @@ export default function ChooseUsernameScreen() {
       const msg = e.message || 'Something went wrong';
       if (msg.includes('Username already taken')) {
         showAppAlert({
-          title: 'Taken',
-          message: 'That username is already in use. Try another.',
+          title: 'Username taken',
+          message: 'Someone already has that username. Try another.',
           tone: 'error',
         });
       } else {
-        showAppAlert({ title: 'Error', message: msg, tone: 'error' });
+        console.error('ChooseUsername: save failed', e);
+        showAppAlert({
+          title: "Couldn't save your username",
+          message: isConnectionError(e) ? CONNECTION_ERROR_MESSAGE : 'Please try again.',
+          tone: 'error',
+        });
       }
     } finally {
       setSubmitting(false);

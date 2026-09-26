@@ -118,6 +118,27 @@ export const loginUserSecure = async (email, password) => {
   }
 };
 
+/** Resend the sign-up confirmation email (for accounts that haven't confirmed yet). */
+export const resendConfirmationEmail = async (email) => {
+  const trimmed = (email || '').trim();
+  if (!isValidEmail(trimmed)) {
+    throw new Error('Please enter a valid email address.');
+  }
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: trimmed,
+    options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO },
+  });
+  if (error) {
+    if (isNetworkError(error)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (error.message || '').toLowerCase();
+    if (m.includes('rate limit') || m.includes('seconds')) {
+      throw new Error('Please wait a minute before requesting another email.');
+    }
+    throw new Error("Couldn't resend the email. Please try again.");
+  }
+};
+
 /**
  * Send a password-reset email containing a one-time code ({{ .Token }} in the
  * Supabase "Reset Password" email template). Succeeds even for unknown emails.
@@ -181,10 +202,12 @@ export const updatePublicUsername = async (userId, username, options = {}) => {
     );
   }
 
+  // Usernames are unique regardless of capitals (users_username_lower_key);
+  // ilike with escaped wildcards = case-insensitive exact match.
   const { data: taken } = await supabase
     .from('users')
     .select('id')
-    .eq('username', trimmed)
+    .ilike('username', trimmed.replace(/[\\%_]/g, (ch) => `\\${ch}`))
     .neq('id', userId)
     .limit(1);
 

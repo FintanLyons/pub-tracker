@@ -19,6 +19,7 @@ import {
   loginUserSecure,
   googleSignInSecure,
   appleSignInSecure,
+  resendConfirmationEmail,
 } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
@@ -79,41 +80,73 @@ export default function AuthScreen({ onAuthSuccess }) {
     setShowConfirmPassword(false);
   };
 
-  const switchMode = () => {
-    setIsLogin(!isLogin);
-    clearForm();
+  const SPAM_TIP = "Can't find it? Check your spam or junk folder.";
+
+  const offerResend = (targetEmail, { title, intro }) => {
+    showAppAlert({
+      title,
+      message: `${intro}\n\n${SPAM_TIP}`,
+      tone: 'neutral',
+      buttons: [
+        { text: 'Resend email', variant: 'secondary', onPress: () => handleResendConfirmation(targetEmail) },
+        {
+          text: 'OK',
+          variant: 'primary',
+          onPress: () => {
+            setIsLogin(true);
+            clearForm();
+          },
+        },
+      ],
+    });
+  };
+
+  const handleResendConfirmation = async (targetEmail) => {
+    try {
+      await resendConfirmationEmail(targetEmail);
+      offerResend(targetEmail, {
+        title: 'Email sent again',
+        intro: `We've sent a new confirmation link to ${targetEmail}.`,
+      });
+    } catch (e) {
+      showAppAlert({ title: "Couldn't resend", message: e.message, tone: 'error' });
+    }
   };
 
   const handleAuth = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      showAppAlert({ title: 'Error', message: 'Please enter your email', tone: 'error' });
+      showAppAlert({ title: 'Email needed', message: 'Enter your email address.', tone: 'error' });
       return;
     }
     if (!validateEmail(trimmedEmail)) {
       showAppAlert({
-        title: 'Error',
-        message: 'Please enter a valid email address',
+        title: 'Check your email address',
+        message: "That doesn't look like a valid email address.",
         tone: 'error',
       });
       return;
     }
     if (!password) {
-      showAppAlert({ title: 'Error', message: 'Please enter a password', tone: 'error' });
+      showAppAlert({ title: 'Password needed', message: 'Enter your password.', tone: 'error' });
       return;
     }
 
     if (!isLogin) {
       if (password.length < 6) {
         showAppAlert({
-          title: 'Error',
-          message: 'Password must be at least 6 characters',
+          title: 'Password too short',
+          message: 'Use at least 6 characters.',
           tone: 'error',
         });
         return;
       }
       if (password !== confirmPassword) {
-        showAppAlert({ title: 'Error', message: 'Passwords do not match', tone: 'error' });
+        showAppAlert({
+          title: "Passwords don't match",
+          message: 'Re-enter the same password in both fields.',
+          tone: 'error',
+        });
         return;
       }
     }
@@ -126,36 +159,24 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else {
         const { needsEmailVerification } = await registerUserSecure(trimmedEmail, password);
         if (needsEmailVerification) {
-          showAppAlert({
-            title: 'Check Your Email',
-            message: `We sent a verification link to ${trimmedEmail}.\n\nClick the link then come back and log in.`,
-            tone: 'neutral',
-            buttons: [
-              {
-                text: 'OK',
-                variant: 'primary',
-                onPress: () => {
-                  setIsLogin(true);
-                  clearForm();
-                },
-              },
-            ],
+          offerResend(trimmedEmail, {
+            title: 'Check your email',
+            intro: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.`,
           });
           return;
         }
-        showAppAlert({ title: 'Success', message: 'Account created!', tone: 'success' });
         await onAuthSuccess();
       }
     } catch (error) {
-      const msg = error.message || 'Something went wrong';
+      const msg = error.message || '';
       if (msg.includes('already registered') || msg.includes('login tab instead')) {
         showAppAlert({
-          title: 'Already Registered',
-          message: msg,
+          title: 'Already registered',
+          message: 'An account with this email already exists. Sign in instead.',
           tone: 'error',
           buttons: [
             {
-              text: 'Switch to Login',
+              text: 'Sign in',
               variant: 'primary',
               onPress: () => {
                 setIsLogin(true);
@@ -165,17 +186,19 @@ export default function AuthScreen({ onAuthSuccess }) {
           ],
         });
       } else if (msg.includes('Too many') || msg.includes('rate limit') || msg.includes('wait')) {
-        showAppAlert({ title: 'Please Wait', message: msg, tone: 'neutral' });
+        showAppAlert({ title: 'Too many attempts', message: msg, tone: 'neutral' });
       } else if (msg.includes('Invalid email or password')) {
-        showAppAlert({ title: 'Error', message: 'Invalid email or password.', tone: 'error' });
-      } else if (msg.includes('valid email')) {
-        showAppAlert({ title: 'Error', message: msg, tone: 'error' });
-      } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
         showAppAlert({
-          title: 'Email Not Verified',
-          message:
-            'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
-          tone: 'neutral',
+          title: 'Wrong email or password',
+          message: 'Check them and try again, or tap "Forgot password?".',
+          tone: 'error',
+        });
+      } else if (msg.includes('valid email')) {
+        showAppAlert({ title: 'Check your email address', message: msg, tone: 'error' });
+      } else if (msg.includes('not confirmed')) {
+        offerResend(trimmedEmail, {
+          title: 'Confirm your email first',
+          intro: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in.`,
         });
       } else if (isConnectionErrorMessage(msg)) {
         showAppAlert({
@@ -185,7 +208,11 @@ export default function AuthScreen({ onAuthSuccess }) {
         });
       } else {
         console.error('Auth error:', error);
-        showAppAlert({ title: 'Error', message: msg, tone: 'error' });
+        showAppAlert({
+          title: isLogin ? "Couldn't sign in" : "Couldn't create your account",
+          message: msg || 'Something went wrong. Please try again.',
+          tone: 'error',
+        });
       }
     } finally {
       setLoading(false);
@@ -215,8 +242,8 @@ export default function AuthScreen({ onAuthSuccess }) {
         });
       } else {
         showAppAlert({
-          title: 'Error',
-          message: 'Sign in with Apple failed. Please try again.',
+          title: "Couldn't sign in with Apple",
+          message: 'Please try again, or sign in with your email.',
           tone: 'error',
         });
       }
@@ -249,8 +276,8 @@ export default function AuthScreen({ onAuthSuccess }) {
         msg.includes('PLAY_SERVICES_NOT_AVAILABLE')
       ) {
         showAppAlert({
-          title: 'Error',
-          message: 'Google Play Services is not available on this device.',
+          title: 'Google sign-in unavailable',
+          message: "This device doesn't have Google Play Services. Sign in with your email instead.",
           tone: 'error',
         });
         return;
@@ -263,16 +290,11 @@ export default function AuthScreen({ onAuthSuccess }) {
         msg.includes('DEVELOPER_ERROR') ||
         msg.includes('Developer console is not set up correctly')
       ) {
+        // Build signing key not registered in Google Cloud (see `npx @react-native-google-signin/config-doctor`).
+        console.error('Google Sign-In DEVELOPER_ERROR — check Android OAuth client SHA-1 / webClientId', { code, msg });
         showAppAlert({
-          title: 'Google Sign-In setup',
-          message:
-            'This build’s signing key is not registered in Google Cloud.\n\n' +
-            '1. Run: npx @react-native-google-signin/config-doctor\n' +
-            '2. Or in Google Cloud → Credentials → Android OAuth client:\n' +
-            '   • Package: com.fintanlyons.pubtracker (or your EXPO_PUBLIC_ANDROID_PACKAGE)\n' +
-            '   • SHA-1: from `eas credentials -p android` for the profile you installed\n' +
-            '3. webClientId must be the Web client ID (not Android).\n' +
-            '4. Rebuild the APK after updating credentials.',
+          title: 'Google sign-in unavailable',
+          message: "Google sign-in isn't working in this version of the app. Please sign in with your email.",
           tone: 'error',
         });
         return;
@@ -288,8 +310,8 @@ export default function AuthScreen({ onAuthSuccess }) {
         });
       } else {
         showAppAlert({
-          title: 'Sign-in failed',
-          message: `Google Sign-In failed. Please try again.\n\n(${code || msg || 'unknown error'})`,
+          title: "Couldn't sign in with Google",
+          message: 'Please try again, or sign in with your email.',
           tone: 'error',
         });
       }
@@ -328,7 +350,7 @@ export default function AuthScreen({ onAuthSuccess }) {
                 style={[styles.tab, isLogin && styles.activeTab]}
                 onPress={() => { setIsLogin(true); clearForm(); }}
               >
-                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign In</Text>
+                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign in</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.tab, !isLogin && styles.activeTab]}
@@ -412,7 +434,7 @@ export default function AuthScreen({ onAuthSuccess }) {
               >
                 {loading
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign In' : 'Create Account'}</Text>
+                  : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign in' : 'Create account'}</Text>
                 }
               </TouchableOpacity>
 
@@ -464,12 +486,6 @@ export default function AuthScreen({ onAuthSuccess }) {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.switchRow} onPress={switchMode}>
-              <Text style={styles.switchText}>
-                {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                <Text style={styles.switchLink}>{isLogin ? 'Register' : 'Sign in'}</Text>
-              </Text>
-            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
         <ForgotPasswordModal
@@ -691,19 +707,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 
-  switchRow: {
-    alignItems: 'center',
-    marginTop: 28,
-  },
-  switchText: {
-    fontSize: 14,
-    color: COLORS.mediumGrey,
-  },
-  forgotRow: {
-    alignSelf: 'flex-end',
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-  },
   switchLink: {
     color: COLORS.amber,
     fontWeight: '700',

@@ -53,7 +53,10 @@ export default function ForgotPasswordModal({ visible, initialEmail, onClose, on
     try {
       await requestPasswordReset(email);
       setStep(STEP.CODE);
-      setNotice(`If an account exists for ${email.trim()}, we've emailed it a reset code.`);
+      setNotice(
+        `If an account exists for ${email.trim()}, we've emailed it a reset code. `
+        + "Can't find it? Check your spam or junk folder.",
+      );
     } catch (e) {
       setError(e.message);
     } finally {
