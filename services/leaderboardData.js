@@ -2,6 +2,7 @@ import { getFriendsLeaderboard, getPendingFriendRequests } from './FriendsServic
 import { getUserLeagues, getLeagueLeaderboard } from './LeagueService';
 import { cacheLeaderboardData, getCachedLeaderboardData } from './LeaderboardCache';
 
+/** { userId, promise } of the prefetch in progress. */
 let inFlightPrefetch = null;
 
 /**
@@ -40,11 +41,11 @@ export async function fetchLeaderboardBundle(userId, preferredLeagueId = null) {
 /** Warm leaderboard cache while the user is on other tabs (deduped). */
 export function prefetchLeaderboardCache(userId, preferredLeagueId = null) {
   if (!userId) return Promise.resolve(null);
-  if (inFlightPrefetch) return inFlightPrefetch;
+  if (inFlightPrefetch?.userId === userId) return inFlightPrefetch.promise;
 
-  inFlightPrefetch = fetchLeaderboardBundle(userId, preferredLeagueId)
+  const promise = fetchLeaderboardBundle(userId, preferredLeagueId)
     .then((data) => {
-      cacheLeaderboardData(data);
+      cacheLeaderboardData(userId, data);
       return data;
     })
     .catch((err) => {
@@ -52,10 +53,11 @@ export function prefetchLeaderboardCache(userId, preferredLeagueId = null) {
       return null;
     })
     .finally(() => {
-      inFlightPrefetch = null;
+      if (inFlightPrefetch?.promise === promise) inFlightPrefetch = null;
     });
 
-  return inFlightPrefetch;
+  inFlightPrefetch = { userId, promise };
+  return promise;
 }
 
 export { getCachedLeaderboardData, cacheLeaderboardData };

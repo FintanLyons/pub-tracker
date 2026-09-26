@@ -80,7 +80,7 @@ export default function LeaderboardScreen() {
 
     setCurrentUser(authUser);
 
-    const cachedData = getCachedLeaderboardData();
+    const cachedData = getCachedLeaderboardData(authUser.id);
     if (cachedData) {
       applyBundle(cachedData);
       setLoading(false);
@@ -92,11 +92,11 @@ export default function LeaderboardScreen() {
         authUser.id,
         selectedLeagueIdRef.current,
       );
-      cacheLeaderboardData(bundle);
+      cacheLeaderboardData(authUser.id, bundle);
       applyBundle(bundle);
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
-      if (!getCachedLeaderboardData()) {
+      if (!getCachedLeaderboardData(authUser.id)) {
         showAppAlert({
           title: 'Error',
           message: 'Failed to load leaderboard data',

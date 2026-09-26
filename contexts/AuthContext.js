@@ -14,7 +14,8 @@ import {
   ensureUserStub,
   PUBLIC_USER_PROFILE_COLUMNS,
 } from '../services/SecureAuthService';
-import { removeAllPushTokensForUser } from '../services/PushNotificationService';
+import { removePushTokenForThisDevice } from '../services/PushNotificationService';
+import { clearLeaderboardCache } from '../services/LeaderboardCache';
 import { isInvalidSessionError } from '../services/authErrors';
 import { useNetworkStatus } from './NetworkContext';
 import { promiseWithTimeout } from '../utils/promiseWithTimeout';
@@ -199,6 +200,7 @@ export const AuthProvider = ({ children }) => {
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         clearCachedProfile();
+        clearLeaderboardCache();
         setUser(null);
       }
     });
@@ -241,16 +243,18 @@ export const AuthProvider = ({ children }) => {
     } = await supabase.auth.getSession();
     const uid = session?.user?.id;
     if (uid) {
-      await removeAllPushTokensForUser(uid);
+      await removePushTokenForThisDevice(uid);
     }
     await logoutUserSecure();
     clearCachedProfile();
+    clearLeaderboardCache();
     setUser(null);
   }, []);
 
   const deleteAccount = useCallback(async () => {
     await deleteAccountSecure();
     clearCachedProfile();
+    clearLeaderboardCache();
     setUser(null);
   }, []);
 
