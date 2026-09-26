@@ -1,10 +1,22 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNetworkStatus } from '../contexts/NetworkContext';
 import { COLORS } from '../constants/theme';
 
-export default function OfflineOverlay() {
+/** Tab bar height (60) + gap — matches navigation/TabNavigator.js and ToastContext. */
+export const OFFLINE_BANNER_TAB_BAR_CLEARANCE = 68;
+/** Height the banner occupies, so toasts can sit above it. */
+export const OFFLINE_BANNER_HEIGHT = 44;
+
+/**
+ * Slim "You're offline" strip at the bottom of the screen. Unlike the old full-screen
+ * overlay it doesn't block the app — already-loaded pubs and stats stay usable.
+ * @param {{ aboveTabBar?: boolean }} props — true on the tab screens (clears the tab bar).
+ */
+export default function OfflineBanner({ aboveTabBar = false }) {
+	const insets = useSafeAreaInsets();
 	const { isConnected, refreshNetworkState } = useNetworkStatus();
 	const [rechecking, setRechecking] = useState(false);
 
@@ -15,30 +27,38 @@ export default function OfflineOverlay() {
 		try {
 			await refreshNetworkState();
 		} catch {
-			// State may still be offline; overlay stays until listener or next retry succeeds.
+			// Still offline; the banner stays until the network listener reports a connection.
 		} finally {
 			setRechecking(false);
 		}
 	};
 
+	const bottom = aboveTabBar
+		? OFFLINE_BANNER_TAB_BAR_CLEARANCE + insets.bottom
+		: Math.max(insets.bottom, 12);
+
 	return (
-		<View style={styles.overlay}>
-			<View style={styles.card}>
-				<MaterialCommunityIcons name="wifi-off" size={40} color={COLORS.amber} style={styles.icon} />
-				<Text style={styles.title}>You&apos;re offline</Text>
-				<Text style={styles.message}>
-					Reconnect to keep tracking your pub adventures, favourites, and leaderboards.
+		<View style={[styles.wrapper, { bottom }]} pointerEvents="box-none">
+			<View
+				style={styles.banner}
+				accessibilityRole="alert"
+				accessibilityLiveRegion="polite"
+			>
+				<MaterialCommunityIcons name="wifi-off" size={18} color={COLORS.amber} />
+				<Text style={styles.text} numberOfLines={2}>
+					You&apos;re offline — showing what&apos;s already loaded.
 				</Text>
 				<TouchableOpacity
 					onPress={handleRetry}
-					style={styles.button}
-					activeOpacity={0.8}
 					disabled={rechecking}
+					style={styles.retry}
+					accessibilityRole="button"
+					accessibilityLabel="Retry connection"
 				>
 					{rechecking ? (
-						<ActivityIndicator color={COLORS.charcoal} />
+						<ActivityIndicator size="small" color={COLORS.amber} />
 					) : (
-						<Text style={styles.buttonText}>Retry connection</Text>
+						<Text style={styles.retryText}>Retry</Text>
 					)}
 				</TouchableOpacity>
 			</View>
@@ -47,50 +67,37 @@ export default function OfflineOverlay() {
 }
 
 const styles = StyleSheet.create({
-	overlay: {
+	wrapper: {
 		position: 'absolute',
-		top: 0,
-		left: 0,
-		right: 0,
-		bottom: 0,
-		backgroundColor: 'rgba(0, 0, 0, 0.6)',
-		justifyContent: 'center',
-		alignItems: 'center',
-		zIndex: 100,
+		left: 12,
+		right: 12,
+		zIndex: 1500,
+		elevation: 12,
 	},
-	card: {
-		marginHorizontal: 24,
-		borderRadius: 16,
-		paddingHorizontal: 24,
-		paddingVertical: 28,
+	banner: {
+		minHeight: OFFLINE_BANNER_HEIGHT - 4,
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 10,
+		paddingHorizontal: 14,
+		paddingVertical: 8,
+		borderRadius: 12,
 		backgroundColor: COLORS.charcoal,
+	},
+	text: {
+		flex: 1,
+		fontSize: 13,
+		color: COLORS.lightGrey,
+	},
+	retry: {
+		paddingVertical: 4,
+		paddingHorizontal: 8,
+		minWidth: 48,
 		alignItems: 'center',
 	},
-	icon: {
-		marginBottom: 12,
-	},
-	title: {
-		fontSize: 20,
-		fontWeight: '700',
+	retryText: {
 		color: COLORS.amber,
-		marginBottom: 8,
-	},
-	message: {
+		fontWeight: '700',
 		fontSize: 14,
-		textAlign: 'center',
-		color: COLORS.lightGrey,
-		marginBottom: 20,
-	},
-	button: {
-		backgroundColor: COLORS.amber,
-		borderRadius: 24,
-		paddingHorizontal: 24,
-		paddingVertical: 10,
-	},
-	buttonText: {
-		color: COLORS.charcoal,
-		fontSize: 15,
-		fontWeight: '600',
 	},
 });
-

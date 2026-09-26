@@ -3,6 +3,8 @@ import { StyleSheet } from 'react-native';
 import { Snackbar } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { useNetworkStatus } from './NetworkContext';
+import { OFFLINE_BANNER_HEIGHT } from '../components/OfflineBanner';
 
 /** Tab bar height (60) + gap, matching navigation/TabNavigator.js. */
 const TAB_BAR_CLEARANCE = 68;
@@ -16,6 +18,7 @@ const ToastContext = createContext({ showToast: () => {} });
  */
 export function ToastProvider({ children }) {
   const insets = useSafeAreaInsets();
+  const { isConnected } = useNetworkStatus();
   const [toast, setToast] = useState({ visible: false, message: '' });
 
   const showToast = useCallback((message) => {
@@ -36,7 +39,11 @@ export function ToastProvider({ children }) {
         visible={toast.visible}
         onDismiss={hideToast}
         duration={TOAST_DURATION_MS}
-        wrapperStyle={[styles.wrapper, { bottom: TAB_BAR_CLEARANCE + insets.bottom }]}
+        wrapperStyle={[
+          styles.wrapper,
+          // Sit above the offline banner when it's showing.
+          { bottom: TAB_BAR_CLEARANCE + insets.bottom + (isConnected ? 0 : OFFLINE_BANNER_HEIGHT) },
+        ]}
         style={styles.snackbar}
         action={{ label: 'OK', textColor: COLORS.amber, onPress: hideToast }}
       >

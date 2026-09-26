@@ -6,7 +6,7 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ErrorBoundary from './components/ErrorBoundary';
-import OfflineOverlay from './components/OfflineOverlay';
+import OfflineBanner from './components/OfflineBanner';
 import ConnectionErrorScreen from './components/ConnectionErrorScreen';
 import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
@@ -127,7 +127,7 @@ function AppContent() {
       <PaperProvider>
         <View style={styles.appContainer}>
           <AuthScreen onAuthSuccess={refreshUser} />
-          <OfflineOverlay />
+          <OfflineBanner />
         </View>
       </PaperProvider>
     );
@@ -138,7 +138,7 @@ function AppContent() {
       <PaperProvider>
         <View style={styles.appContainer}>
           <ChooseUsernameScreen />
-          <OfflineOverlay />
+          <OfflineBanner />
         </View>
       </PaperProvider>
     );
@@ -170,7 +170,7 @@ function AppContent() {
               </ToastProvider>
             </UserStatsProvider>
           </LocationProvider>
-          <OfflineOverlay />
+          <OfflineBanner aboveTabBar />
         </View>
       </PaperProvider>
     </NavigationContainer>
