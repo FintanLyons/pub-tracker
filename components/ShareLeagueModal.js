@@ -9,12 +9,12 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { APP_DISPLAY_NAME, PLAY_STORE_LISTING_URL } from '../constants/app';
+import { APP_DISPLAY_NAME, STORE_LINKS_TEXT } from '../constants/app';
 import { COLORS } from '../constants/theme';
 
 function buildInviteMessage(leagueName, leagueCode) {
   const code = (leagueCode || '').toUpperCase();
-  return `Join my league "${leagueName}" on ${APP_DISPLAY_NAME}! League code: ${code}\n\nGet the app on Google Play:\n${PLAY_STORE_LISTING_URL}`;
+  return `Join my league "${leagueName}" on ${APP_DISPLAY_NAME}! League code: ${code}\n\nGet the app:\n${STORE_LINKS_TEXT}`;
 }
 
 export default function ShareLeagueModal({
