@@ -165,6 +165,7 @@ export default function AddFriendModal({
       await rejectFriendRequest(friendshipId);
       showFeedback('Request declined', 'You declined this friend request.');
       loadPendingRequests();
+      loadRelationships();
     } catch (error) {
       console.error('Error rejecting friend request:', error);
       showFeedback('Could not decline', 'Failed to decline friend request. Please try again.', 'error');
@@ -252,15 +253,26 @@ export default function AddFriendModal({
       );
     }
     if (relation?.kind === 'received') {
+      // Same accept / decline buttons as the Requests tab.
       return (
-        <TouchableOpacity
-          style={styles.acceptButton}
-          onPress={() => handleAcceptRequest(relation.friendshipId)}
-          accessibilityRole="button"
-          accessibilityLabel={`Accept friend request from ${item.username}`}
-        >
-          <Text style={styles.acceptButtonText}>Accept</Text>
-        </TouchableOpacity>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.acceptButton}
+            onPress={() => handleAcceptRequest(relation.friendshipId)}
+            accessibilityRole="button"
+            accessibilityLabel={`Accept friend request from ${item.username}`}
+          >
+            <MaterialCommunityIcons name="check" size={24} color={COLORS.white} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.rejectButton}
+            onPress={() => handleRejectRequest(relation.friendshipId)}
+            accessibilityRole="button"
+            accessibilityLabel={`Decline friend request from ${item.username}`}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={COLORS.white} />
+          </TouchableOpacity>
+        </View>
       );
     }
     return (
@@ -795,23 +807,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: COLORS.lightGrey,
+    backgroundColor: COLORS.white,
   },
   statusPillText: {
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.darkGrey,
-  },
-  acceptButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: COLORS.amber,
-  },
-  acceptButtonText: {
-    color: COLORS.white,
-    fontWeight: '700',
-    fontSize: 14,
   },
   addButton: {
     width: 40,

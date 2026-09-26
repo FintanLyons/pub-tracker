@@ -20,7 +20,14 @@ for (const f of files) {
     if (p.node.id.type === 'Identifier' && init && init.type === 'CallExpression'
       && init.callee.type === 'MemberExpression' && init.callee.object.name === 'StyleSheet'
       && init.callee.property.name === 'create' && init.arguments[0]?.type === 'ObjectExpression') {
-      sheets.set(p.node.id.name, new Set(init.arguments[0].properties.map((pr) => pr.key && (pr.key.name || pr.key.value))));
+      const keys = init.arguments[0].properties.map((pr) => pr.key && (pr.key.name || pr.key.value));
+      const seen = new Set();
+      keys.forEach((k, idx) => {
+        // A repeated key silently overrides the earlier style.
+        if (seen.has(k)) { console.log(`${f}:${init.arguments[0].properties[idx].loc.start.line}  ${p.node.id.name}.${k} (duplicate style key — earlier one is overridden)`); issues++; }
+        seen.add(k);
+      });
+      sheets.set(p.node.id.name, new Set(keys));
     }
   } });
   if (sheets.size) traverse(ast, { MemberExpression(p) {
