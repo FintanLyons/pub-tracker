@@ -1,0 +1,1 @@
+Depends on the rename OfflineOverlay.js -> OfflineBanner.js, which landed in 7716de8 (report form). Revert/cherry-pick together with 7716de8.
