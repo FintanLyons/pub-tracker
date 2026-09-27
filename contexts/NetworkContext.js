@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import * as Network from 'expo-network';
 
 export const NetworkContext = createContext({
@@ -24,9 +25,20 @@ export const NetworkProvider = ({ children }) => {
 		const subscription = Network.addNetworkStateListener((next) => {
 			setNetworkState(next);
 		});
+		// A change made while the app was in the background (e.g. airplane mode from
+		// Control Centre or Settings) may never reach the listener — re-read on return.
+		const appStateSub = AppState.addEventListener('change', (state) => {
+			if (state !== 'active') return;
+			Network.getNetworkStateAsync()
+				.then((next) => {
+					if (!cancelled) setNetworkState(next);
+				})
+				.catch(() => {});
+		});
 		return () => {
 			cancelled = true;
 			subscription.remove();
+			appStateSub.remove();
 		};
 	}, []);
 
