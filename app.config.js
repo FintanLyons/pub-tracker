@@ -72,6 +72,19 @@ export default {
           ]
         : '@react-native-google-signin/google-signin',
       [
+        // GoogleSignIn 9.2+ pulls in the Swift pod AppCheckCore, whose dependencies
+        // don't define modules; without this `pod install` fails on EAS.
+        'expo-build-properties',
+        {
+          ios: {
+            extraPods: [
+              { name: 'GoogleUtilities', modular_headers: true },
+              { name: 'RecaptchaInterop', modular_headers: true },
+            ],
+          },
+        },
+      ],
+      [
         'expo-notifications',
         {
           icon: './assets/logo.png',
