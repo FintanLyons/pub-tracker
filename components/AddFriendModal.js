@@ -166,6 +166,8 @@ export default function AddFriendModal({
       showFeedback('Request declined', 'You declined this friend request.');
       loadPendingRequests();
       loadRelationships();
+      // Reloads the Leaderboard too, so its requests badge drops the declined one.
+      if (onFriendAdded) onFriendAdded();
     } catch (error) {
       console.error('Error rejecting friend request:', error);
       showFeedback('Could not decline', 'Failed to decline friend request. Please try again.', 'error');
