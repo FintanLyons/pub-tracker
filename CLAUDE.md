@@ -108,7 +108,6 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 ### ⚠️ Pending database migrations
 
 - **`scripts/social_security_phase_b_2026_09.sql` — NOT YET RUN (deliberately).** Hides leagues and invite codes from non-members. Run it only once most users have updated to a build that joins leagues via `join_league_by_code()` (commit "Join leagues by code on the server"); older builds can't join leagues after it runs. Remind the user about this whenever database or release work comes up. After running: verify via MCP, update the schema baseline, and delete this bullet.
-- **`scripts/db_cleanup_2026_09.sql` — NOT YET RUN.** Batch 8a: archives the legacy tables, drops dead functions/duplicate indexes, adds FK indexes, fixes RLS initplan, and changes `delete_my_account` (leagues pass on; reports lose the username). After running: verify via MCP, sync the baseline, update the Tables row below, delete this bullet.
 - **Edge secret `R2_REQUIRE_CONTENT_LENGTH=true` on `presign-r2-upload` — NOT YET SET (deliberately).** Builds before Batch 7 don't send `contentLength`; set it alongside Phase B, once most users have updated. Until then old builds can still upload without a size limit.
 
 ### Tables
@@ -128,7 +127,7 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 | `reports` | User pub corrections / missing-pub submissions. Users insert own `pending` rows; approving (set `status='approved'` in dashboard) auto-applies to `Pubs_List` via trigger |
 | `user_push_tokens` | Expo push tokens |
 | `notification_outbox` / `notification_monthly_digest_log` | Push queue + digest log — server-only (no RLS policies) |
-| `pubs`, `pubs_all`, `pub_spatial_assignments` | **Legacy, unused by the app** — moved to the non-exposed `archive` schema by `db_cleanup_2026_09.sql` |
+| `archive.pubs`, `archive.pubs_all`, `archive.pub_spatial_assignments` | **Legacy, unused** — in the non-exposed `archive` schema (not `public`) since 2026-09-27 |
 
 ### Server RPCs (callable by the app)
 

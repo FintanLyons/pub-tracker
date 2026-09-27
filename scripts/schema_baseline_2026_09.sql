@@ -6,7 +6,8 @@
 -- (updated for scripts/signup_username_null_2026_09.sql and
 -- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql,
 -- scripts/username_case_insensitive_2026_09.sql, scripts/league_ownership_transfer_2026_09.sql,
--- scripts/notification_queue_2026_09.sql, scripts/notification_scheduling_2026_09.sql).
+-- scripts/notification_queue_2026_09.sql, scripts/notification_scheduling_2026_09.sql,
+-- scripts/db_cleanup_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -23,10 +24,9 @@
 --     plus GRANT EXECUTE ... TO authenticated only if the app calls it.
 --   * The app requires login for every screen; `anon` needs no access.
 --
--- Legacy objects still present but unused by the app (cleanup candidates):
---   tables pubs, pubs_all, pub_spatial_assignments; functions pubs_in_bounds,
---   uk_postcode_from_address (its regex needs a literal backslash, so it never
---   matches), approve_report / reject_report (dashboard edits are used instead).
+-- Legacy tables pubs, pubs_all, pub_spatial_assignments (unused since Pubs_List)
+-- live in the non-exposed `archive` schema (scripts/db_cleanup_2026_09.sql);
+-- their definitions below are kept for reference.
 -- =============================================================================
 
 
@@ -303,9 +303,11 @@ CREATE TABLE public.notification_monthly_digest_log (
 );
 ALTER TABLE public.notification_monthly_digest_log ENABLE ROW LEVEL SECURITY;
 
--- --- LEGACY (pre-Pubs_List; unused by the app) --------------------------------
+-- --- ARCHIVE: legacy tables (pre-Pubs_List; not exposed to the API) -------------
+CREATE SCHEMA IF NOT EXISTS archive;
+REVOKE ALL ON SCHEMA archive FROM PUBLIC, anon, authenticated;
 
-CREATE TABLE public.pubs (
+CREATE TABLE archive.pubs (
   id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL,
   name text NOT NULL,
   lat numeric(10,8) NOT NULL,
@@ -335,10 +337,10 @@ CREATE TABLE public.pubs (
   CONSTRAINT pubs_pkey PRIMARY KEY (id),
   CONSTRAINT pubs_id_key UNIQUE (id)
 );
-ALTER TABLE public.pubs ENABLE ROW LEVEL SECURITY;
-COMMENT ON TABLE public.pubs IS 'Main table storing pub information';
+ALTER TABLE archive.pubs ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE archive.pubs IS 'Main table storing pub information';
 
-CREATE TABLE public.pubs_all (
+CREATE TABLE archive.pubs_all (
   id uuid DEFAULT extensions.uuid_generate_v4() NOT NULL,
   name text NOT NULL,
   lat numeric(10,8) NOT NULL,
@@ -369,9 +371,9 @@ CREATE TABLE public.pubs_all (
   CONSTRAINT pubs_all_pkey PRIMARY KEY (id),
   CONSTRAINT pubs_all_id_key UNIQUE (id)
 );
-ALTER TABLE public.pubs_all ENABLE ROW LEVEL SECURITY;
+ALTER TABLE archive.pubs_all ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE public.pub_spatial_assignments (
+CREATE TABLE archive.pub_spatial_assignments (
   pub_id uuid NOT NULL,
   pub_name text NOT NULL,
   lat double precision,
@@ -392,10 +394,10 @@ CREATE TABLE public.pub_spatial_assignments (
   postcode_area text,
   CONSTRAINT pub_spatial_assignments_pkey PRIMARY KEY (pub_id),
   CONSTRAINT pub_spatial_assignments_assignment_status_check CHECK ((assignment_status = ANY (ARRAY['inside_supported_polygons'::text, 'outside_supported_polygons'::text]))),
-  CONSTRAINT pub_spatial_assignments_pub_id_fkey FOREIGN KEY (pub_id) REFERENCES pubs_all(id) ON DELETE CASCADE
+  CONSTRAINT pub_spatial_assignments_pub_id_fkey FOREIGN KEY (pub_id) REFERENCES archive.pubs_all(id) ON DELETE CASCADE
 );
-ALTER TABLE public.pub_spatial_assignments ENABLE ROW LEVEL SECURITY;
-COMMENT ON TABLE public.pub_spatial_assignments IS 'Polygon-based ward and borough assignments for pubs, generated from pub lat/lon against the bundled London ward and borough GeoJSON files.';
+ALTER TABLE archive.pub_spatial_assignments ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE archive.pub_spatial_assignments IS 'Polygon-based ward and borough assignments for pubs, generated from pub lat/lon against the bundled London ward and borough GeoJSON files.';
 
 
 -- --- Views ----------------------------------------------------------------------
@@ -425,34 +427,37 @@ CREATE INDEX idx_league_members_user_id ON public.league_members USING btree (us
 CREATE INDEX idx_leagues_created_by ON public.leagues USING btree (created_by);
 CREATE UNIQUE INDEX leagues_code_key ON public.leagues USING btree (code);
 CREATE INDEX idx_notification_outbox_pending ON public.notification_outbox USING btree (created_at) WHERE ((sent_at IS NULL) AND (failed_at IS NULL));
+CREATE INDEX idx_notification_outbox_target_user_id ON public.notification_outbox USING btree (target_user_id);
+CREATE INDEX idx_favorite_pubs_pub_id ON public.favorite_pubs USING btree (pub_id);
+CREATE INDEX idx_pub_drinks_pub_id ON public.pub_drinks USING btree (pub_id);
+CREATE INDEX idx_pub_reviews_pub_id ON public.pub_reviews USING btree (pub_id);
+CREATE INDEX idx_reports_reporter_id ON public.reports USING btree (reporter_id);
+CREATE INDEX idx_reports_reviewed_by ON public.reports USING btree (reviewed_by);
 CREATE INDEX idx_pub_achievements_pub_id ON public.pub_achievements USING btree (pub_id);
 CREATE UNIQUE INDEX idx_pub_achievements_pub_title ON public.pub_achievements USING btree (pub_id, lower(TRIM(BOTH FROM title)));
 CREATE INDEX idx_user_push_tokens_user_id ON public.user_push_tokens USING btree (user_id);
 CREATE INDEX idx_user_stats_score ON public.user_stats USING btree (total_score DESC);
-CREATE UNIQUE INDEX idx_user_stats_user_id_unique ON public.user_stats USING btree (user_id);  -- duplicate of PK
-CREATE INDEX idx_users_email ON public.users USING btree (email);
-CREATE INDEX idx_users_username ON public.users USING btree (username);
 CREATE UNIQUE INDEX users_username_lower_key ON public.users USING btree (lower(username));  -- unique regardless of capitals
 CREATE INDEX idx_visited_pubs_pub_id ON public.visited_pubs USING btree (pub_id);
 CREATE INDEX idx_visited_pubs_user_id ON public.visited_pubs USING btree (user_id);
 -- Legacy tables
-CREATE INDEX idx_pub_spatial_assignments_assignment_status ON public.pub_spatial_assignments USING btree (assignment_status);
-CREATE INDEX idx_pub_spatial_assignments_corrected_borough_id ON public.pub_spatial_assignments USING btree (corrected_borough_id);
-CREATE INDEX idx_pub_spatial_assignments_corrected_ward_id ON public.pub_spatial_assignments USING btree (corrected_ward_id);
-CREATE INDEX idx_pub_spatial_assignments_postcode_area ON public.pub_spatial_assignments USING btree (postcode_area);
-CREATE INDEX idx_pub_spatial_assignments_postcode_district ON public.pub_spatial_assignments USING btree (postcode_district);
-CREATE INDEX idx_pubs_area ON public.pubs USING btree (area);
-CREATE INDEX idx_pubs_area_ownership ON public.pubs USING btree (area, ownership);
-CREATE INDEX idx_pubs_location ON public.pubs USING btree (lat, lon);
-CREATE INDEX idx_pubs_name ON public.pubs USING btree (name);
-CREATE INDEX idx_pubs_ownership ON public.pubs USING btree (ownership);
-CREATE UNIQUE INDEX pubs_legacy_id_key ON public.pubs USING btree (legacy_id);
-CREATE INDEX pubs_all_area_idx ON public.pubs_all USING btree (area);
-CREATE INDEX pubs_all_area_ownership_idx ON public.pubs_all USING btree (area, ownership);
-CREATE INDEX pubs_all_lat_lon_idx ON public.pubs_all USING btree (lat, lon);
-CREATE UNIQUE INDEX pubs_all_legacy_id_idx ON public.pubs_all USING btree (legacy_id);
-CREATE INDEX pubs_all_name_idx ON public.pubs_all USING btree (name);
-CREATE INDEX pubs_all_ownership_idx ON public.pubs_all USING btree (ownership);
+CREATE INDEX idx_pub_spatial_assignments_assignment_status ON archive.pub_spatial_assignments USING btree (assignment_status);
+CREATE INDEX idx_pub_spatial_assignments_corrected_borough_id ON archive.pub_spatial_assignments USING btree (corrected_borough_id);
+CREATE INDEX idx_pub_spatial_assignments_corrected_ward_id ON archive.pub_spatial_assignments USING btree (corrected_ward_id);
+CREATE INDEX idx_pub_spatial_assignments_postcode_area ON archive.pub_spatial_assignments USING btree (postcode_area);
+CREATE INDEX idx_pub_spatial_assignments_postcode_district ON archive.pub_spatial_assignments USING btree (postcode_district);
+CREATE INDEX idx_pubs_area ON archive.pubs USING btree (area);
+CREATE INDEX idx_pubs_area_ownership ON archive.pubs USING btree (area, ownership);
+CREATE INDEX idx_pubs_location ON archive.pubs USING btree (lat, lon);
+CREATE INDEX idx_pubs_name ON archive.pubs USING btree (name);
+CREATE INDEX idx_pubs_ownership ON archive.pubs USING btree (ownership);
+CREATE UNIQUE INDEX pubs_legacy_id_key ON archive.pubs USING btree (legacy_id);
+CREATE INDEX pubs_all_area_idx ON archive.pubs_all USING btree (area);
+CREATE INDEX pubs_all_area_ownership_idx ON archive.pubs_all USING btree (area, ownership);
+CREATE INDEX pubs_all_lat_lon_idx ON archive.pubs_all USING btree (lat, lon);
+CREATE UNIQUE INDEX pubs_all_legacy_id_idx ON archive.pubs_all USING btree (legacy_id);
+CREATE INDEX pubs_all_name_idx ON archive.pubs_all USING btree (name);
+CREATE INDEX pubs_all_ownership_idx ON archive.pubs_all USING btree (ownership);
 
 
 -- =============================================================================
@@ -760,21 +765,33 @@ BEGIN
   DELETE FROM public.favorite_pubs WHERE user_id = uid;
   DELETE FROM public.friendships WHERE user_id = uid OR friend_id = uid;
 
-  DELETE FROM public.league_members
-  WHERE league_id IN (SELECT id FROM public.leagues WHERE created_by = uid);
-
-  DELETE FROM public.leagues WHERE created_by = uid;
-
+  -- Leaving each league runs the league triggers: ownership passes to the
+  -- longest-standing member, and a league left empty is deleted.
   DELETE FROM public.league_members WHERE user_id = uid;
 
+  -- Leagues still owned by this user (owner had no membership row): hand over the
+  -- same way, otherwise delete (leagues.created_by would cascade anyway).
+  UPDATE public.leagues l
+     SET created_by = (
+       SELECT m.user_id FROM public.league_members m
+        WHERE m.league_id = l.id
+        ORDER BY m.joined_at NULLS LAST, m.user_id
+        LIMIT 1
+     )
+   WHERE l.created_by = uid
+     AND EXISTS (SELECT 1 FROM public.league_members m WHERE m.league_id = l.id);
+  DELETE FROM public.leagues WHERE created_by = uid;
+
   DELETE FROM public.user_stats WHERE user_id = uid;
+
+  -- Reports stay (pub data) but no longer name the reporter.
+  UPDATE public.reports SET reporter_username = NULL WHERE reporter_id = uid;
 
   DELETE FROM public.users WHERE id = uid;
 
   DELETE FROM auth.users WHERE id = uid;
 END;
-$function$
-;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.enqueue_pub_summon_notifications(p_pub_id text, p_friend_ids uuid[], p_pub_area_label text DEFAULT NULL::text)
  RETURNS integer
@@ -1698,44 +1715,6 @@ END;
 $function$
 ;
 
-CREATE OR REPLACE FUNCTION public.approve_report(p_report_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  UPDATE public.reports
-     SET status = 'approved'::public.report_status,
-         reviewed_at = COALESCE(reviewed_at, now())
-   WHERE id = p_report_id;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'report not found: %', p_report_id;
-  END IF;
-END;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.reject_report(p_report_id uuid)
- RETURNS void
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-BEGIN
-  UPDATE public.reports
-     SET status = 'rejected'::public.report_status,
-         reviewed_at = COALESCE(reviewed_at, now())
-   WHERE id = p_report_id;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'report not found: %', p_report_id;
-  END IF;
-END;
-$function$
-;
-
 CREATE OR REPLACE FUNCTION public.trg_reports_after_status_change()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -1863,67 +1842,6 @@ BEGIN
 
   -- Unchanged if we cannot validate
   RETURN raw;
-END;
-$function$
-;
-
--- NOTE: live definition — the '\\s' in the standard (non-E) strings below is a
--- literal backslash in the regex, so postcodes never match. Unused.
-CREATE OR REPLACE FUNCTION public.uk_postcode_from_address(p_address text)
- RETURNS TABLE(district text, area text)
- LANGUAGE sql
- IMMUTABLE PARALLEL SAFE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  WITH s AS (
-    SELECT CASE
-      WHEN p_address IS NULL OR length(trim(p_address)) = 0 THEN NULL::text
-      ELSE upper(regexp_replace(p_address, E'[\\n\\r\\t]+', ' ', 'g'))
-    END AS txt
-  ),
-  lastm AS (
-    SELECT (rm.arr)[1] AS pc
-    FROM s
-    CROSS JOIN LATERAL regexp_matches(
-      s.txt,
-      '([A-Z]{1,2}[0-9]{1,2}[A-Z]?\\s?[0-9][A-Z]{2})',
-      'gi'
-    ) WITH ORDINALITY AS rm(arr, ord)
-    ORDER BY rm.ord DESC
-    LIMIT 1
-  ),
-  compact AS (
-    SELECT regexp_replace(lastm.pc, '\\s+', '', 'g') AS c
-    FROM lastm
-    WHERE lastm.pc IS NOT NULL
-  ),
-  split AS (
-    SELECT
-      left(c, length(c) - 3) AS outward,
-      right(c, 3) AS inward3
-    FROM compact
-    WHERE length(c) >= 5
-      AND right(c, 3) ~ '^[0-9][A-Z]{2}$'
-  )
-  SELECT
-    split.outward AS district,
-    (regexp_match(split.outward, '^([A-Z]+)'))[1] AS area
-  FROM split;
-$function$
-;
-
--- LEGACY: queries the unused `pubs` table.
-CREATE OR REPLACE FUNCTION public.pubs_in_bounds(north_lat numeric, south_lat numeric, east_lon numeric, west_lon numeric)
- RETURNS TABLE(id uuid, name text, lat numeric, lon numeric, address text, phone text, description text, founded text, history text, area text, ownership text, photo_url text, points integer, created_at timestamp with time zone, updated_at timestamp with time zone)
- LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-BEGIN
-  RETURN QUERY
-  SELECT p.*
-  FROM pubs p
-  WHERE p.lat BETWEEN south_lat AND north_lat
-    AND p.lon BETWEEN west_lon AND east_lon;
 END;
 $function$
 ;
@@ -2209,31 +2127,31 @@ CREATE POLICY favorite_pubs_select_own_or_friend ON public.favorite_pubs AS PERM
 
 -- pub_drinks: own rows only
 CREATE POLICY pub_drinks_delete_own ON public.pub_drinks AS PERMISSIVE FOR DELETE TO authenticated
-  USING ((auth.uid() = user_id));
+  USING ((( SELECT auth.uid() AS uid) = user_id));
 
 CREATE POLICY pub_drinks_insert_own ON public.pub_drinks AS PERMISSIVE FOR INSERT TO authenticated
-  WITH CHECK ((auth.uid() = user_id));
+  WITH CHECK ((( SELECT auth.uid() AS uid) = user_id));
 
 CREATE POLICY pub_drinks_select_own ON public.pub_drinks AS PERMISSIVE FOR SELECT TO authenticated
-  USING ((auth.uid() = user_id));
+  USING ((( SELECT auth.uid() AS uid) = user_id));
 
 CREATE POLICY pub_drinks_update_own ON public.pub_drinks AS PERMISSIVE FOR UPDATE TO authenticated
-  USING ((auth.uid() = user_id))
-  WITH CHECK ((auth.uid() = user_id));
+  USING ((( SELECT auth.uid() AS uid) = user_id))
+  WITH CHECK ((( SELECT auth.uid() AS uid) = user_id));
 
 -- pub_reviews: public read, own writes
 CREATE POLICY "Reviews readable by all" ON public.pub_reviews AS PERMISSIVE FOR SELECT TO public
   USING (true);
 
 CREATE POLICY pub_reviews_delete_own ON public.pub_reviews AS PERMISSIVE FOR DELETE TO authenticated
-  USING ((auth.uid() = user_id));
+  USING ((( SELECT auth.uid() AS uid) = user_id));
 
 CREATE POLICY pub_reviews_insert_own ON public.pub_reviews AS PERMISSIVE FOR INSERT TO authenticated
-  WITH CHECK ((auth.uid() = user_id));
+  WITH CHECK ((( SELECT auth.uid() AS uid) = user_id));
 
 CREATE POLICY pub_reviews_update_own ON public.pub_reviews AS PERMISSIVE FOR UPDATE TO authenticated
-  USING ((auth.uid() = user_id))
-  WITH CHECK ((auth.uid() = user_id));
+  USING ((( SELECT auth.uid() AS uid) = user_id))
+  WITH CHECK ((( SELECT auth.uid() AS uid) = user_id));
 
 -- friendships
 CREATE POLICY friendships_delete ON public.friendships AS PERMISSIVE FOR DELETE TO authenticated
@@ -2302,32 +2220,32 @@ CREATE POLICY user_push_tokens_update_own ON public.user_push_tokens AS PERMISSI
   WITH CHECK ((user_id = ( SELECT auth.uid() AS uid)));
 
 -- Legacy tables
-CREATE POLICY "Allow public read access to pubs" ON public.pubs AS PERMISSIVE FOR SELECT TO public
+CREATE POLICY "Allow public read access to pubs" ON archive.pubs AS PERMISSIVE FOR SELECT TO public
   USING (true);
 
-CREATE POLICY "Allow public read access to pubs_all" ON public.pubs_all AS PERMISSIVE FOR SELECT TO public
+CREATE POLICY "Allow public read access to pubs_all" ON archive.pubs_all AS PERMISSIVE FOR SELECT TO public
   USING (true);
 
-CREATE POLICY pubs_all_delete_service ON public.pubs_all AS PERMISSIVE FOR DELETE TO service_role
+CREATE POLICY pubs_all_delete_service ON archive.pubs_all AS PERMISSIVE FOR DELETE TO service_role
   USING (true);
 
-CREATE POLICY pubs_all_insert_service ON public.pubs_all AS PERMISSIVE FOR INSERT TO service_role
+CREATE POLICY pubs_all_insert_service ON archive.pubs_all AS PERMISSIVE FOR INSERT TO service_role
   WITH CHECK (true);
 
-CREATE POLICY pubs_all_update_service ON public.pubs_all AS PERMISSIVE FOR UPDATE TO service_role
+CREATE POLICY pubs_all_update_service ON archive.pubs_all AS PERMISSIVE FOR UPDATE TO service_role
   USING (true)
   WITH CHECK (true);
 
-CREATE POLICY pub_spatial_assignments_delete_service ON public.pub_spatial_assignments AS PERMISSIVE FOR DELETE TO service_role
+CREATE POLICY pub_spatial_assignments_delete_service ON archive.pub_spatial_assignments AS PERMISSIVE FOR DELETE TO service_role
   USING (true);
 
-CREATE POLICY pub_spatial_assignments_insert_service ON public.pub_spatial_assignments AS PERMISSIVE FOR INSERT TO service_role
+CREATE POLICY pub_spatial_assignments_insert_service ON archive.pub_spatial_assignments AS PERMISSIVE FOR INSERT TO service_role
   WITH CHECK (true);
 
-CREATE POLICY pub_spatial_assignments_select_public ON public.pub_spatial_assignments AS PERMISSIVE FOR SELECT TO public
+CREATE POLICY pub_spatial_assignments_select_public ON archive.pub_spatial_assignments AS PERMISSIVE FOR SELECT TO public
   USING (true);
 
-CREATE POLICY pub_spatial_assignments_update_service ON public.pub_spatial_assignments AS PERMISSIVE FOR UPDATE TO service_role
+CREATE POLICY pub_spatial_assignments_update_service ON archive.pub_spatial_assignments AS PERMISSIVE FOR UPDATE TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -2355,9 +2273,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.league_members                  T
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_push_tokens                TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.notification_outbox             TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.notification_monthly_digest_log TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.pubs                            TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.pubs_all                        TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.pub_spatial_assignments         TO anon, authenticated;
 GRANT SELECT                         ON public.user_stats                      TO anon, authenticated;
 GRANT SELECT, INSERT                 ON public.reports                         TO authenticated;
 GRANT SELECT                         ON public.pub_rating_summaries            TO authenticated;
