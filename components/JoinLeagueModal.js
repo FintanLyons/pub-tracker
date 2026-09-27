@@ -17,7 +17,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { joinLeagueByCode } from '../services/LeagueService';
 import { COLORS } from '../constants/theme';
-import { AppFeedbackOverlay } from './AppFeedbackModal';
+import { AppDialogOverlay } from './AppDialog';
 
 const BACKDROP = 'rgba(0, 0, 0, 0.5)';
 
@@ -232,7 +232,7 @@ export default function JoinLeagueModal({
           </View>
 
           {feedback ? (
-            <AppFeedbackOverlay
+            <AppDialogOverlay
               title={feedback.title}
               message={feedback.message}
               tone={feedback.tone}

@@ -30,7 +30,7 @@ import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
 import PubReportFormModal from '../components/PubReportFormModal';
-import AppFeedbackModal from '../components/AppFeedbackModal';
+import AppDialogModal from '../components/AppDialog';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -887,8 +887,9 @@ export default function MapScreen() {
         onSuccess={() => setMissingPubReportSubmittedVisible(true)}
       />
 
-      <AppFeedbackModal
+      <AppDialogModal
         visible={missingPubReportSubmittedVisible}
+        tone="success"
         title="Report submitted"
         message="Thanks! Your report is pending review. Points are awarded once it is accepted."
         onClose={() => setMissingPubReportSubmittedVisible(false)}

@@ -13,7 +13,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
 import UserAvatar from './UserAvatar';
-import { AppFeedbackOverlay } from './AppFeedbackModal';
+import { AppDialogOverlay } from './AppDialog';
 import { getFriends } from '../services/FriendsService';
 import { summonFriendsToPub } from '../services/NotificationSummonService';
 
@@ -301,7 +301,7 @@ export default function PubSummonTroopsModal({
         </View>
 
         {feedback ? (
-          <AppFeedbackOverlay
+          <AppDialogOverlay
             title={feedback.title}
             message={feedback.message}
             tone={feedback.tone}

@@ -31,7 +31,7 @@ import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
 import LeagueActionsModal from '../components/LeagueActionsModal';
 import ShareLeagueModal from '../components/ShareLeagueModal';
-import AppFeedbackModal from '../components/AppFeedbackModal';
+import AppDialogModal from '../components/AppDialog';
 import { COLORS } from '../constants/theme';
 
 /** What leaving does: last member deletes the league; an owner hands it on. */
@@ -688,7 +688,7 @@ export default function LeaderboardScreen() {
         </View>
       </Modal>
 
-      <AppFeedbackModal
+      <AppDialogModal
         visible={!!feedback}
         title={feedback?.title ?? ''}
         message={feedback?.message ?? ''}

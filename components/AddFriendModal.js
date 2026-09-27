@@ -16,7 +16,7 @@ import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejec
 import { COLORS } from '../constants/theme';
 import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
 import UserAvatar from './UserAvatar';
-import { AppFeedbackOverlay } from './AppFeedbackModal';
+import { AppDialogOverlay } from './AppDialog';
 import { useAppAlert } from '../contexts/AppAlertContext';
 
 export default function AddFriendModal({
@@ -541,7 +541,7 @@ export default function AddFriendModal({
         ) : null}
 
         {feedback ? (
-          <AppFeedbackOverlay
+          <AppDialogOverlay
             title={feedback.title}
             message={feedback.message}
             tone={feedback.tone}

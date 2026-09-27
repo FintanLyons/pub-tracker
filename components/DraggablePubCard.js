@@ -14,7 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
 import PubReportFormModal from './PubReportFormModal';
-import AppFeedbackModal from './AppFeedbackModal';
+import AppDialogModal from './AppDialog';
 import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 
@@ -675,8 +675,9 @@ export default function DraggablePubCard({
         onSubmit={handlePubCorrectionSubmit}
         onSuccess={() => setReportSubmittedVisible(true)}
       />
-      <AppFeedbackModal
+      <AppDialogModal
         visible={reportSubmittedVisible}
+        tone="success"
         title="Report submitted"
         message="Thanks! Your report is pending review. Points are awarded once it is accepted."
         onClose={() => setReportSubmittedVisible(false)}
