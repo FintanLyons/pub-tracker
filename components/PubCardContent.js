@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
-import { useAppAlert } from '../contexts/AppAlertContext';
 import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -90,7 +89,6 @@ export default function PubCardContent({
   onToggleVisited,
   onBlockingOverlayVisibleChange,
 }) {
-  const { showAppAlert } = useAppAlert();
   const { showToast } = useToast();
   const { refreshUserStats } = useUserStats();
   const { user } = useAuth();
@@ -215,16 +213,8 @@ export default function PubCardContent({
   const pubAreaLabel = pub?.area ? formatDistrictWithCode(pub.area) : null;
 
   const handleOpenSummonModal = useCallback(() => {
-    if (!userId) {
-      showAppAlert({
-        title: 'Sign in required',
-        message: 'Sign in to summon friends to this pub.',
-        tone: 'neutral',
-      });
-      return;
-    }
     setShowSummonModal(true);
-  }, [userId]);
+  }, []);
 
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {

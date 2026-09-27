@@ -113,15 +113,6 @@ export default function JoinLeagueModal({
       return;
     }
 
-    if (!currentUserId) {
-      Keyboard.dismiss();
-      setFeedback({
-        title: 'Not logged in',
-        message: 'You must be logged in to join a league.',
-        tone: 'error',
-      });
-      return;
-    }
 
     try {
       setLoading(true);

@@ -50,7 +50,8 @@ function leaveLeagueMessage(league, members, userId) {
 export default function LeaderboardScreen() {
   const { showAppAlert } = useAppAlert();
   const { user: authUser } = useAuth();
-  const [currentUser, setCurrentUser] = useState(null);
+  // The app only shows this screen when signed in; use the auth user directly.
+  const currentUser = authUser;
   const [activeTab, setActiveTab] = useState('friends'); // 'friends' or 'leagues'
   const [friendsLeaderboard, setFriendsLeaderboard] = useState([]);
   const [leagues, setLeagues] = useState([]);
@@ -97,7 +98,6 @@ export default function LeaderboardScreen() {
       return;
     }
 
-    setCurrentUser(authUser);
 
     const cachedData = getCachedLeaderboardData(authUser.id);
     if (cachedData) {
@@ -291,24 +291,6 @@ export default function LeaderboardScreen() {
     );
   }
 
-  if (!currentUser) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.contentContainerLoggedOut}>
-          <View style={styles.headerContainer}>
-            <View style={styles.headerSideSlot} />
-            <View style={styles.headerTitleWrap}>
-              <Text style={styles.headerTitle}>Leaderboard</Text>
-            </View>
-            <View style={styles.headerSideSlot} />
-          </View>
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Please log in to view the leaderboard</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <>
