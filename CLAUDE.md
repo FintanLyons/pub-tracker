@@ -102,6 +102,8 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 ### ⚠️ Pending database migrations
 
 - **`scripts/social_security_phase_b_2026_09.sql` — NOT YET RUN (deliberately).** Hides leagues and invite codes from non-members. Run it only once most users have updated to a build that joins leagues via `join_league_by_code()` (commit "Join leagues by code on the server"); older builds can't join leagues after it runs. Remind the user about this whenever database or release work comes up. After running: verify via MCP, update the schema baseline, and delete this bullet.
+- **Batch 7 notifications — in progress.** Order: (1) `scripts/notification_queue_2026_09.sql`; (2) deploy `process-notification-queue`, `monthly-friends-digest`, `presign-r2-upload` (`npx supabase functions deploy <name>`); (3) Vault secret + `scripts/notification_scheduling_2026_09.sql`; (4) once pushes are verified, disable the cron-job.org jobs and rewrite the "Push notification scheduling" section above. After each SQL file: verify via MCP, sync the baseline, update this bullet.
+- **Edge secret `R2_REQUIRE_CONTENT_LENGTH=true` on `presign-r2-upload` — NOT YET SET (deliberately).** Builds before Batch 7 don't send `contentLength`; set it alongside Phase B, once most users have updated. Until then old builds can still upload without a size limit.
 
 ### Tables
 
