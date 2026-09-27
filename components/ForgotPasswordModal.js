@@ -55,7 +55,7 @@ export default function ForgotPasswordModal({ visible, initialEmail, onClose, on
       setStep(STEP.CODE);
       setNotice(
         `If an account exists for ${email.trim()}, we've emailed it a reset code. `
-        + "Can't find it? Check your spam or junk folder.",
+        + "Can't find it? Check your spam or junk folder, and make sure it's the address you signed up with.",
       );
     } catch (e) {
       setError(e.message);
@@ -115,7 +115,7 @@ export default function ForgotPasswordModal({ visible, initialEmail, onClose, on
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.body}>
             <Text style={styles.hint}>
               {isEmailStep
-                ? "Enter your account email and we'll send you a reset code."
+                ? "Enter the email address you signed up with and we'll send you a reset code."
                 : notice}
             </Text>
 
