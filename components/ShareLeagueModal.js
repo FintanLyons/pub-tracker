@@ -9,12 +9,12 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { APP_DISPLAY_NAME, PLAY_STORE_LISTING_URL } from '../constants/app';
+import { APP_DISPLAY_NAME, STORE_LINKS_TEXT } from '../constants/app';
 import { COLORS } from '../constants/theme';
 
 function buildInviteMessage(leagueName, leagueCode) {
   const code = (leagueCode || '').toUpperCase();
-  return `Join my league "${leagueName}" on ${APP_DISPLAY_NAME}! League code: ${code}\n\nGet the app on Google Play:\n${PLAY_STORE_LISTING_URL}`;
+  return `Join my league "${leagueName}" on ${APP_DISPLAY_NAME}! League code: ${code}\n\nGet the app:\n${STORE_LINKS_TEXT}`;
 }
 
 export default function ShareLeagueModal({
@@ -22,6 +22,8 @@ export default function ShareLeagueModal({
   onClose,
   leagueName,
   leagueCode,
+  /** Render inside a parent Modal (avoids stacked modals on iOS). */
+  embedded = false,
 }) {
   const [phase, setPhase] = useState('menu'); // 'menu' | 'copied' | 'copyError'
 
@@ -58,20 +60,9 @@ export default function ShareLeagueModal({
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent
-      onRequestClose={dismissFully}
-    >
-      <View style={styles.overlay}>
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={dismissFully}
-          accessibilityLabel="Dismiss"
-        />
+  if (!visible) return null;
+
+  const card = (
         <View style={styles.card}>
           {phase === 'menu' && (
             <>
@@ -193,10 +184,55 @@ export default function ShareLeagueModal({
             </>
           )}
         </View>
+  );
+
+  if (embedded) {
+    return (
+      <View style={embeddedStyles.layer} pointerEvents="box-none">
+        <TouchableOpacity
+          style={embeddedStyles.backdrop}
+          activeOpacity={1}
+          onPress={dismissFully}
+          accessibilityLabel="Dismiss"
+        />
+        {card}
+      </View>
+    );
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent
+      onRequestClose={dismissFully}
+    >
+      <View style={styles.overlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={dismissFully}
+          accessibilityLabel="Dismiss"
+        />
+        {card}
       </View>
     </Modal>
   );
 }
+
+const embeddedStyles = StyleSheet.create({
+  layer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    zIndex: 10,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+});
 
 const styles = StyleSheet.create({
   overlay: {

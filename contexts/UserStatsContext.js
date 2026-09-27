@@ -1,8 +1,9 @@
-import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
 import { supabase } from '../config/supabase';
 import { getPostcodeDistrictDisplayName } from '../utils/postcodeDistrictDisplayNames';
-import { CORE_LONDON_AREAS } from '../constants/londonAreas';
+import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
 import { getDrinkStats } from '../services/ReviewService';
+import { createCoalescedRunner } from '../utils/coalescedRunner';
 
 const EMPTY_DRINK_STATS = { total: 0, byDistrict: {}, byPostcodeArea: {} };
 
@@ -18,13 +19,11 @@ export const UserStatsProvider = ({ userId, children }) => {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState(null);
 	const [lastUpdated, setLastUpdated] = useState(null);
-	const loadingRef = useRef(false);
-
-	const loadUserStats = useCallback(async () => {
-		if (!userId || loadingRef.current) return;
-		loadingRef.current = true;
-		setLoading(true);
+	/** When the fetch behind the current stats *started* — changes made before this are included. */
+	const [statsAsOf, setStatsAsOf] = useState(0);
+	const fetchUserStatsOnce = useCallback(async () => {
 		setError(null);
+		const startedAt = Date.now();
 		try {
 			const [districtResult, areaResult, achievementsResult, drinkStatsResult] = await Promise.all([
 				supabase.rpc('get_area_stats', { p_user_id: userId }),
@@ -52,7 +51,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 			percentage: row.percentage,
 			centerLat: row.center_lat ?? null,
 			centerLon: row.center_lon ?? null,
-		})).filter((d) => d.postcodeArea && CORE_LONDON_AREAS.has(d.postcodeArea));
+		})).filter((d) => d.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(d.postcodeArea));
 
 		const mappedPostcodeAreas = rawAreas.map((row) => ({
 			postcodeArea: row.postcode_area,
@@ -63,9 +62,15 @@ export const UserStatsProvider = ({ userId, children }) => {
 			completedDistricts: Number(row.completed_districts),
 			centerLat: row.center_lat ?? null,
 			centerLon: row.center_lon ?? null,
-		})).filter((a) => a.postcodeArea && CORE_LONDON_AREAS.has(a.postcodeArea));
+			bounds: [row.min_lat, row.max_lat, row.min_lon, row.max_lon].every(Number.isFinite)
+				? { north: row.max_lat, south: row.min_lat, east: row.max_lon, west: row.min_lon }
+				: null,
+		})).filter((a) => a.postcodeArea && SUPPORTED_POSTCODE_AREAS.has(a.postcodeArea));
 
-		const totalVisitedCount = mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
+		// Pubs visited comes from user_stats (via get_achievements) so Profile and
+		// Leaderboard always show the same number.
+		const totalVisitedCount = Number(achievementsResult.data?.pubsVisited)
+			|| mappedDistricts.reduce((sum, s) => sum + (s.visited || 0), 0);
 		const totalPubsCount = mappedDistricts.reduce((sum, s) => sum + (s.total || 0), 0);
 
 		setDistrictStats(mappedDistricts);
@@ -75,14 +80,27 @@ export const UserStatsProvider = ({ userId, children }) => {
 			setAchievements(achievementsResult.data || null);
 			setDrinkStats(drinkStatsResult || EMPTY_DRINK_STATS);
 			setLastUpdated(Date.now());
+			setStatsAsOf(startedAt);
 		} catch (err) {
 			console.error('Error loading user stats:', err);
 			setError(err);
-		} finally {
-			loadingRef.current = false;
-			setLoading(false);
 		}
 	}, [userId]);
+
+	/**
+	 * Refresh all stats. Calls made while a refresh is running are merged into a single
+	 * follow-up refresh (never dropped); the returned promise settles after it.
+	 */
+	const runStatsRefresh = useMemo(
+		() => createCoalescedRunner(fetchUserStatsOnce),
+		[fetchUserStatsOnce],
+	);
+
+	const loadUserStats = useCallback(() => {
+		if (!userId) return Promise.resolve();
+		setLoading(true);
+		return runStatsRefresh().finally(() => setLoading(false));
+	}, [userId, runStatsRefresh]);
 
 	useEffect(() => {
 		loadUserStats();
@@ -100,6 +118,7 @@ export const UserStatsProvider = ({ userId, children }) => {
 				loading,
 				error,
 				lastUpdated,
+				statsAsOf,
 				refreshUserStats: loadUserStats,
 			}}
 		>

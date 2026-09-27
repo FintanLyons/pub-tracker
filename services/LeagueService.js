@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { supabase } from '../config/supabase';
+import { noteSocialAction } from './notificationPrompt';
 
 /** 32 chars: 256 % 32 === 0 so uniform index = byte % 32 */
 const LEAGUE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -16,40 +17,39 @@ const generateLeagueCode = async () => {
   return code;
 };
 
-const generateUniqueLeagueCode = async () => {
-  for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt += 1) {
-    const code = await generateLeagueCode();
-    const { data } = await supabase
-      .from('leagues')
-      .select('id')
-      .eq('code', code)
-      .limit(1);
-
-    if (!data || data.length === 0) return code;
-  }
-  throw new Error('Unable to generate unique league code');
-};
+/** Postgres unique_violation (league code collision). */
+const UNIQUE_VIOLATION = '23505';
 
 /**
- * Create a new league
+ * Create a new league with a random invite code. Other leagues' codes are not
+ * visible to the client, so a (rare) collision is detected by the unique index
+ * and retried with a new code.
  */
 export const createLeague = async (userId, leagueName) => {
-  const code = await generateUniqueLeagueCode();
+  let data = null;
+  for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS && !data; attempt += 1) {
+    const code = await generateLeagueCode();
+    const { data: row, error } = await supabase
+      .from('leagues')
+      .insert({
+        name: leagueName,
+        created_by: userId,
+        created_at: new Date().toISOString(),
+        code,
+      })
+      .select()
+      .single();
 
-  const { data, error } = await supabase
-    .from('leagues')
-    .insert({
-      name: leagueName,
-      created_by: userId,
-      created_at: new Date().toISOString(),
-      code,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
+    if (!error) {
+      data = row;
+    } else if (error.code !== UNIQUE_VIOLATION) {
+      throw error;
+    }
+  }
+  if (!data) throw new Error('Unable to create the league. Please try again.');
 
   await addLeagueMember(data.id, userId);
+  noteSocialAction();
   return data;
 };
 
@@ -82,32 +82,22 @@ export const addLeagueMember = async (leagueId, userId) => {
 };
 
 /**
- * Join a league using its code
+ * Join a league using its invite code (server-side lookup — league codes are not
+ * readable by non-members).
+ * @returns {Promise<{ league: object, alreadyMember: boolean }>}
  */
 export const joinLeagueByCode = async (userId, code) => {
-  const normalizedCode = code.trim().toUpperCase();
+  const normalizedCode = (code || '').trim().toUpperCase();
   if (!normalizedCode) throw new Error('League code is required');
+  if (!userId) throw new Error('You must be signed in to join a league.');
 
-  const { data: leagues, error } = await supabase
-    .from('leagues')
-    .select('*')
-    .eq('code', normalizedCode)
-    .limit(1);
-
-  if (error) throw error;
-  if (!leagues || leagues.length === 0) throw new Error('League not found');
-
-  const league = leagues[0];
-
-  try {
-    await addLeagueMember(league.id, userId);
-    return { league, alreadyMember: false };
-  } catch (err) {
-    if (err.message.includes('already a member')) {
-      return { league, alreadyMember: true };
-    }
-    throw err;
+  const { data, error } = await supabase.rpc('join_league_by_code', { p_code: normalizedCode });
+  if (error) {
+    if (error.code === 'P0002') throw new Error('League not found. Check the code and try again.');
+    throw error;
   }
+  noteSocialAction();
+  return { league: data.league, alreadyMember: Boolean(data.already_member) };
 };
 
 /**

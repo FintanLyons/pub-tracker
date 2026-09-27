@@ -24,14 +24,18 @@ import {
   Map as MLRNMap,
 } from '@maplibre/maplibre-react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { submitPubReport } from '../services/ReportService';
 import SearchBar from '../components/SearchBar';
 import SearchSuggestions from '../components/SearchSuggestions';
 import DraggablePubCard from '../components/DraggablePubCard';
 import PubReportFormModal from '../components/PubReportFormModal';
+import AppDialogModal from '../components/AppDialog';
 import FilterScreen from './FilterScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
+import { fetchFavoritePubIdsForUsers } from '../services/PubService';
 import { useFilterState } from './map/hooks/useFilterState';
 import { useImageSource } from './map/hooks/useImageSource';
 import { useMapCamera } from './map/hooks/useMapCamera';
@@ -39,9 +43,23 @@ import { useViewportPubs } from './map/hooks/useViewportPubs';
 import { useMapInteraction } from './map/hooks/useMapInteraction';
 import { COLORS } from '../constants/theme';
 import { pubInsideFeature } from './map/mapUtils';
-import postcodeDistrictGeojson from '../data/geo/london_postcode_districts.min.json';
-import postcodeAreaOutlinesGeojson from '../data/geo/london_postcode_areas.min.json';
-import postcodeAreaLabelPointsGeojson from '../data/geo/london_postcode_area_label_points.min.json';
+import { parseFoundedYear } from '../utils/foundedYear';
+import {
+  areaSummariesWithDeltas,
+  districtStatsWithDeltas,
+  visitDeltas,
+} from '../utils/pendingVisitChanges';
+
+const NO_DELTAS = { byDistrict: new Map(), byArea: new Map() };
+
+/** One-time hint pointing at the "report a missing pub" button. */
+const REPORT_PUB_HINT_KEY = 'hint:reportMissingPub:v1';
+const REPORT_PUB_HINT_MS = 8000;
+import {
+  postcodeAreaLabelPointsGeojson,
+  postcodeAreaOutlinesGeojson,
+  postcodeDistrictGeojson,
+} from '../data/geo/supportedPostcodeGeo';
 import { styles as baseStyles } from './map/mapStyles';
 import { getOpeningStatus, isOpenPastMidnight } from '../utils/openingHours';
 import {
@@ -76,12 +94,23 @@ export default function MapScreen() {
   const {
     setIsLocationLoaded,
     setIsInitialPubsLoaded,
-    postcodeAreaSummaries,
   } = useContext(LoadingContext);
-  const { refreshUserStats } = useUserStats();
+  const {
+    refreshUserStats,
+    districtStats,
+    postcodeAreaStats,
+    statsAsOf,
+  } = useUserStats();
+  /** Server postcode-area stats (bounds / centres for camera moves). */
+  const baseAreaSummaries = useMemo(
+    () => areaSummariesWithDeltas(postcodeAreaStats, NO_DELTAS),
+    [postcodeAreaStats],
+  );
   const getImageSource = useImageSource();
 
   // ── Hooks ─────────────────────────────────────────────────────
+
+  const requestInitialViewportPubsRef = useRef(null);
 
   const {
     cameraRef,
@@ -93,21 +122,31 @@ export default function MapScreen() {
     fitBoundsObject,
     handleCurrentLocation,
     handleMapLoaded,
-  } = useMapCamera({ setIsLocationLoaded, isMapFocused: isFocused });
+  } = useMapCamera({
+    setIsLocationLoaded,
+    isMapFocused: isFocused,
+    onInitialCameraReady: (center) => requestInitialViewportPubsRef.current?.(center),
+  });
 
   const {
     allPubs,
     setAllPubs,
+    initialPubsReady,
     requestViewportPubs,
+    requestInitialViewportPubs,
     handleRegionChange,
     loadedPubBoundsRef,
   } = useViewportPubs({ isFocused, mapZoomRef });
+
+  requestInitialViewportPubsRef.current = requestInitialViewportPubs;
+
+  const { user: authUser } = useAuth();
 
   const {
     selectedFeatures,
     selectedOwnerships,
     yearRange,
-    showOnlyFavorites,
+    favoritesFilterUserIds,
     showOnlyAchievements,
     closingTimeMin,
     minRating,
@@ -118,6 +157,37 @@ export default function MapScreen() {
     handleFilterPress,
     handleFilterClose,
   } = useFilterState(allPubs);
+
+  const [favoritesFilterPubIds, setFavoritesFilterPubIds] = useState(null);
+
+  // "Open now" depends on the clock: re-evaluate every minute while that filter is on.
+  const [openNowTick, setOpenNowTick] = useState(0);
+  useEffect(() => {
+    if (closingTimeMin !== 'open_now') return undefined;
+    const timer = setInterval(() => setOpenNowTick((t) => t + 1), 60 * 1000);
+    return () => clearInterval(timer);
+  }, [closingTimeMin]);
+
+  useEffect(() => {
+    if (!favoritesFilterUserIds?.length) {
+      setFavoritesFilterPubIds(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    fetchFavoritePubIdsForUsers(favoritesFilterUserIds)
+      .then((ids) => {
+        if (!cancelled) setFavoritesFilterPubIds(ids);
+      })
+      .catch((e) => {
+        console.warn('Favourites filter fetch failed:', e?.message);
+        if (!cancelled) setFavoritesFilterPubIds(new Set());
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [favoritesFilterUserIds]);
 
   const interaction = useMapInteraction({
     allPubs,
@@ -130,8 +200,9 @@ export default function MapScreen() {
     fitFeature,
     fitBoundsObject,
     currentLocation,
-    postcodeAreaSummaries,
+    postcodeAreaSummaries: baseAreaSummaries,
     refreshUserStats,
+    statsAsOf,
     navigation,
     route,
   });
@@ -151,10 +222,12 @@ export default function MapScreen() {
     keyboardHeight,
     keyboardTop,
     mapHighlightedPubId,
+    pubSelectionSeq,
     clearMapHighlight,
     closeCard,
     handleToggleVisited,
     handleToggleFavorite,
+    pendingVisitChanges,
     handlePostcodeAreaLayerPress,
     handlePostcodeDistrictLayerPress,
     handlePubPress,
@@ -171,7 +244,7 @@ export default function MapScreen() {
     const hasFeatures = selectedFeatures?.length > 0;
     const hasOwnerships = selectedOwnerships?.length > 0;
     const hasYearRange = yearRange && yearRange.min !== null && yearRange.max !== null;
-    const hasFavorites = showOnlyFavorites === true;
+    const hasFavoritesFilter = favoritesFilterUserIds.length > 0;
     const hasAchievements = showOnlyAchievements === true;
     const hasClosingTime = closingTimeMin != null;
     const hasMinRating = minRating != null;
@@ -187,10 +260,12 @@ export default function MapScreen() {
       if (hasFeatures && (!pub.features || !selectedFeatures.every((f) => pub.features.includes(f)))) return false;
       if (hasOwnerships && (!pub.ownership || !selectedOwnerships.includes(pub.ownership))) return false;
       if (hasYearRange) {
-        const foundedYear = parseInt(pub.founded, 10);
+        const foundedYear = parseFoundedYear(pub.founded);
         if (!Number.isFinite(foundedYear) || foundedYear < yearRange.min || foundedYear > yearRange.max) return false;
       }
-      if (hasFavorites && pub.isFavorite !== true) return false;
+      if (hasFavoritesFilter) {
+        if (!favoritesFilterPubIds || !favoritesFilterPubIds.has(pub.id)) return false;
+      }
       if (hasAchievements && (!pub.achievements || pub.achievements.length === 0)) return false;
       if (hasClosingTime) {
         if (closingTimeMin === 'open_now') {
@@ -212,10 +287,12 @@ export default function MapScreen() {
     selectedFeatures,
     selectedOwnerships,
     yearRange,
-    showOnlyFavorites,
+    favoritesFilterUserIds,
+    favoritesFilterPubIds,
     showOnlyAchievements,
     closingTimeMin,
     minRating,
+    openNowTick,
   ]);
 
   // Deselect pub when it falls outside the active filter set.
@@ -235,19 +312,18 @@ export default function MapScreen() {
     [filteredPubs, mapHighlightedPubId],
   );
 
-  const districtStatsMap = useMemo(() => {
-    if (!allPubs.length) return null;
-    const statsMap = new Map();
-    allPubs.forEach((pub) => {
-      const district = typeof pub.area === 'string' ? pub.area.trim().toLowerCase() : '';
-      if (!district) return;
-      let entry = statsMap.get(district);
-      if (!entry) { entry = { total: 0, visited: 0 }; statsMap.set(district, entry); }
-      entry.total += 1;
-      if (pub.isVisited) entry.visited += 1;
-    });
-    return statsMap;
-  }, [allPubs]);
+  // Completion colours / area labels: server totals + taps the server hasn't counted yet.
+  const pendingDeltas = useMemo(() => visitDeltas(pendingVisitChanges), [pendingVisitChanges]);
+
+  const districtStatsMap = useMemo(
+    () => (districtStats?.length ? districtStatsWithDeltas(districtStats, pendingDeltas) : null),
+    [districtStats, pendingDeltas],
+  );
+
+  const postcodeAreaSummaries = useMemo(
+    () => areaSummariesWithDeltas(postcodeAreaStats, pendingDeltas),
+    [postcodeAreaStats, pendingDeltas],
+  );
 
   const postcodeAreaLayerFeatures = useMemo(
     () => buildPostcodeAreaLayerCollection(postcodeAreaOutlinesGeojson, postcodeAreaSummaries),
@@ -310,6 +386,16 @@ export default function MapScreen() {
       sheetTranslateY.setValue(mapSheetMetrics.hiddenY);
     }
   }, [selectedPub, mapSheetMetrics.hiddenY, sheetTranslateY]);
+
+  // Re-tapping the Map tab while already on the map dismisses an open pub card.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress', () => {
+      if (!isFocused || !selectedPub) return;
+      clearMapHighlight(selectedPub.id);
+      closeCard(selectedPub.id);
+    });
+    return unsubscribe;
+  }, [navigation, isFocused, selectedPub, clearMapHighlight, closeCard]);
 
   // Android back behavior on map:
   // 1) if search suggestions are open, close them (or let system close keyboard first)
@@ -397,17 +483,40 @@ export default function MapScreen() {
   }, [mapSheetMetrics, sheetTranslateY]);
 
   const mapControlsBaseBottom = MAP_FLOATING_CONTROLS_BOTTOM_GAP;
-  const feedbackToastBottom =
-    mapControlsBaseBottom + MAP_FLOATING_BUTTON_SIZE + 12;
-
   // ── Missing pub modal ─────────────────────────────────────────
 
   const [isMissingPubModalVisible, setIsMissingPubModalVisible] = useState(false);
-  const [isMissingPubSuccessVisible, setIsMissingPubSuccessVisible] = useState(false);
+  const [missingPubReportSubmittedVisible, setMissingPubReportSubmittedVisible] = useState(false);
+
+  const [showReportPubHint, setShowReportPubHint] = useState(false);
+
+  const dismissReportPubHint = useCallback(() => {
+    setShowReportPubHint(false);
+    AsyncStorage.setItem(REPORT_PUB_HINT_KEY, 'true').catch(() => {});
+  }, []);
+
+  // First time the map has pubs on it, point out what the flag button does.
+  useEffect(() => {
+    if (!initialPubsReady) return undefined;
+    let cancelled = false;
+    let timer = null;
+    AsyncStorage.getItem(REPORT_PUB_HINT_KEY)
+      .then((seen) => {
+        if (cancelled || seen === 'true') return;
+        setShowReportPubHint(true);
+        timer = setTimeout(dismissReportPubHint, REPORT_PUB_HINT_MS);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [initialPubsReady, dismissReportPubHint]);
 
   const openMissingPubModal = useCallback(() => {
+    if (showReportPubHint) dismissReportPubHint();
     setIsMissingPubModalVisible(true);
-  }, []);
+  }, [showReportPubHint, dismissReportPubHint]);
 
   const closeMissingPubModal = useCallback(() => {
     setIsMissingPubModalVisible(false);
@@ -418,10 +527,11 @@ export default function MapScreen() {
       reportType: 'missing_pub',
       pubId: null,
       pubName: payload.pubName,
-      pubArea: payload.address || 'Unknown Area',
       chainOrIndependent: payload.chainOrIndependent,
       founded: payload.founded,
-      address: payload.address,
+      housenumber: payload.housenumber,
+      street: payload.street,
+      postcode: payload.postcode,
       website: payload.website,
       phone: payload.phone,
       closingTime: payload.closingTime,
@@ -434,8 +544,16 @@ export default function MapScreen() {
   // ── Loading gate ──────────────────────────────────────────────
 
   useEffect(() => {
-    setIsInitialPubsLoaded?.(true);
-  }, [setIsInitialPubsLoaded]);
+    if (initialPubsReady) {
+      setIsInitialPubsLoaded?.(true);
+    }
+  }, [initialPubsReady, setIsInitialPubsLoaded]);
+
+  useEffect(() => {
+    if (initialPubsReady) return undefined;
+    const fallback = setTimeout(() => setIsInitialPubsLoaded?.(true), 8000);
+    return () => clearTimeout(fallback);
+  }, [initialPubsReady, setIsInitialPubsLoaded]);
 
   // ── Render ────────────────────────────────────────────────────
 
@@ -452,7 +570,10 @@ export default function MapScreen() {
         touchRotate={false}
         onRegionDidChange={onMapRegionDidChange}
         onDidFinishLoadingMap={handleMapLoaded}
-        onDidFailLoadingMap={() => console.warn('MapLibre: map failed to load')}
+        onDidFailLoadingMap={() => {
+          console.warn('MapLibre: map failed to load — continuing with fallback');
+          handleMapLoaded();
+        }}
       >
         <Camera ref={cameraRef} initialViewState={DEFAULT_CAMERA} minZoom={8.5} maxZoom={17.5} />
         <Images
@@ -694,7 +815,9 @@ export default function MapScreen() {
         yearRange={yearRange}
         minYear={availableYearRange.min}
         maxYear={availableYearRange.max}
-        showOnlyFavorites={showOnlyFavorites}
+        favoritesFilterUserIds={favoritesFilterUserIds}
+        currentUserId={authUser?.id}
+        currentUser={authUser}
         showOnlyAchievements={showOnlyAchievements}
         closingTimeMin={closingTimeMin}
         minRating={minRating}
@@ -706,6 +829,7 @@ export default function MapScreen() {
         containerHeight={mapAreaHeight}
         translateY={sheetTranslateY}
         collapseRequest={collapseSheetRequest}
+        openRequest={pubSelectionSeq}
         onCloseStart={clearMapHighlight}
         onClose={closeCard}
         onToggleVisited={handleToggleVisited}
@@ -718,7 +842,24 @@ export default function MapScreen() {
         renderToHardwareTextureAndroid
         style={[screenStyles.floatingLeft, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
-        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={openMissingPubModal}>
+        {showReportPubHint ? (
+          <TouchableOpacity
+            style={screenStyles.hintBubble}
+            onPress={dismissReportPubHint}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss hint"
+          >
+            <Text style={screenStyles.hintText}>Pub missing from the map? Tap here to add it.</Text>
+            <View style={screenStyles.hintArrow} />
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          style={baseStyles.mapFloatingButton}
+          onPress={openMissingPubModal}
+          accessibilityRole="button"
+          accessibilityLabel="Report a missing pub"
+        >
           <MaterialCommunityIcons name="flag-plus-outline" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
@@ -728,7 +869,12 @@ export default function MapScreen() {
         renderToHardwareTextureAndroid
         style={[screenStyles.floatingRight, { bottom: mapControlsBaseBottom }, floatingControlsStyle]}
       >
-        <TouchableOpacity style={baseStyles.mapFloatingButton} onPress={handleCurrentLocation}>
+        <TouchableOpacity
+          style={baseStyles.mapFloatingButton}
+          onPress={handleCurrentLocation}
+          accessibilityRole="button"
+          accessibilityLabel="Go to my location"
+        >
           <MaterialCommunityIcons name="crosshairs-gps" size={24} color={COLORS.amber} />
         </TouchableOpacity>
       </Animated.View>
@@ -738,28 +884,16 @@ export default function MapScreen() {
         onClose={closeMissingPubModal}
         mode="missing_pub"
         onSubmit={handleMissingPubSubmit}
-        onSuccess={() => setIsMissingPubSuccessVisible(true)}
+        onSuccess={() => setMissingPubReportSubmittedVisible(true)}
       />
 
-      {isMissingPubSuccessVisible && (
-        <Animated.View
-          style={[
-            baseStyles.feedbackToast,
-            screenStyles.feedbackToast,
-            { bottom: feedbackToastBottom },
-          ]}
-        >
-          <MaterialCommunityIcons name="check-circle" size={20} color={COLORS.amber} />
-          <Text style={baseStyles.feedbackToastText}>Missing pub successfully reported</Text>
-          <TouchableOpacity
-            onPress={() => setIsMissingPubSuccessVisible(false)}
-            style={baseStyles.feedbackToastCloseButton}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <MaterialCommunityIcons name="close" size={20} color={COLORS.charcoal} />
-          </TouchableOpacity>
-        </Animated.View>
-      )}
+      <AppDialogModal
+        visible={missingPubReportSubmittedVisible}
+        tone="success"
+        title="Report submitted"
+        message="Thanks! Your report is pending review. Points are awarded once it is accepted."
+        onClose={() => setMissingPubReportSubmittedVisible(false)}
+      />
     </View>
   );
 }
@@ -771,17 +905,34 @@ const screenStyles = StyleSheet.create({
     zIndex: 1001,
     elevation: 6,
   },
+  hintBubble: {
+    position: 'absolute',
+    bottom: MAP_FLOATING_BUTTON_SIZE + 10,
+    left: 0,
+    width: 210,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.charcoal,
+  },
+  hintText: {
+    color: COLORS.white,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  hintArrow: {
+    position: 'absolute',
+    bottom: -6,
+    left: MAP_FLOATING_BUTTON_SIZE / 2 - 6,
+    width: 12,
+    height: 12,
+    backgroundColor: COLORS.charcoal,
+    transform: [{ rotate: '45deg' }],
+  },
   floatingRight: {
     position: 'absolute',
     right: 16,
     zIndex: 1001,
     elevation: 6,
-  },
-  feedbackToast: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 1200,
-    elevation: 14,
   },
 });

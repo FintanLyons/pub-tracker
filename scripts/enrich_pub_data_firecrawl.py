@@ -200,6 +200,21 @@ def is_empty(val: Any) -> bool:
     return isinstance(val, str) and not val.strip()
 
 
+def is_stub_description(val: Any) -> bool:
+    """Wikidata one-liners that block Firecrawl from writing real copy."""
+    d = str(val or "").strip()
+    if not d:
+        return False
+    if len(d) < 100:
+        return True
+    lower = d.lower()
+    if lower.startswith("pub in ") or lower.startswith("public house in "):
+        return True
+    if "england, uk" in lower and len(d) < 150:
+        return True
+    return False
+
+
 def normalize_website(raw: str) -> Optional[str]:
     if is_empty(raw):
         return None
@@ -429,13 +444,21 @@ def apply_enrichment(
     row: Dict[str, str],
     data: Dict,
     threshold: float,
+    replace_stub_descriptions: bool = False,
 ) -> Dict[str, str]:
     out = dict(row)
 
     for json_key, col, conf_col in SOFT_FIELDS:
         conf = parse_confidence(data, f"{json_key}_CONFIDENCE")
         out[conf_col] = f"{conf:.4f}"
-        if not is_empty(out.get(col)):
+        cell_blocked = not is_empty(out.get(col))
+        if (
+            replace_stub_descriptions
+            and json_key == "DESCRIPTION"
+            and is_stub_description(out.get(col))
+        ):
+            cell_blocked = False
+        if cell_blocked:
             continue
         val = str(data.get(json_key) or "").strip()
         if conf < threshold or not val:
@@ -573,6 +596,14 @@ def main() -> None:
         help="Skip pubs that already have a description filled in",
     )
     parser.add_argument(
+        "--replace-stub-descriptions",
+        action="store_true",
+        help=(
+            "Re-scrape pubs whose description is a short Wikidata stub "
+            "(e.g. 'pub in Cambridge, England, UK') and overwrite description only"
+        ),
+    )
+    parser.add_argument(
         "--exclude-fc-ok",
         action="store_true",
         help="When sampling, skip rows that already have fc_status=ok (different batch)",
@@ -618,12 +649,24 @@ def main() -> None:
     def fc_ok(r: Dict[str, str]) -> bool:
         return (r.get("fc_status") or "").strip().lower() == "ok"
 
+    def description_needs_work(r: Dict[str, str]) -> bool:
+        desc = r.get("description", "") or ""
+        if args.replace_stub_descriptions and is_stub_description(desc):
+            return True
+        if args.only_missing and is_empty(desc):
+            return True
+        if not args.only_missing and not args.replace_stub_descriptions:
+            return True
+        return False
+
+    skip_fc_ok = args.exclude_fc_ok and not args.replace_stub_descriptions
+
     eligible_idx = [
         i
         for i, r in enumerate(all_rows)
         if normalize_website(r.get("website", "") or "")
-        and (not args.only_missing or is_empty(r.get("description", "")))
-        and (not args.exclude_fc_ok or not fc_ok(r))
+        and description_needs_work(r)
+        and (not skip_fc_ok or not fc_ok(r))
     ]
 
     if sample_cap is not None:
@@ -697,7 +740,12 @@ def main() -> None:
             continue
 
         # Apply enrichment
-        all_rows[i] = apply_enrichment(all_rows[i], data, args.threshold)
+        all_rows[i] = apply_enrichment(
+            all_rows[i],
+            data,
+            args.threshold,
+            replace_stub_descriptions=args.replace_stub_descriptions,
+        )
         all_rows[i]["fc_status"] = "ok"
         all_rows[i]["fc_error"] = ""
 

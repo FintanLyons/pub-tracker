@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -20,12 +19,32 @@ import {
   loginUserSecure,
   googleSignInSecure,
   appleSignInSecure,
+  resendConfirmationEmail,
+  CONFIRMATION_RESEND_COOLDOWN_SECONDS,
 } from '../services/SecureAuthService';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { APP_DISPLAY_NAME } from '../constants/app';
 import { COLORS } from '../constants/theme';
+import { isSupabaseConfigured } from '../config/supabase';
+import { CONNECTION_ERROR_MESSAGE } from '../services/authErrors';
+import ForgotPasswordModal from '../components/ForgotPasswordModal';
+import AppDialogModal from '../components/AppDialog';
+import { useAppAlert } from '../contexts/AppAlertContext';
+
+/** Developer setup message — only shown in builds missing the Supabase env vars. */
+const MISSING_CONFIG_MESSAGE =
+  'This build cannot reach Supabase. Set EXPO_PUBLIC_SUPABASE_URL and ' +
+  'EXPO_PUBLIC_SUPABASE_ANON_KEY for this EAS environment, then create a new build.';
+
+function authNetworkErrorMessage() {
+  return isSupabaseConfigured ? CONNECTION_ERROR_MESSAGE : MISSING_CONFIG_MESSAGE;
+}
+
+const isConnectionErrorMessage = (msg) =>
+  msg === CONNECTION_ERROR_MESSAGE || /network request failed|failed to fetch|network error/i.test(msg);
 
 export default function AuthScreen({ onAuthSuccess }) {
+  const { showAppAlert } = useAppAlert();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,6 +55,22 @@ export default function AuthScreen({ onAuthSuccess }) {
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  /** Email awaiting confirmation: { email, availableAt } — drives the confirm-email dialog. */
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  /** { title, intro } while the confirm-email dialog is open. */
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [resendBusy, setResendBusy] = useState(false);
+  /** { text, tone: 'success' | 'error' } shown inside the confirm-email dialog. */
+  const [resendNote, setResendNote] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  // Tick once a second while the dialog is open and the resend cooldown is running.
+  useEffect(() => {
+    if (!confirmDialog || !pendingConfirmation || pendingConfirmation.availableAt <= now) return undefined;
+    const t = setTimeout(() => setNow(Date.now()), 1000);
+    return () => clearTimeout(t);
+  }, [confirmDialog, pendingConfirmation, now]);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,33 +97,70 @@ export default function AuthScreen({ onAuthSuccess }) {
     setShowConfirmPassword(false);
   };
 
-  const switchMode = () => {
-    setIsLogin(!isLogin);
-    clearForm();
+  const SPAM_TIP = "Can't find it? Check your spam or junk folder.";
+
+  const awaitConfirmation = (targetEmail, cooldownSeconds) => {
+    setPendingConfirmation({ email: targetEmail, availableAt: Date.now() + cooldownSeconds * 1000 });
+    setResendNote(null);
+    setNow(Date.now());
+  };
+
+  const openConfirmDialog = (content) => {
+    setNow(Date.now());
+    setConfirmDialog(content);
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!pendingConfirmation || resendBusy) return;
+    const targetEmail = pendingConfirmation.email;
+    setResendBusy(true);
+    setResendNote(null);
+    try {
+      await resendConfirmationEmail(targetEmail);
+      awaitConfirmation(targetEmail, CONFIRMATION_RESEND_COOLDOWN_SECONDS);
+      setResendNote({ text: 'Sent again — check your inbox and spam folder.', tone: 'success' });
+    } catch (e) {
+      if (e.retryAfterSeconds) awaitConfirmation(targetEmail, e.retryAfterSeconds);
+      setResendNote({ text: e.message, tone: 'error' });
+    } finally {
+      setResendBusy(false);
+    }
   };
 
   const handleAuth = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      Alert.alert('Error', 'Please enter your email');
+      showAppAlert({ title: 'Email needed', message: 'Enter your email address.', tone: 'error' });
       return;
     }
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      showAppAlert({
+        title: 'Check your email address',
+        message: "That doesn't look like a valid email address.",
+        tone: 'error',
+      });
       return;
     }
     if (!password) {
-      Alert.alert('Error', 'Please enter a password');
+      showAppAlert({ title: 'Password needed', message: 'Enter your password.', tone: 'error' });
       return;
     }
 
     if (!isLogin) {
       if (password.length < 6) {
-        Alert.alert('Error', 'Password must be at least 6 characters');
+        showAppAlert({
+          title: 'Password too short',
+          message: 'Use at least 6 characters.',
+          tone: 'error',
+        });
         return;
       }
       if (password !== confirmPassword) {
-        Alert.alert('Error', 'Passwords do not match');
+        showAppAlert({
+          title: "Passwords don't match",
+          message: 'Re-enter the same password in both fields.',
+          tone: 'error',
+        });
         return;
       }
     }
@@ -101,36 +173,65 @@ export default function AuthScreen({ onAuthSuccess }) {
       } else {
         const { needsEmailVerification } = await registerUserSecure(trimmedEmail, password);
         if (needsEmailVerification) {
-          Alert.alert(
-            'Check Your Email',
-            `We sent a verification link to ${trimmedEmail}.\n\nClick the link then come back and log in.`,
-            [{ text: 'OK', onPress: () => { setIsLogin(true); clearForm(); } }],
-          );
+          awaitConfirmation(trimmedEmail, CONFIRMATION_RESEND_COOLDOWN_SECONDS);
+          setIsLogin(true);
+          clearForm();
+          openConfirmDialog({
+            title: 'Check your email',
+            intro: `We've sent a confirmation link to ${trimmedEmail}. Tap it, then come back and sign in.`,
+          });
           return;
         }
-        Alert.alert('Success', 'Account created!');
         await onAuthSuccess();
       }
     } catch (error) {
-      const msg = error.message || 'Something went wrong';
+      const msg = error.message || '';
       if (msg.includes('already registered') || msg.includes('login tab instead')) {
-        Alert.alert('Already Registered', msg, [
-          { text: 'Switch to Login', onPress: () => { setIsLogin(true); clearForm(); } },
-        ]);
+        showAppAlert({
+          title: 'Already registered',
+          message: 'An account with this email already exists. Sign in instead.',
+          tone: 'error',
+          buttons: [
+            {
+              text: 'Sign in',
+              variant: 'primary',
+              onPress: () => {
+                setIsLogin(true);
+                clearForm();
+              },
+            },
+          ],
+        });
       } else if (msg.includes('Too many') || msg.includes('rate limit') || msg.includes('wait')) {
-        Alert.alert('Please Wait', msg);
+        showAppAlert({ title: 'Too many attempts', message: msg, tone: 'neutral' });
       } else if (msg.includes('Invalid email or password')) {
-        Alert.alert('Error', 'Invalid email or password.');
+        showAppAlert({
+          title: 'Wrong email or password',
+          message: 'Check them and try again, or tap "Forgot password?".',
+          tone: 'error',
+        });
       } else if (msg.includes('valid email')) {
-        Alert.alert('Error', msg);
-      } else if (msg.includes('Email not confirmed') || msg.includes('not confirmed')) {
-        Alert.alert(
-          'Email Not Verified',
-          'Please verify your email before logging in.\n\nCheck your inbox for the verification link.',
-        );
+        showAppAlert({ title: 'Check your email address', message: msg, tone: 'error' });
+      } else if (msg.includes('not confirmed')) {
+        // Keep an existing cooldown for this address; otherwise allow an immediate resend.
+        if (pendingConfirmation?.email !== trimmedEmail) awaitConfirmation(trimmedEmail, 0);
+        openConfirmDialog({
+          title: 'Confirm your email first',
+          intro: `Tap the confirmation link we sent to ${trimmedEmail}, then sign in.`,
+        });
+      } else if (isConnectionErrorMessage(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
       } else {
         console.error('Auth error:', error);
-        Alert.alert('Error', msg);
+        showAppAlert({
+          title: isLogin ? "Couldn't sign in" : "Couldn't create your account",
+          message: msg || 'Something went wrong. Please try again.',
+          tone: 'error',
+        });
       }
     } finally {
       setLoading(false);
@@ -152,7 +253,19 @@ export default function AuthScreen({ onAuthSuccess }) {
         return;
       }
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Error', 'Sign in with Apple failed. Please try again.');
+      if (isConnectionErrorMessage(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
+      } else {
+        showAppAlert({
+          title: "Couldn't sign in with Apple",
+          message: 'Please try again, or sign in with your email.',
+          tone: 'error',
+        });
+      }
     } finally {
       setAppleLoading(false);
     }
@@ -165,19 +278,62 @@ export default function AuthScreen({ onAuthSuccess }) {
       await onAuthSuccess();
     } catch (error) {
       const msg = error.message || '';
+      const code = error.code || '';
+
+      // User dismissed the account picker — not an error.
       if (
+        code === 'SIGN_IN_CANCELLED' ||
         msg.includes('SIGN_IN_CANCELLED') ||
         msg.includes('canceled') ||
         msg.includes('cancelled')
       ) {
         return;
       }
-      if (msg.includes('PLAY_SERVICES_NOT_AVAILABLE')) {
-        Alert.alert('Error', 'Google Play Services is not available on this device.');
+
+      if (
+        code === 'PLAY_SERVICES_NOT_AVAILABLE' ||
+        msg.includes('PLAY_SERVICES_NOT_AVAILABLE')
+      ) {
+        showAppAlert({
+          title: 'Google sign-in unavailable',
+          message: "This device doesn't have Google Play Services. Sign in with your email instead.",
+          tone: 'error',
+        });
         return;
       }
-      console.error('Google Sign-In error:', error);
-      Alert.alert('Error', 'Google Sign-In failed. Please try again.');
+
+      // Android OAuth client / SHA-1 mismatch (Google Cloud Console).
+      if (
+        code === 10 ||
+        code === '10' ||
+        msg.includes('DEVELOPER_ERROR') ||
+        msg.includes('Developer console is not set up correctly')
+      ) {
+        // Build signing key not registered in Google Cloud (see `npx @react-native-google-signin/config-doctor`).
+        console.error('Google Sign-In DEVELOPER_ERROR — check Android OAuth client SHA-1 / webClientId', { code, msg });
+        showAppAlert({
+          title: 'Google sign-in unavailable',
+          message: "Google sign-in isn't working in this version of the app. Please sign in with your email.",
+          tone: 'error',
+        });
+        return;
+      }
+
+      console.error('Google Sign-In error — code:', code, '| message:', msg, '| raw:', error);
+
+      if (isConnectionErrorMessage(msg)) {
+        showAppAlert({
+          title: 'Connection problem',
+          message: authNetworkErrorMessage(),
+          tone: 'neutral',
+        });
+      } else {
+        showAppAlert({
+          title: "Couldn't sign in with Google",
+          message: 'Please try again, or sign in with your email.',
+          tone: 'error',
+        });
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -201,12 +357,19 @@ export default function AuthScreen({ onAuthSuccess }) {
               <Text style={styles.subtitle}>London's pub community</Text>
             </View>
 
+            {!isSupabaseConfigured ? (
+              <View style={styles.configBanner}>
+                <Text style={styles.configBannerTitle}>Server not configured</Text>
+                <Text style={styles.configBannerBody}>{authNetworkErrorMessage()}</Text>
+              </View>
+            ) : null}
+
             <View style={styles.tabContainer}>
               <TouchableOpacity
                 style={[styles.tab, isLogin && styles.activeTab]}
                 onPress={() => { setIsLogin(true); clearForm(); }}
               >
-                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign In</Text>
+                <Text style={[styles.tabText, isLogin && styles.activeTabText]}>Sign in</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.tab, !isLogin && styles.activeTab]}
@@ -251,6 +414,16 @@ export default function AuthScreen({ onAuthSuccess }) {
                 </TouchableOpacity>
               </View>
 
+              {isLogin && (
+                <TouchableOpacity
+                  onPress={() => setShowForgotPassword(true)}
+                  style={styles.forgotRow}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.switchLink}>Forgot password?</Text>
+                </TouchableOpacity>
+              )}
+
               {!isLogin && (
                 <View style={styles.inputRow}>
                   <MaterialCommunityIcons name="lock-check-outline" size={18} color={COLORS.mediumGrey} style={styles.inputIcon} />
@@ -280,9 +453,10 @@ export default function AuthScreen({ onAuthSuccess }) {
               >
                 {loading
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign In' : 'Create Account'}</Text>
+                  : <Text style={styles.primaryBtnText}>{isLogin ? 'Sign in' : 'Create account'}</Text>
                 }
               </TouchableOpacity>
+
 
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
@@ -332,14 +506,38 @@ export default function AuthScreen({ onAuthSuccess }) {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.switchRow} onPress={switchMode}>
-              <Text style={styles.switchText}>
-                {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                <Text style={styles.switchLink}>{isLogin ? 'Register' : 'Sign in'}</Text>
-              </Text>
-            </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
+        {confirmDialog && pendingConfirmation ? (() => {
+          const secondsLeft = Math.max(0, Math.ceil((pendingConfirmation.availableAt - now) / 1000));
+          return (
+            <AppDialogModal
+              visible
+              title={confirmDialog.title}
+              message={`${confirmDialog.intro}\n\n${SPAM_TIP}`}
+              tone="neutral"
+              footnote={resendNote}
+              onClose={() => setConfirmDialog(null)}
+              buttons={[
+                {
+                  // Supabase allows one email a minute — the button unlocks when it will work.
+                  text: resendBusy ? 'Sending…' : secondsLeft > 0 ? `Resend in ${secondsLeft}s` : 'Resend email',
+                  variant: 'secondary',
+                  disabled: secondsLeft > 0 || resendBusy,
+                  keepOpen: true,
+                  onPress: handleResendConfirmation,
+                },
+                { text: 'OK', variant: 'primary' },
+              ]}
+            />
+          );
+        })() : null}
+        <ForgotPasswordModal
+          visible={showForgotPassword}
+          initialEmail={email}
+          onClose={() => setShowForgotPassword(false)}
+          onSuccess={onAuthSuccess}
+        />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -363,6 +561,25 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 32,
+  },
+  configBanner: {
+    backgroundColor: COLORS.errorLight,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.errorRed,
+  },
+  configBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.errorRed,
+    marginBottom: 8,
+  },
+  configBannerBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.darkGrey,
   },
   title: {
     fontSize: 28,
@@ -534,13 +751,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
 
-  switchRow: {
-    alignItems: 'center',
-    marginTop: 28,
-  },
-  switchText: {
-    fontSize: 14,
-    color: COLORS.mediumGrey,
+  forgotRow: {
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
   switchLink: {
     color: COLORS.amber,

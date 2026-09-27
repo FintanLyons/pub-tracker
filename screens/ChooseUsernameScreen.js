@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,7 +15,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import {
   updatePublicUsername,
-  scheduleAuthUsernameMetadataSync,
   isValidUsernameFormat,
 } from '../services/SecureAuthService';
 import { presignAndPutImage } from '../services/r2Upload';
@@ -25,10 +23,13 @@ import {
   AVATAR_LIBRARY_PERMISSION_ALERT,
 } from '../utils/avatarImagePrep';
 import { useAuth } from '../contexts/AuthContext';
+import { CONNECTION_ERROR_MESSAGE, isNetworkError as isConnectionError } from '../services/authErrors';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import PintGlassIcon from '../components/PintGlassIcon';
 import { COLORS } from '../constants/theme';
 
 export default function ChooseUsernameScreen() {
+  const { showAppAlert } = useAppAlert();
   const { user, logout, applyUserProfileRow } = useAuth();
   const [username, setUsername] = useState('');
   const [avatarUri, setAvatarUri] = useState(null);
@@ -38,9 +39,17 @@ export default function ChooseUsernameScreen() {
     const res = await pickNormalizedAvatarUri();
     if (!res.ok) {
       if (res.reason === 'denied') {
-        Alert.alert(AVATAR_LIBRARY_PERMISSION_ALERT.title, AVATAR_LIBRARY_PERMISSION_ALERT.message);
+        showAppAlert({
+          title: AVATAR_LIBRARY_PERMISSION_ALERT.title,
+          message: AVATAR_LIBRARY_PERMISSION_ALERT.message,
+          tone: 'neutral',
+        });
       } else if (res.reason === 'processing') {
-        Alert.alert('Error', res.message || 'Could not process photo.');
+        showAppAlert({
+          title: "Couldn't use that photo",
+          message: res.message || 'Try a different photo.',
+          tone: 'error',
+        });
       }
       return;
     }
@@ -52,19 +61,20 @@ export default function ChooseUsernameScreen() {
   const handleSubmit = async () => {
     const trimmed = username.trim();
     if (!trimmed) {
-      Alert.alert('Error', 'Please enter a username');
+      showAppAlert({ title: 'Username needed', message: 'Choose a username to continue.', tone: 'error' });
       return;
     }
     if (!isValidUsernameFormat(trimmed)) {
-      Alert.alert(
-        'Invalid username',
-        'Use 3–20 characters: letters, numbers, and underscores only.',
-      );
+      showAppAlert({
+        title: 'Invalid username',
+        message: 'Use 3–20 characters: letters, numbers, and underscores only.',
+        tone: 'error',
+      });
       return;
     }
 
     if (!user?.id) {
-      Alert.alert('Error', 'Not signed in');
+      showAppAlert({ title: 'Signed out', message: 'Please sign in again.', tone: 'error' });
       return;
     }
 
@@ -78,13 +88,21 @@ export default function ChooseUsernameScreen() {
         ...(avatarUrl ? { avatarUrl } : {}),
       });
       applyUserProfileRow(row);
-      scheduleAuthUsernameMetadataSync();
     } catch (e) {
       const msg = e.message || 'Something went wrong';
       if (msg.includes('Username already taken')) {
-        Alert.alert('Taken', 'That username is already in use. Try another.');
+        showAppAlert({
+          title: 'Username taken',
+          message: 'Someone already has that username. Try another.',
+          tone: 'error',
+        });
       } else {
-        Alert.alert('Error', msg);
+        console.error('ChooseUsername: save failed', e);
+        showAppAlert({
+          title: "Couldn't save your username",
+          message: isConnectionError(e) ? CONNECTION_ERROR_MESSAGE : 'Please try again.',
+          tone: 'error',
+        });
       }
     } finally {
       setSubmitting(false);

@@ -1,0 +1,162 @@
+[
+  {
+    "id": "node/30152966",
+    "search_query": "\"Dog & Duck\" pub Cambridge CB21",
+    "suggested_website": "https://www.dogandduck-linton.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Dog & Duck Linton"
+  },
+  {
+    "id": "node/30152969",
+    "search_query": "\"The Crown\" pub Cambridge CB21",
+    "suggested_website": "https://crownatlinton.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Crown Linton"
+  },
+  {
+    "id": "node/30153028",
+    "search_query": "\"Waggon & Horses\" pub Cambridge CB21",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "Facebook only"
+  },
+  {
+    "id": "node/33129159",
+    "search_query": "\"Queen's Head\" pub Cambridge CB22",
+    "suggested_website": "https://www.queensheadnewton.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Queen's Head Newton"
+  },
+  {
+    "id": "node/33129704",
+    "search_query": "\"The Hoops\" pub Cambridge CB23",
+    "suggested_website": "https://the-hoops.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Hoops Barton"
+  },
+  {
+    "id": "node/148190061",
+    "search_query": "\"The Porterhouse\" pub Cambridge CB24",
+    "suggested_website": "https://theporterhousepub.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Porterhouse Willingham"
+  },
+  {
+    "id": "node/255594710",
+    "search_query": "\"Red Lion\" pub Cambridge CB6",
+    "suggested_website": "https://www.theredlionstretham.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Red Lion Stretham"
+  },
+  {
+    "id": "node/304736366",
+    "search_query": "\"The Fox\" pub Cambridge CB25",
+    "suggested_website": "https://www.thefoxburwell.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Fox Burwell"
+  },
+  {
+    "id": "node/304736391",
+    "search_query": "\"The Anchor\" pub Cambridge CB25",
+    "suggested_website": "https://www.theanchorburwell.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Anchor Burwell"
+  },
+  {
+    "id": "node/304736523",
+    "search_query": "\"The Five Bells\" pub Cambridge CB25",
+    "suggested_website": "https://www.fivebellsburwell.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Five Bells Burwell"
+  },
+  {
+    "id": "node/429597760",
+    "search_query": "\"The Clarendon Arms\" pub Cambridge CB1",
+    "suggested_website": "https://www.theclarendonarms.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Clarendon Arms"
+  },
+  {
+    "id": "node/473728763",
+    "search_query": "\"Carpenters Arms\" pub Cambridge CB7",
+    "suggested_website": "https://www.carpentersarmswilbraham.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Carpenters Arms Great Wilbraham"
+  },
+  {
+    "id": "node/473728905",
+    "search_query": "\"The Fountain\" pub Cambridge CB7",
+    "suggested_website": "https://www.craftunionpubs.com/fountain-soham",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Fountain Inn Soham"
+  },
+  {
+    "id": "node/473729205",
+    "search_query": "\"Comrades Club\" pub Cambridge CB7",
+    "suggested_website": "https://sohamcomradesclub.co.uk/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Soham Comrades Club official site; Market Street CB7 5JG. User-found."
+  },
+  {
+    "id": "node/473729209",
+    "search_query": "\"Red Lion\" pub Cambridge CB7",
+    "suggested_website": "https://www.redlionsoham.com/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Red Lion Soham"
+  },
+  {
+    "id": "node/473729213",
+    "search_query": "\"The Ship\" pub Cambridge CB7",
+    "suggested_website": "https://www.theshipsoham.co.uk/",
+    "confidence": 0.4,
+    "alternates": [],
+    "notes": "Ship Soham - verify URL; HTTP error"
+  },
+  {
+    "id": "node/1594688118",
+    "search_query": "\"Architect\" pub Cambridge CB3",
+    "suggested_website": "https://www.architectpub.co.uk/",
+    "confidence": 0.4,
+    "alternates": [],
+    "notes": "Architect; HTTP error"
+  },
+  {
+    "id": "node/1594688120",
+    "search_query": "\"The Castle Inn\" pub Cambridge CB3",
+    "suggested_website": "https://www.thecastleinn.pub/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Castle Inn"
+  },
+  {
+    "id": "node/1832280892",
+    "search_query": "\"King Street Run\" pub Cambridge CB1",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "King Street Run - no dedicated site; shares King Street Brewery"
+  },
+  {
+    "id": "node/4820111626",
+    "search_query": "\"Station Tavern\" pub Cambridge CB1",
+    "suggested_website": "https://www.thestationtavern.co.uk/",
+    "confidence": 0.95,
+    "alternates": [],
+    "notes": "Station Tavern"
+  }
+]

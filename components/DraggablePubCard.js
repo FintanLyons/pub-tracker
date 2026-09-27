@@ -7,7 +7,6 @@ import {
   Easing,
   PanResponder,
   StyleSheet,
-  Alert,
   Platform,
 } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
@@ -15,6 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PubCardContent from './PubCardContent';
 import PubReportFormModal from './PubReportFormModal';
+import AppDialogModal from './AppDialog';
 import { submitPubReport } from '../services/ReportService';
 import { COLORS } from '../constants/theme';
 
@@ -66,6 +66,7 @@ export default function DraggablePubCard({
   containerHeight,
   translateY,
   collapseRequest = 0,
+  openRequest = 0,
   onCloseStart,
   onClose,
   onToggleVisited,
@@ -117,11 +118,29 @@ export default function DraggablePubCard({
   const scrollEnabledRef = useRef(false); // Ref for PanResponder to access current value
   const scrollViewRef = useRef(null);
   const [reportModalVisible, setReportModalVisible] = useState(false); // Control report modal visibility
-  const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
-  const reviewsModalOpenRef = useRef(false);
+  const [reportSubmittedVisible, setReportSubmittedVisible] = useState(false);
+  const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
+  const blockingOverlayOpenRef = useRef(false);
+  const [sheetTouchEnabled, setSheetTouchEnabled] = useState(false);
   useEffect(() => {
-    reviewsModalOpenRef.current = reviewsModalOpen;
-  }, [reviewsModalOpen]);
+    blockingOverlayOpenRef.current = blockingOverlayOpen;
+  }, [blockingOverlayOpen]);
+
+  useEffect(() => {
+    if (!pub) {
+      setSheetTouchEnabled(false);
+      return undefined;
+    }
+
+    const syncTouchEnabled = (value) => {
+      const hidden = value >= hiddenYRef.current - 24;
+      setSheetTouchEnabled((current) => (current === !hidden ? current : !hidden));
+    };
+
+    syncTouchEnabled(currentPosition.current);
+    const listenerId = translateY.addListener(({ value }) => syncTouchEnabled(value));
+    return () => translateY.removeListener(listenerId);
+  }, [pub, translateY]);
 
   /** PanResponder is created once; keep latest pub id for close callbacks. */
   const pubIdRef = useRef(pub?.id);
@@ -178,12 +197,12 @@ export default function DraggablePubCard({
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponderCapture: () => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         return false;
       },
 
       onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         const ax = Math.abs(gestureState.dx);
         const ay = Math.abs(gestureState.dy);
         const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
@@ -219,7 +238,7 @@ export default function DraggablePubCard({
       },
       
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        if (reviewsModalOpenRef.current) return false;
+        if (blockingOverlayOpenRef.current) return false;
         const ax = Math.abs(gestureState.dx);
         const ay = Math.abs(gestureState.dy);
         const isHorizontalDominant = ax > ay * SHEET_DRAG_AXIS_RATIO && ax > 12;
@@ -419,7 +438,7 @@ export default function DraggablePubCard({
         scrollY.current = 0;
       });
     }
-  }, [pub?.id]);
+  }, [pub?.id, openRequest, COLLAPSED_Y, HIDDEN_Y, translateY, updateIsExpanded, updateScrollEnabled]);
 
   // External request to collapse sheet should use the same internal state transition
   // as gesture snaps (expanded chrome -> collapsed chrome + correct layout metrics).
@@ -446,7 +465,7 @@ export default function DraggablePubCard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapseRequest, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
   
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     const closingPubId = pub?.id;
     onCloseStartRef.current?.(closingPubId);
     translateY.stopAnimation();
@@ -467,7 +486,7 @@ export default function DraggablePubCard({
       updateIsExpanded(false);
       onClose(closingPubId);
     });
-  };
+  }, [HIDDEN_Y, onClose, pub?.id, translateY, updateIsExpanded, updateScrollEnabled]);
 
   const handlePubCorrectionSubmit = useCallback(
     async (payload) => {
@@ -478,7 +497,9 @@ export default function DraggablePubCard({
         pubArea: pub.area || 'Unknown Area',
         chainOrIndependent: payload.chainOrIndependent,
         founded: payload.founded,
-        address: payload.address,
+        housenumber: payload.housenumber,
+        street: payload.street,
+        postcode: payload.postcode,
         website: payload.website,
         phone: payload.phone,
         closingTime: payload.closingTime,
@@ -501,6 +522,7 @@ export default function DraggablePubCard({
   return (
     <Animated.View
       collapsable={false}
+      pointerEvents={sheetTouchEnabled ? 'auto' : 'none'}
       // Android: cache this subtree as a GPU texture while translateY updates (cheap compositing).
       // iOS: keep transform on this layer with minimal non-animated props for Core Animation.
       renderToHardwareTextureAndroid
@@ -616,10 +638,10 @@ export default function DraggablePubCard({
       )}
       
       {/* Invisible overlay to capture drags when collapsed (prevents content from intercepting) */}
-      {!isExpanded && !reviewsModalOpen && (
-        <View 
-          style={styles.draggableOverlay} 
-          pointerEvents="box-only" 
+      {!isExpanded && !blockingOverlayOpen && (
+        <View
+          style={styles.draggableOverlay}
+          pointerEvents="box-only"
         />
       )}
 
@@ -633,15 +655,15 @@ export default function DraggablePubCard({
         pub={pub}
         isExpanded={isExpanded}
         getImageSource={getImageSource}
-        pointerEvents={reviewsModalOpen || !isExpanded ? 'none' : 'auto'}
+        pointerEvents={blockingOverlayOpen || !isExpanded ? 'none' : 'auto'}
         onScroll={handleScroll}
-        scrollEnabled={scrollEnabled && !reviewsModalOpen}
+        scrollEnabled={scrollEnabled && !blockingOverlayOpen}
         scrollRef={scrollViewRef}
         onToggleVisited={onToggleVisited}
-        onReviewsModalVisibleChange={setReviewsModalOpen}
+        onBlockingOverlayVisibleChange={setBlockingOverlayOpen}
       />
 
-      {reviewsModalOpen && (
+      {blockingOverlayOpen && (
         <View style={styles.modalBlockOverlay} pointerEvents="box-only" />
       )}
 
@@ -651,13 +673,14 @@ export default function DraggablePubCard({
         mode="pub_correction"
         initialPub={pub}
         onSubmit={handlePubCorrectionSubmit}
-        onSuccess={() =>
-          Alert.alert(
-            'Report Submitted',
-            'Thank you! Your report has been submitted successfully.',
-            [{ text: 'OK' }]
-          )
-        }
+        onSuccess={() => setReportSubmittedVisible(true)}
+      />
+      <AppDialogModal
+        visible={reportSubmittedVisible}
+        tone="success"
+        title="Report submitted"
+        message="Thanks! Your report is pending review. Points are awarded once it is accepted."
+        onClose={() => setReportSubmittedVisible(false)}
       />
       </View>
     </Animated.View>

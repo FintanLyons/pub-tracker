@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,12 +8,12 @@ import MapScreen from '../screens/MapScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import LeaderboardScreen from '../screens/LeaderboardScreen';
 import { LoadingContext } from '../contexts/LoadingContext';
-import { fetchPostcodeAreaSummaries } from '../services/PubService';
 import { prefetchLeaderboardCache } from '../services/leaderboardData';
-import { serializePostcodeAreaSummaries } from '../screens/map/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { COLORS } from '../constants/theme';
+import PintGlassIcon from '../components/PintGlassIcon';
+import { setupPushNotificationNavigation } from '../services/notificationNavigation';
 
 const withErrorBoundary = (Screen, message) => (props) => (
   <ErrorBoundary fallbackMessage={message}>
@@ -34,8 +34,30 @@ const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderbo
 
 const Tab = createBottomTabNavigator();
 
+/**
+ * Active tab: soft amber pill behind a filled icon + bold label.
+ * Inactive: outline icon in dimmed amber. (Replaces a harsher amber/grey split.)
+ */
+function TabIcon({ focused, color, size, icon }) {
+  return (
+    <View style={[styles.tabIconPill, focused && styles.tabIconPillActive]}>
+      <MaterialCommunityIcons name={focused ? icon : `${icon}-outline`} size={size} color={color} />
+    </View>
+  );
+}
+
+function TabLabel({ focused, color, children }) {
+  return (
+    <Text style={[styles.tabLabel, { color }, focused && styles.tabLabelActive]} numberOfLines={1}>
+      {children}
+    </Text>
+  );
+}
+
 /** Minimum splash duration so the map can centre on GPS before first reveal. */
 const MIN_SPLASH_MS = 850;
+/** Hard cap so first-time / cold-start never blocks on the loading wheel indefinitely. */
+const MAX_SPLASH_MS = 10000;
 
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
@@ -44,8 +66,6 @@ export default function TabNavigator() {
   const [isLocationLoaded, setIsLocationLoaded] = useState(false);
   const [isInitialPubsLoaded, setIsInitialPubsLoaded] = useState(false);
   const [minSplashElapsed, setMinSplashElapsed] = useState(false);
-  const [postcodeAreaSummaries, setPostcodeAreaSummaries] = useState([]);
-  const [isLoadingPostcodeAreas, setIsLoadingPostcodeAreas] = useState(true);
   const [mapReturnToProfile, setMapReturnToProfile] = useState({
     key: 0,
     baselineScore: 0,
@@ -74,33 +94,6 @@ export default function TabNavigator() {
   }, [drinkStats?.total]);
 
   useEffect(() => {
-    let isCancelled = false;
-
-    const loadPostcodeAreaSummaries = async () => {
-      try {
-        setIsLoadingPostcodeAreas(true);
-        const summaries = await fetchPostcodeAreaSummaries(user?.id);
-        if (!isCancelled) {
-          setPostcodeAreaSummaries((prev) => {
-            const nextArray = Array.isArray(summaries) ? summaries : [];
-            if (serializePostcodeAreaSummaries(prev) === serializePostcodeAreaSummaries(nextArray)) return prev;
-            return nextArray;
-          });
-        }
-      } catch (error) {
-        console.error('Error loading postcode area summaries:', error);
-        if (!isCancelled) setPostcodeAreaSummaries([]);
-      } finally {
-        if (!isCancelled) setIsLoadingPostcodeAreas(false);
-      }
-    };
-
-    loadPostcodeAreaSummaries();
-
-    return () => { isCancelled = true; };
-  }, [user?.id]);
-
-  useEffect(() => {
     if (!user?.id) return;
     prefetchLeaderboardCache(user.id);
   }, [user?.id]);
@@ -110,6 +103,16 @@ export default function TabNavigator() {
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLocationLoaded(true);
+      setIsInitialPubsLoaded(true);
+    }, MAX_SPLASH_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => setupPushNotificationNavigation(), []);
+
   const isFullyLoaded = isLocationLoaded && isInitialPubsLoaded && minSplashElapsed;
   
   return (
@@ -118,8 +121,6 @@ export default function TabNavigator() {
       setIsLocationLoaded,
       isInitialPubsLoaded,
       setIsInitialPubsLoaded,
-      postcodeAreaSummaries,
-      isLoadingPostcodeAreas,
     }}>
       <View style={styles.container}>
         <Tab.Navigator
@@ -164,7 +165,7 @@ export default function TabNavigator() {
             headerShown: false,
             freezeOnBlur: true,
             tabBarActiveTintColor: COLORS.amber,
-            tabBarInactiveTintColor: COLORS.amber,
+            tabBarInactiveTintColor: COLORS.tabInactive,
             tabBarStyle: {
               backgroundColor: COLORS.charcoal,
               borderTopColor: COLORS.charcoal,
@@ -173,28 +174,20 @@ export default function TabNavigator() {
               paddingBottom: Math.max(insets.bottom, 8),
               paddingTop: 8,
             },
-            tabBarLabelStyle: {
-              fontSize: 12,
-              fontWeight: '600',
-              color: COLORS.amber,
-            },
+            tabBarLabel: TabLabel,
           }}
         >
           <Tab.Screen 
             name="Map" 
             component={MapScreenWithBoundary}
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="map-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="map" />,
             }}
           />
           <Tab.Screen 
             name="Profile" 
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="account-circle-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="account-circle" />,
             }}
           >
             {(props) => (
@@ -211,19 +204,13 @@ export default function TabNavigator() {
             name="Leaderboard" 
             component={SafeLeaderboardScreen}
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="crown-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="crown" />,
             }}
           />
         </Tab.Navigator>
         {!isFullyLoaded && (
           <View style={styles.loadingContainer}>
-            <Image 
-              source={require('../assets/pub_icon.png')} 
-              style={styles.loadingLogo}
-              resizeMode="contain"
-            />
+            <PintGlassIcon size={160} color={COLORS.amber} style={styles.loadingLogo} />
             <ActivityIndicator size="large" color={COLORS.amber} style={styles.loadingSpinner} />
           </View>
         )}
@@ -236,6 +223,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  tabIconPill: {
+    width: 56,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabIconPillActive: {
+    backgroundColor: COLORS.tabActiveIndicator,
+  },
+  tabLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  tabLabelActive: {
+    fontWeight: '700',
+  },
   loadingContainer: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#FFFFFF',
@@ -244,8 +249,6 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   loadingLogo: {
-    width: 150,
-    height: 150,
     marginBottom: 30,
   },
   loadingSpinner: {

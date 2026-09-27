@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   ScrollView,
   Switch,
   Dimensions,
-  Alert,
   FlatList,
   Platform,
 } from 'react-native';
@@ -17,25 +16,34 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { AppDialogOverlay } from './AppDialog';
 import {
   PUB_FEATURES_DISPLAY,
   defaultFeatureSwitchState,
   featureMapFromPubFeatureArray,
 } from '../constants/pubFeatures';
+import { normalizeUkPostcode } from '../utils/ukPostcode';
 
-const MAX_PHOTOS = 6;
+const MAX_PHOTOS = 5;
 
 /** UK national numbers are at most 11 digits including trunk 0 (e.g. 02079460123, 07123456789). */
 const UK_PHONE_DIGITS_MAX = 11;
 
 const FOUNDED_YEAR_MIN = 1000;
 
-function closingTimePrefillFromPub(pub) {
+/** Example shown under the opening hours field on reports. */
+const OPENING_HOURS_EXAMPLE = 'Mon–Fri 11:00–23:00; Sat 11:00–23:30; Sun 12:00–22:30';
+
+function openingHoursPrefillFromPub(pub) {
   if (!pub) return '';
+  const oh = pub.opening_hours;
+  if (oh != null && String(oh).trim()) return String(oh).trim();
   const ct = pub.closing_time;
   if (ct == null || ct === '') return '';
-  const n = Number(ct);
-  if (!Number.isFinite(n)) return '';
+  const s = String(ct).trim();
+  if (!s) return '';
+  const n = Number(s);
+  if (!Number.isFinite(n)) return s;
   return `${String(Math.floor(n)).padStart(2, '0')}:00`;
 }
 
@@ -51,25 +59,6 @@ function historyPrefillFromPub(pub) {
 
 function digitsOnlyPhone(raw) {
   return String(raw || '').replace(/\D/g, '').slice(0, UK_PHONE_DIGITS_MAX);
-}
-
-/** Up to 4 digits → display HH:mm (colon inserted after hour). */
-function formatClosingTimeDigits(raw) {
-  const d = String(raw).replace(/\D/g, '').slice(0, 4);
-  if (d.length === 0) return '';
-  if (d.length <= 2) return d;
-  return `${d.slice(0, 2)}:${d.slice(2)}`;
-}
-
-/** Empty = valid (optional). Otherwise strict HH:mm, 00:00–23:59. */
-function isValid24hClosing(display) {
-  const s = String(display || '').trim();
-  if (!s) return true;
-  const m = s.match(/^(\d{2}):(\d{2})$/);
-  if (!m) return false;
-  const h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  return h >= 0 && h <= 23 && min >= 0 && min <= 59;
 }
 
 function foundedYearFromPub(pub) {
@@ -93,17 +82,22 @@ export default function PubReportFormModal({
   const [chainOrIndependent, setChainOrIndependent] = useState('');
   const [foundedYear, setFoundedYear] = useState(null);
   const [foundedPickerVisible, setFoundedPickerVisible] = useState(false);
-  const [address, setAddress] = useState('');
+  const [housenumber, setHousenumber] = useState('');
+  const [street, setStreet] = useState('');
+  const [postcode, setPostcode] = useState('');
   const [website, setWebsite] = useState('');
   const [phone, setPhone] = useState('');
-  const [closingTime, setClosingTime] = useState('');
+  const [openingHours, setOpeningHours] = useState('');
   const [history, setHistory] = useState('');
   const [features, setFeatures] = useState(defaultFeatureSwitchState);
   const [imageUris, setImageUris] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [photoPermissionDialog, setPhotoPermissionDialog] = useState(false);
   /** pub_correction only: true = still operating, false = permanently closed (not opening hours). */
   const [pubStillOpen, setPubStillOpen] = useState(true);
+  /** Correction mode: the pre-filled values, to tell whether anything was actually changed. */
+  const prefillSnapshotRef = useRef(null);
 
   const { width: screenW, height: screenH } = Dimensions.get('window');
   const modalW = Math.min(screenW - 24, 440);
@@ -121,20 +115,38 @@ export default function PubReportFormModal({
       setPubName(initialPub.name || '');
       setChainOrIndependent(initialPub.ownership || '');
       setFoundedYear(foundedYearFromPub(initialPub));
-      setAddress(initialPub.address || '');
+      setHousenumber(initialPub.addrHousenumber || '');
+      setStreet(initialPub.addrStreet || '');
+      setPostcode('');
       setWebsite(initialPub.website ? String(initialPub.website) : '');
       setPhone(digitsOnlyPhone(initialPub.phone));
-      setClosingTime(closingTimePrefillFromPub(initialPub));
+      setOpeningHours(openingHoursPrefillFromPub(initialPub));
       setHistory(historyPrefillFromPub(initialPub));
       setFeatures(featureMapFromPubFeatureArray(initialPub.features));
+      prefillSnapshotRef.current = JSON.stringify({
+        pubName: initialPub.name || '',
+        chainOrIndependent: initialPub.ownership || '',
+        foundedYear: foundedYearFromPub(initialPub),
+        housenumber: initialPub.addrHousenumber || '',
+        street: initialPub.addrStreet || '',
+        postcode: '',
+        website: initialPub.website ? String(initialPub.website) : '',
+        phone: digitsOnlyPhone(initialPub.phone),
+        openingHours: openingHoursPrefillFromPub(initialPub),
+        history: historyPrefillFromPub(initialPub),
+        features: featureMapFromPubFeatureArray(initialPub.features),
+      });
     } else {
+      prefillSnapshotRef.current = null;
       setPubName('');
       setChainOrIndependent('');
       setFoundedYear(null);
-      setAddress('');
+      setHousenumber('');
+      setStreet('');
+      setPostcode('');
       setWebsite('');
       setPhone('');
-      setClosingTime('');
+      setOpeningHours('');
       setHistory('');
       setFeatures(defaultFeatureSwitchState());
     }
@@ -142,7 +154,8 @@ export default function PubReportFormModal({
     setImageUris([]);
     setErrorMessage(null);
     setFoundedPickerVisible(false);
-  }, [visible, mode, initialPub?.id]);
+    setPhotoPermissionDialog(false);
+  }, [visible, mode, initialPub?.id, initialPub?.detailsLoaded]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -165,10 +178,7 @@ export default function PubReportFormModal({
       granted = status === 'granted';
     }
     if (!granted) {
-      Alert.alert(
-        'Photos',
-        'Photo library access is needed to attach images. You can enable it in your device settings.'
-      );
+      setPhotoPermissionDialog(true);
       return;
     }
 
@@ -192,22 +202,35 @@ export default function PubReportFormModal({
     setPhone(digitsOnlyPhone(text));
   }, []);
 
-  const handleClosingTimeChange = useCallback((text) => {
-    setClosingTime(formatClosingTimeDigits(text));
+  const handlePostcodeChange = useCallback((text) => {
+    setPostcode(text.toUpperCase());
   }, []);
+
+  const handlePostcodeBlur = useCallback(() => {
+    const normalised = normalizeUkPostcode(postcode);
+    if (normalised) setPostcode(normalised);
+  }, [postcode]);
+
+  // Corrections must change something (blank ones used to reach review and earn points).
+  const correctionHasChanges = mode === 'pub_correction' && (
+    !pubStillOpen
+    || imageUris.length > 0
+    || prefillSnapshotRef.current !== JSON.stringify({
+      pubName, chainOrIndependent, foundedYear, housenumber, street, postcode,
+      website, phone, openingHours, history, features,
+    })
+  );
 
   const canSubmit =
     mode === 'missing_pub'
-      ? pubName.trim().length > 0 && address.trim().length > 0
-      : history.trim().length > 0;
+      ? pubName.trim().length > 0
+        && housenumber.trim().length > 0
+        && street.trim().length > 0
+        && postcode.trim().length > 0
+      : correctionHasChanges;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isSubmitting) return;
-    const ct = closingTime.trim();
-    if (!isValid24hClosing(ct)) {
-      setErrorMessage('Closing time must be 24-hour HH:mm (e.g. 22:30), or leave blank.');
-      return;
-    }
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
@@ -215,10 +238,12 @@ export default function PubReportFormModal({
         pubName: pubName.trim(),
         chainOrIndependent: chainOrIndependent.trim(),
         founded: foundedYear != null ? String(foundedYear) : '',
-        address: address.trim(),
+        housenumber: housenumber.trim(),
+        street: street.trim(),
+        postcode: postcode.trim(),
         website: website.trim(),
         phone: phone.trim(),
-        closingTime: ct,
+        closingTime: openingHours.trim(),
         history: history.trim(),
         features,
         imageUris,
@@ -242,10 +267,12 @@ export default function PubReportFormModal({
     pubName,
     chainOrIndependent,
     foundedYear,
-    address,
+    housenumber,
+    street,
+    postcode,
     website,
     phone,
-    closingTime,
+    openingHours,
     history,
     features,
     imageUris,
@@ -337,7 +364,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Pub name *</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. The Crown"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={pubName}
                 onChangeText={setPubName}
@@ -345,10 +372,11 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Chain / independent</Text>
+              <Text style={styles.label}>Ownership</Text>
+              <Text style={styles.sectionHint}>Chain, brewery, or independent operator</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. Fuller's, Greene King or Independent"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={chainOrIndependent}
                 onChangeText={setChainOrIndependent}
@@ -356,7 +384,7 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Founded</Text>
+              <Text style={styles.label}>Year founded</Text>
               <TouchableOpacity
                 style={[styles.textInput, styles.yearPickerTrigger]}
                 onPress={() => !isSubmitting && setFoundedPickerVisible(true)}
@@ -369,20 +397,53 @@ export default function PubReportFormModal({
                   }
                   numberOfLines={1}
                 >
-                  {foundedYear != null ? String(foundedYear) : ''}
+                  {foundedYear != null ? String(foundedYear) : 'Select year'}
                 </Text>
                 <MaterialCommunityIcons name="calendar-month-outline" size={22} color={COLORS.mediumGrey} />
               </TouchableOpacity>
 
-              <Text style={styles.label}>Pub address {mode === 'missing_pub' ? '*' : ''}</Text>
+              <Text style={styles.sectionTitle}>Address</Text>
+
+              <Text style={styles.label}>
+                Number or building name{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              {mode !== 'missing_pub' ? (
+                <Text style={styles.sectionHint}>Building number or name, if known</Text>
+              ) : null}
               <TextInput
-                style={[styles.textInput, styles.textInputMultiline]}
-                placeholder=""
+                style={styles.textInput}
+                placeholder="e.g. 12 or The Old Bank"
                 placeholderTextColor={COLORS.inputPlaceholder}
-                value={address}
-                onChangeText={setAddress}
-                multiline
-                textAlignVertical="top"
+                value={housenumber}
+                onChangeText={setHousenumber}
+                autoCorrect={false}
+                editable={!isSubmitting}
+              />
+
+              <Text style={styles.label}>
+                Street{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. High Street"
+                placeholderTextColor={COLORS.inputPlaceholder}
+                value={street}
+                onChangeText={setStreet}
+                autoCorrect={false}
+                editable={!isSubmitting}
+              />
+
+              <Text style={styles.label}>
+                Postcode{mode === 'missing_pub' ? ' *' : ' (optional)'}
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. SW1A 1AA"
+                placeholderTextColor={COLORS.inputPlaceholder}
+                value={postcode}
+                onChangeText={handlePostcodeChange}
+                onBlur={handlePostcodeBlur}
+                autoCapitalize="characters"
                 autoCorrect={false}
                 editable={!isSubmitting}
               />
@@ -390,7 +451,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Website</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. thecrown.co.uk"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={website}
                 onChangeText={setWebsite}
@@ -403,7 +464,7 @@ export default function PubReportFormModal({
               <Text style={styles.label}>Phone number</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder=""
+                placeholder="e.g. 020 7946 0000"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={phone}
                 onChangeText={handlePhoneChange}
@@ -412,16 +473,19 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.label}>Typical closing time</Text>
+              <Text style={styles.label}>Opening hours</Text>
+              <Text style={styles.sectionHint}>
+                e.g. {OPENING_HOURS_EXAMPLE}
+              </Text>
               <TextInput
-                style={styles.textInput}
+                style={[styles.textInput, styles.textInputMultiline]}
                 placeholder=""
                 placeholderTextColor={COLORS.inputPlaceholder}
-                value={closingTime}
-                onChangeText={handleClosingTimeChange}
-                keyboardType="number-pad"
+                value={openingHours}
+                onChangeText={setOpeningHours}
+                multiline
+                textAlignVertical="top"
                 autoCorrect={false}
-                maxLength={5}
                 editable={!isSubmitting}
               />
 
@@ -441,12 +505,11 @@ export default function PubReportFormModal({
                 </View>
               ))}
 
-              <Text style={styles.label}>
-                History {mode === 'pub_correction' ? '*' : ''}
-              </Text>
+              <Text style={styles.label}>About this pub</Text>
+              <Text style={styles.sectionHint}>Shown on the pub card as the main description</Text>
               <TextInput
                 style={[styles.textInput, styles.textInputTall]}
-                placeholder=""
+                placeholder="What makes this pub special? History, atmosphere, what it's known for…"
                 placeholderTextColor={COLORS.inputPlaceholder}
                 value={history}
                 onChangeText={setHistory}
@@ -455,7 +518,10 @@ export default function PubReportFormModal({
                 editable={!isSubmitting}
               />
 
-              <Text style={styles.sectionTitle}>Pub photos</Text>
+              <Text style={styles.sectionTitle}>Photos</Text>
+              <Text style={styles.sectionHint}>
+                Up to {MAX_PHOTOS} — applied to the pub listing when your report is accepted
+              </Text>
               <View style={styles.photoRow}>
                 <TouchableOpacity
                   style={styles.addPhotoButton}
@@ -484,6 +550,9 @@ export default function PubReportFormModal({
               </View>
 
               {errorMessage ? <Text style={styles.errorMessage}>{errorMessage}</Text> : null}
+              {mode === 'pub_correction' && !canSubmit && !errorMessage ? (
+                <Text style={styles.submitHint}>Change at least one detail to send a correction.</Text>
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.submitButton, (!canSubmit || isSubmitting) && styles.submitButtonDisabled]}
@@ -497,60 +566,64 @@ export default function PubReportFormModal({
               </TouchableOpacity>
             </ScrollView>
         </View>
-      </View>
-    </Modal>
-
-    <Modal
-      visible={foundedPickerVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setFoundedPickerVisible(false)}
-    >
-      <View style={styles.yearPickerOverlay}>
-        <TouchableOpacity
-          style={styles.yearPickerDismissArea}
-          activeOpacity={1}
-          onPress={() => setFoundedPickerVisible(false)}
-        />
-        <View style={styles.yearPickerSheet}>
-          <Text style={styles.yearPickerTitle}>Year founded</Text>
-          <TouchableOpacity
-            style={styles.yearPickerClearRow}
-            onPress={() => {
-              setFoundedYear(null);
-              setFoundedPickerVisible(false);
-            }}
-          >
-            <Text style={styles.yearPickerClearText}>Clear selection</Text>
-          </TouchableOpacity>
-          <FlatList
-            data={foundedYearOptions}
-            keyExtractor={(item) => String(item)}
-            style={[styles.yearPickerList, { maxHeight: Math.min(screenH * 0.42, 340) }]}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
+        {photoPermissionDialog ? (
+          <AppDialogOverlay
+            title="Photos"
+            message="Photo library access is needed to attach images. You can enable it in your device settings."
+            tone="neutral"
+            onClose={() => setPhotoPermissionDialog(false)}
+          />
+        ) : null}
+        {foundedPickerVisible ? (
+          <View style={styles.yearPickerOverlay} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.yearPickerDismissArea}
+              activeOpacity={1}
+              onPress={() => setFoundedPickerVisible(false)}
+              accessibilityLabel="Dismiss year picker"
+            />
+            <View style={styles.yearPickerSheet} pointerEvents="auto">
+              <Text style={styles.yearPickerTitle}>Year founded</Text>
               <TouchableOpacity
-                style={[
-                  styles.yearPickerRow,
-                  foundedYear === item && styles.yearPickerRowSelected,
-                ]}
+                style={styles.yearPickerClearRow}
                 onPress={() => {
-                  setFoundedYear(item);
+                  setFoundedYear(null);
                   setFoundedPickerVisible(false);
                 }}
               >
-                <Text
-                  style={[
-                    styles.yearPickerRowText,
-                    foundedYear === item && styles.yearPickerRowTextSelected,
-                  ]}
-                >
-                  {item}
-                </Text>
+                <Text style={styles.yearPickerClearText}>Clear selection</Text>
               </TouchableOpacity>
-            )}
-          />
-        </View>
+              <FlatList
+                data={foundedYearOptions}
+                keyExtractor={(item) => String(item)}
+                style={[styles.yearPickerList, { maxHeight: Math.min(screenH * 0.42, 340) }]}
+                keyboardShouldPersistTaps="handled"
+                initialNumToRender={24}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.yearPickerRow,
+                      foundedYear === item && styles.yearPickerRowSelected,
+                    ]}
+                    onPress={() => {
+                      setFoundedYear(item);
+                      setFoundedPickerVisible(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.yearPickerRowText,
+                        foundedYear === item && styles.yearPickerRowTextSelected,
+                      ]}
+                    >
+                      {item}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
     </Modal>
     </>
@@ -707,8 +780,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   yearPickerOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    zIndex: 20,
+    elevation: 20,
   },
   yearPickerDismissArea: {
     flex: 1,
@@ -822,7 +897,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   errorMessage: {
-    color: '#D9534F',
+    color: COLORS.errorRed,
+    marginBottom: 12,
+  },
+  submitHint: {
+    color: COLORS.mediumGrey,
+    fontSize: 13,
     marginBottom: 12,
   },
   submitButton: {

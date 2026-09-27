@@ -4,6 +4,10 @@ import * as Notifications from 'expo-notifications';
 import { APP_DISPLAY_NAME } from '../constants/app';
 import { EAS_PROJECT_ID } from '../constants/easProject';
 import { supabase } from '../config/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/** Expo push token last registered from this device (so logout removes only this one). */
+const DEVICE_PUSH_TOKEN_KEY = 'push:deviceToken:v1';
 
 let handlerInstalled = false;
 
@@ -59,9 +63,23 @@ function logPushDiag(stage, detail) {
   console.warn(`[Push] ${stage}${line ? `: ${line}` : ''}`);
 }
 
-export async function registerPushNotificationsForUser(userId) {
+/**
+ * @param {string} userId
+ * @param {{ prompt?: boolean }} [options] prompt=false (default): register only if permission
+ *   was already granted — never shows an OS dialog. prompt=true: ask the OS first.
+ */
+export async function registerPushNotificationsForUser(userId, { prompt = false } = {}) {
   if (!userId || Platform.OS === 'web') return;
   ensureHandler();
+
+  if (!prompt) {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') return;
+    } catch {
+      return;
+    }
+  }
 
   try {
     const { data: authData, error: authErr } = await supabase.auth.getUser();
@@ -136,15 +154,12 @@ export async function registerPushNotificationsForUser(userId) {
     const platform =
       Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : Platform.OS;
 
-    const { error } = await supabase.from('user_push_tokens').upsert(
-      {
-        user_id: rowUserId,
-        expo_push_token: expoPushToken,
-        platform,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'expo_push_token' },
-    );
+    // Server-side claim: moves the token off any account previously signed in on this
+    // device (a plain upsert is blocked by RLS for another user's row).
+    const { error } = await supabase.rpc('claim_push_token', {
+      p_token: expoPushToken,
+      p_platform: platform,
+    });
 
     if (error) {
       logPushDiag('token upsert failed', {
@@ -155,6 +170,7 @@ export async function registerPushNotificationsForUser(userId) {
       });
       return;
     }
+    AsyncStorage.setItem(DEVICE_PUSH_TOKEN_KEY, expoPushToken).catch(() => {});
     logPushDiag('token saved', {
       userId: rowUserId,
       platform,
@@ -165,15 +181,26 @@ export async function registerPushNotificationsForUser(userId) {
   }
 }
 
-/** Remove all device tokens for this account (call on logout). */
-export async function removeAllPushTokensForUser(userId) {
+/**
+ * Stop push notifications to THIS device for the account (call on logout).
+ * The user's other devices keep receiving notifications.
+ */
+export async function removePushTokenForThisDevice(userId) {
   if (!userId) return;
   try {
-    const { error } = await supabase.from('user_push_tokens').delete().eq('user_id', userId);
+    const token = await AsyncStorage.getItem(DEVICE_PUSH_TOKEN_KEY);
+    if (!token) return;
+    const { error } = await supabase
+      .from('user_push_tokens')
+      .delete()
+      .eq('user_id', userId)
+      .eq('expo_push_token', token);
     if (error) {
-      console.warn('Push: delete tokens failed', error.message);
+      console.warn('Push: delete device token failed', error.message);
+      return;
     }
+    await AsyncStorage.removeItem(DEVICE_PUSH_TOKEN_KEY);
   } catch (e) {
-    console.warn('Push: delete tokens failed', e?.message ?? e);
+    console.warn('Push: delete device token failed', e?.message ?? e);
   }
 }

@@ -1,18 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  View, 
-  Text, 
-  ScrollView, 
-  TouchableOpacity, 
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Pressable,
   StyleSheet,
   Modal,
+  Animated,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RangeSlider from '../components/RangeSlider';
+import FavoritesFilterModal from '../components/FavoritesFilterModal';
 import { COLORS } from '../constants/theme';
 import { PUB_FEATURE_CHIPS } from '../constants/pubFeatureChips';
+
+const CURRENT_YEAR = new Date().getFullYear();
 
 const CLOSING_TIME_OPTIONS = [
   { label: 'Open now', value: 'open_now', icon: 'clock-check-outline' },
@@ -51,21 +56,40 @@ export default function FilterScreen({
   yearRange,
   minYear,
   maxYear,
-  showOnlyFavorites,
+  favoritesFilterUserIds,
+  currentUserId,
+  currentUser,
   showOnlyAchievements,
   closingTimeMin,
   minRating,
   onApply 
 }) {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const sheetTranslateY = useRef(new Animated.Value(windowHeight)).current;
+
+  useEffect(() => {
+    if (visible) {
+      sheetTranslateY.setValue(windowHeight);
+      Animated.timing(sheetTranslateY, {
+        toValue: 0,
+        duration: 280,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      sheetTranslateY.setValue(windowHeight);
+    }
+  }, [visible, sheetTranslateY, windowHeight]);
   const filterChipWidth =
     Math.floor((windowWidth - FILTER_SECTION_PAD * 2 - FILTER_CHIP_GAP) / 2);
-  const defaultYearRange = { min: minYear || 1800, max: maxYear || 2025 };
+  const defaultYearRange = { min: minYear || 1800, max: maxYear || CURRENT_YEAR };
   const [localSelectedFeatures, setLocalSelectedFeatures] = useState(new Set(selectedFeatures));
   const [localSelectedOwnerships, setLocalSelectedOwnerships] = useState(new Set(selectedOwnerships || []));
   const [localYearRange, setLocalYearRange] = useState(yearRange || defaultYearRange);
-  const [localShowOnlyFavorites, setLocalShowOnlyFavorites] = useState(showOnlyFavorites || false);
+  const [localFavoritesFilterUserIds, setLocalFavoritesFilterUserIds] = useState(
+    favoritesFilterUserIds || []
+  );
+  const [favoritesPickerVisible, setFavoritesPickerVisible] = useState(false);
   const [localShowOnlyAchievements, setLocalShowOnlyAchievements] = useState(showOnlyAchievements || false);
   const [localClosingTimeMin, setLocalClosingTimeMin] = useState(closingTimeMin || null);
   const [localMinRating, setLocalMinRating] = useState(minRating ?? null);
@@ -74,11 +98,23 @@ export default function FilterScreen({
     setLocalSelectedFeatures(new Set(selectedFeatures));
     setLocalSelectedOwnerships(new Set(selectedOwnerships || []));
     setLocalYearRange(yearRange || defaultYearRange);
-    setLocalShowOnlyFavorites(showOnlyFavorites || false);
+    setLocalFavoritesFilterUserIds(favoritesFilterUserIds || []);
     setLocalShowOnlyAchievements(showOnlyAchievements || false);
     setLocalClosingTimeMin(closingTimeMin || null);
     setLocalMinRating(minRating ?? null);
-  }, [selectedFeatures, selectedOwnerships, yearRange, minYear, maxYear, showOnlyFavorites, showOnlyAchievements, closingTimeMin, minRating, visible]);
+    if (!visible) setFavoritesPickerVisible(false);
+  }, [
+    selectedFeatures,
+    selectedOwnerships,
+    yearRange,
+    minYear,
+    maxYear,
+    favoritesFilterUserIds,
+    showOnlyAchievements,
+    closingTimeMin,
+    minRating,
+    visible,
+  ]);
 
   const allFeatureNames = PUB_FEATURE_CHIPS.map((f) => f.name);
   const allFeaturesSelected = allFeatureNames.every((n) => localSelectedFeatures.has(n));
@@ -115,7 +151,7 @@ export default function FilterScreen({
     setLocalSelectedFeatures(new Set());
     setLocalSelectedOwnerships(new Set());
     setLocalYearRange(defaultYearRange);
-    setLocalShowOnlyFavorites(false);
+    setLocalFavoritesFilterUserIds([]);
     setLocalShowOnlyAchievements(false);
     setLocalClosingTimeMin(null);
     setLocalMinRating(null);
@@ -134,13 +170,20 @@ export default function FilterScreen({
   const ownershipStripHeight =
     FILTER_CHIP_MIN_H * OWNERSHIP_GRID_ROWS + FILTER_CHIP_GAP * (OWNERSHIP_GRID_ROWS - 1);
 
+  const favoritesFilterActive = localFavoritesFilterUserIds.length > 0;
+
+  const handleFavoritesPickerApply = (userIds) => {
+    setLocalFavoritesFilterUserIds(userIds);
+    setFavoritesPickerVisible(false);
+  };
+
   const handleApply = () => {
-    const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || 2025);
+    const isFullRange = localYearRange.min === (minYear || 1800) && localYearRange.max === (maxYear || CURRENT_YEAR);
     onApply({
       features: Array.from(localSelectedFeatures),
       ownerships: Array.from(localSelectedOwnerships),
       yearRange: isFullRange ? null : localYearRange,
-      showOnlyFavorites: localShowOnlyFavorites,
+      favoritesFilterUserIds: localFavoritesFilterUserIds,
       showOnlyAchievements: localShowOnlyAchievements,
       closingTimeMin: localClosingTimeMin,
       minRating: localMinRating,
@@ -151,12 +194,23 @@ export default function FilterScreen({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      transparent={true}
+      animationType="none"
+      transparent
       onRequestClose={onClose}
     >
-      <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-        <View style={styles.modalContent}>
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={onClose}
+          accessibilityLabel="Dismiss filters"
+          accessibilityRole="button"
+        />
+        <Animated.View
+          style={[
+            styles.modalContent,
+            { transform: [{ translateY: sheetTranslateY }] },
+          ]}
+        >
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Filter Pubs</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -175,21 +229,25 @@ export default function FilterScreen({
                 style={[
                   styles.filterChip,
                   { width: filterChipWidth },
-                  localShowOnlyFavorites && styles.featureBoxSelected
+                  favoritesFilterActive && styles.featureBoxSelected
                 ]}
-                onPress={() => setLocalShowOnlyFavorites(!localShowOnlyFavorites)}
+                onPress={() => setFavoritesPickerVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Filter by favourites"
+                accessibilityState={{ selected: favoritesFilterActive }}
               >
                 <MaterialCommunityIcons
                   name="heart"
                   size={18}
-                  color={localShowOnlyFavorites ? COLORS.amber : COLORS.mediumGrey}
+                  color={favoritesFilterActive ? COLORS.amber : COLORS.mediumGrey}
                   style={styles.filterIconInline}
                 />
                 <Text style={[
                   styles.featureBoxText,
-                  localShowOnlyFavorites && styles.featureBoxTextSelected
+                  favoritesFilterActive && styles.featureBoxTextSelected
                 ]}>
                   Favourites
+                  {favoritesFilterActive ? ` (${localFavoritesFilterUserIds.length})` : ''}
                 </Text>
               </TouchableOpacity>
 
@@ -200,6 +258,9 @@ export default function FilterScreen({
                   localShowOnlyAchievements && styles.featureBoxSelected
                 ]}
                 onPress={() => setLocalShowOnlyAchievements(!localShowOnlyAchievements)}
+                accessibilityRole="button"
+                accessibilityLabel="Show only notable pubs"
+                accessibilityState={{ selected: localShowOnlyAchievements }}
               >
                 <MaterialCommunityIcons
                   name="trophy"
@@ -211,7 +272,7 @@ export default function FilterScreen({
                   styles.featureBoxText,
                   localShowOnlyAchievements && styles.featureBoxTextSelected
                 ]}>
-                  Achievements
+                  Notable
                 </Text>
               </TouchableOpacity>
             </View>
@@ -407,7 +468,7 @@ export default function FilterScreen({
             <Text style={[styles.sectionTitle, styles.sectionTitleTight]}>Founded Year</Text>
             <RangeSlider
               min={minYear || 1800}
-              max={maxYear || 2025}
+              max={maxYear || CURRENT_YEAR}
               minValue={localYearRange.min}
               maxValue={localYearRange.max}
               onValueChange={handleYearRangeChange}
@@ -429,17 +490,30 @@ export default function FilterScreen({
               <Text style={styles.applyButtonText}>Apply Changes</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </Animated.View>
+
+        <FavoritesFilterModal
+          embedded
+          visible={favoritesPickerVisible}
+          onClose={() => setFavoritesPickerVisible(false)}
+          onApply={handleFavoritesPickerApply}
+          currentUserId={currentUserId}
+          currentUser={currentUser}
+          initialSelectedIds={localFavoritesFilterUserIds}
+        />
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  modalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',

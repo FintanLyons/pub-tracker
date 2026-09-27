@@ -1,48 +1,23 @@
 import { Platform } from 'react-native';
 import { supabase } from '../config/supabase';
 import { clearVisitedFavoriteCache } from './PubService';
+import { CONNECTION_ERROR_MESSAGE, isNetworkError } from './authErrors';
 
-const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,20}$/;
+import { isValidUsernameFormat } from '../utils/usernameValidation';
+
+export { isValidUsernameFormat };
+
+/** public.users columns clients may read (column grants hide `email` — see schema baseline §6). */
+export const PUBLIC_USER_PROFILE_COLUMNS =
+  'id, username, avatar_url, created_at, updated_at';
 
 /** Where the email confirmation link opens (must match Supabase Dashboard → Auth → Redirect URLs). */
 const EMAIL_CONFIRM_REDIRECT_TO =
   process.env.EXPO_PUBLIC_EMAIL_CONFIRM_REDIRECT_URL ?? 'https://fintanlyons.com/pub';
 
-/** Auth user_metadata key — false = must complete ChooseUsernameScreen (set on new signup). */
-const META_APP_USERNAME_CHOSEN = 'app_username_chosen';
-
-const setAuthUsernamePending = async () => {
-  const { error } = await supabase.auth.updateUser({
-    data: { [META_APP_USERNAME_CHOSEN]: false },
-  });
-  if (error) {
-    console.warn('setAuthUsernamePending:', error.message);
-  }
-};
-
-export const isValidUsernameFormat = (username) =>
-  typeof username === 'string' && USERNAME_REGEX.test(username.trim());
-
 /**
- * Supabase projects often have a trigger on auth.users that INSERTs public.users
- * with a placeholder username (e.g. email local-part) before the client runs.
- * ensureUserStub then sees an existing row and skips — ChooseUsername never shows.
- * Call after sign-up / brand-new OAuth so the app owns the first username set.
- */
-const clearUsernameForInAppChoice = async (userId) => {
-  if (!userId) return;
-  const { error } = await supabase
-    .from('users')
-    .update({ username: null, updated_at: new Date().toISOString() })
-    .eq('id', userId);
-  if (error) {
-    console.warn('clearUsernameForInAppChoice:', error.message);
-  }
-};
-
-/**
- * Ensure a public.users row exists for this auth user (username may be NULL).
- * Call when session exists but SELECT returned no row (cold start / race).
+ * Ensure a public.users row exists for this auth user (username NULL until chosen).
+ * Normally the on_auth_user_created trigger creates it; this is the fallback.
  */
 export const ensureUserStub = async (userId, email) => {
   if (!userId) return;
@@ -65,150 +40,160 @@ export const ensureUserStub = async (userId, email) => {
 
   if (insertError && insertError.code !== '23505') {
     console.warn('ensureUserStub insert:', insertError.message);
-    return;
   }
-
-  try {
-    await syncUserStatsLite(userId);
-  } catch {
-    // best-effort
-  }
+  // user_stats is seeded by the trg_seed_user_stats DB trigger.
 };
 
+/**
+ * Email sign-up. Returns { needsEmailVerification } — true when Supabase requires the
+ * confirmation link before a session exists. The caller loads the profile (refreshUser).
+ */
 export const registerUserSecure = async (email, password) => {
-  try {
-    await supabase.auth.signOut({ scope: 'local' });
-    clearVisitedFavoriteCache();
+  await supabase.auth.signOut({ scope: 'local' });
+  clearVisitedFavoriteCache();
 
-    const { data: authData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO,
-      },
-    });
+  const { data: authData, error: signUpError } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO,
+    },
+  });
 
-    if (signUpError) {
-      const msg = signUpError.message || '';
-      if (msg.includes('seconds') || msg.includes('rate limit')) {
-        throw new Error('Too many registration attempts. Please wait a minute and try again.');
-      }
-      if (
-        msg.toLowerCase().includes('already') ||
-        msg.toLowerCase().includes('exist') ||
-        msg.toLowerCase().includes('duplicate')
-      ) {
-        throw new Error('This email is already registered. Please use the login tab instead.');
-      }
-      throw signUpError;
-    }
-
-    const userData = authData.user;
-    const sessionData = authData.session;
-    if (!userData?.id) throw new Error('Registration failed — please try again.');
-
-    const emptyIdentities = !userData.identities || userData.identities.length === 0;
-    const createdSecondsAgo = (Date.now() - new Date(userData.created_at).getTime()) / 1000;
-    if (emptyIdentities || (!sessionData && createdSecondsAgo > 5)) {
-      throw new Error('This email is already registered. Please use the login tab instead.');
-    }
-
-    if (!sessionData) {
-      return { user: null, session: null, needsEmailVerification: true };
-    }
-
-    await ensureUserStub(userData.id, email);
-    await clearUsernameForInAppChoice(userData.id);
-    await setAuthUsernamePending();
-
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userData.id)
-      .single();
-
-    if (profileError) throw profileError;
-
-    return { user: profile, session: sessionData, needsEmailVerification: false };
-  } catch (error) {
-    const msg = error.message || 'Registration failed';
-    if (msg.includes('already registered') || msg.includes('User already registered')) {
-      throw new Error('This email is already registered. Please use the login tab instead.');
-    }
-    if (msg.includes('rate limit') || msg.includes('seconds') || msg.includes('wait')) {
+  if (signUpError) {
+    const msg = (signUpError.message || '').toLowerCase();
+    if (isNetworkError(signUpError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    if (msg.includes('seconds') || msg.includes('rate limit')) {
       throw new Error('Too many attempts. Please wait a minute and try again.');
     }
-    if (msg.includes('invalid')) {
-      throw new Error('Please check your email and password format.');
+    if (msg.includes('already') || msg.includes('exist') || msg.includes('duplicate')) {
+      throw new Error('This email is already registered. Please use the login tab instead.');
     }
-    throw error;
+    if (msg.includes('password')) {
+      throw new Error(signUpError.message);
+    }
+    throw new Error('Registration failed. Please check your email and password and try again.');
   }
+
+  const userData = authData.user;
+  if (!userData?.id) throw new Error('Registration failed. Please try again.');
+
+  // With email confirmation on, Supabase answers a sign-up for an existing confirmed
+  // email with an obfuscated user that has no identities (no error, no email sent).
+  if (!userData.identities || userData.identities.length === 0) {
+    throw new Error('This email is already registered. Please use the login tab instead.');
+  }
+
+  // No session yet = new (or still unconfirmed) account; Supabase sent the confirmation link.
+  // New accounts have no username, so ChooseUsernameScreen runs after first sign-in.
+  return { needsEmailVerification: !authData.session };
 };
 
 const isValidEmail = (text) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((text || '').trim());
 
+/** Email + password sign-in. The caller loads the profile (refreshUser). */
 export const loginUserSecure = async (email, password) => {
-  try {
-    if (!isValidEmail(email)) {
-      throw new Error('Please enter a valid email address.');
+  if (!isValidEmail(email)) {
+    throw new Error('Please enter a valid email address.');
+  }
+
+  await supabase.auth.signOut({ scope: 'local' });
+  clearVisitedFavoriteCache();
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
+  });
+
+  if (signInError) {
+    if (isNetworkError(signInError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (signInError.message || '').toLowerCase();
+    if (m.includes('not confirmed')) {
+      throw new Error('Email not confirmed. Please verify your email before logging in.');
     }
-
-    await supabase.auth.signOut({ scope: 'local' });
-    clearVisitedFavoriteCache();
-
-    const trimmedEmail = email.trim();
-
-    const { data: authData, error: signInError } =
-      await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
-
-    if (signInError) {
-      const m = (signInError.message || '').toLowerCase();
-      if (m.includes('email not confirmed') || m.includes('not confirmed')) {
-        throw new Error('Email not confirmed. Please verify your email before logging in.');
-      }
-      throw new Error('Invalid email or password.');
-    }
-
-    let { data: users } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authData.user.id)
-      .limit(1);
-
-    let user;
-    if (!users || users.length === 0) {
-      await ensureUserStub(authData.user.id, authData.user.email);
-      const { data: refetch } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
-      if (!refetch) {
-        throw new Error('Unable to set up your account. Please contact support.');
-      }
-      user = refetch;
-    } else {
-      user = users[0];
-    }
-
-    return { user, session: authData.session };
-  } catch (error) {
-    const msg = error.message || '';
-    if (
-      msg.includes('Invalid email or password') ||
-      msg.includes('valid email') ||
-      msg.includes('Email not confirmed') ||
-      msg.includes('Unable to set up')
-    ) {
-      throw error;
+    if (m.includes('rate limit') || m.includes('too many')) {
+      throw new Error('Too many attempts. Please wait a minute and try again.');
     }
     throw new Error('Invalid email or password.');
   }
 };
 
+/** Resend the sign-up confirmation email (for accounts that haven't confirmed yet). */
+export const resendConfirmationEmail = async (email) => {
+  const trimmed = (email || '').trim();
+  if (!isValidEmail(trimmed)) {
+    throw new Error('Please enter a valid email address.');
+  }
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: trimmed,
+    options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT_TO },
+  });
+  if (error) {
+    if (isNetworkError(error)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (error.message || '').toLowerCase();
+    if (m.includes('rate limit') || m.includes('seconds')) {
+      // e.g. "you can only request this after 45 seconds"
+      const seconds = Number((m.match(/after (\d+) seconds?/) || [])[1]) || 60;
+      const err = new Error(`You can request another email in ${seconds} seconds.`);
+      err.retryAfterSeconds = seconds;
+      throw err;
+    }
+    throw new Error("Couldn't resend the email. Please try again.");
+  }
+};
+
+/** Supabase allows one confirmation email per address per minute. */
+export const CONFIRMATION_RESEND_COOLDOWN_SECONDS = 60;
+
 /**
- * Persist username to public.users only — no getSession/getUser/updateUser here.
- * Avoids Supabase auth client deadlocks during ChooseUsername submit (see AuthContext).
+ * Send a password-reset email containing a one-time code ({{ .Token }} in the
+ * Supabase "Reset Password" email template). Succeeds even for unknown emails.
+ */
+export const requestPasswordReset = async (email) => {
+  const trimmed = (email || '').trim();
+  if (!isValidEmail(trimmed)) {
+    throw new Error('Please enter a valid email address.');
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(trimmed);
+  if (error) {
+    if (isNetworkError(error)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (error.message || '').toLowerCase();
+    if (m.includes('rate limit') || m.includes('seconds')) {
+      throw new Error('Please wait a minute before requesting another code.');
+    }
+    throw new Error("Couldn't send the reset email. Please try again.");
+  }
+};
+
+/** Verify the emailed code, then set the new password. Leaves the user signed in. */
+export const resetPasswordWithCode = async (email, code, newPassword) => {
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    email: (email || '').trim(),
+    token: (code || '').trim(),
+    type: 'recovery',
+  });
+  if (verifyError) {
+    if (isNetworkError(verifyError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    throw new Error('That code is invalid or has expired. Request a new one.');
+  }
+
+  clearVisitedFavoriteCache();
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) {
+    if (isNetworkError(updateError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    const m = (updateError.message || '').toLowerCase();
+    if (m.includes('different from the old')) {
+      throw new Error('Choose a password different from your old one.');
+    }
+    if (m.includes('password')) throw new Error(updateError.message);
+    throw new Error("Couldn't update your password. Please try again.");
+  }
+};
+
+/**
+ * Persist the chosen username (and optional avatar) to public.users.
  *
  * @param {string} userId
  * @param {string} username
@@ -224,10 +209,12 @@ export const updatePublicUsername = async (userId, username, options = {}) => {
     );
   }
 
+  // Usernames are unique regardless of capitals (users_username_lower_key);
+  // ilike with escaped wildcards = case-insensitive exact match.
   const { data: taken } = await supabase
     .from('users')
     .select('id')
-    .eq('username', trimmed)
+    .ilike('username', trimmed.replace(/[\\%_]/g, (ch) => `\\${ch}`))
     .neq('id', userId)
     .limit(1);
 
@@ -247,7 +234,7 @@ export const updatePublicUsername = async (userId, username, options = {}) => {
     .from('users')
     .update(patch)
     .eq('id', userId)
-    .select()
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .single();
 
   if (error) {
@@ -281,27 +268,11 @@ export const updatePublicAvatarUrl = async (userId, avatarUrl) => {
     .from('users')
     .update(patch)
     .eq('id', userId)
-    .select()
+    .select(PUBLIC_USER_PROFILE_COLUMNS)
     .single();
 
   if (error) throw error;
   return data;
-};
-
-/**
- * Sync app_username_chosen to auth metadata after a delay — do not await from UI;
- * updateUser can deadlock with onAuthStateChange if called inline with getSession/getUser.
- */
-export const scheduleAuthUsernameMetadataSync = () => {
-  setTimeout(() => {
-    void supabase.auth
-      .updateUser({
-        data: { [META_APP_USERNAME_CHOSEN]: true },
-      })
-      .then(({ error }) => {
-        if (error) console.warn('scheduleAuthUsernameMetadataSync:', error.message);
-      });
-  }, 250);
 };
 
 export const logoutUserSecure = async () => {
@@ -316,7 +287,7 @@ export const logoutUserSecure = async () => {
 
 /**
  * Deletes the current user's app data and auth record via the
- * `delete_my_account` RPC (scripts/tier2_security_hardening.sql).
+ * `delete_my_account` RPC (scripts/schema_baseline_2026_09.sql).
  */
 export const deleteAccountSecure = async () => {
   const {
@@ -337,8 +308,19 @@ export const deleteAccountSecure = async () => {
 };
 
 /**
+ * Exchange an Apple/Google ID token for a Supabase session.
+ * The caller loads the profile (refreshUser).
+ */
+const completeIdTokenSignIn = async (provider, token) => {
+  const { error: signInError } = await supabase.auth.signInWithIdToken({ provider, token });
+  if (signInError) {
+    if (isNetworkError(signInError)) throw new Error(CONNECTION_ERROR_MESSAGE);
+    throw signInError;
+  }
+};
+
+/**
  * Native Sign in with Apple (iOS only). Requires Supabase Apple provider + bundle ID in dashboard.
- * @returns {Promise<{ user: object, session: object }>}
  */
 export const appleSignInSecure = async () => {
   if (Platform.OS !== 'ios') {
@@ -375,131 +357,47 @@ export const appleSignInSecure = async () => {
     throw new Error('Apple Sign-In failed — no identity token returned.');
   }
 
-  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
-    provider: 'apple',
-    token: credential.identityToken,
-  });
-
-  if (signInError) throw signInError;
-
-  const authUser = authData.user;
-
-  let { data: users } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .limit(1);
-
-  if (!users || users.length === 0) {
-    await ensureUserStub(authUser.id, authUser.email);
-  }
-
-  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
-  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
-  if (isBrandNewAuthUser) {
-    await clearUsernameForInAppChoice(authUser.id);
-    await setAuthUsernamePending();
-  }
-
-  const { data: user, error: fetchError } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .single();
-  if (fetchError || !user) {
-    throw new Error('Unable to set up your account. Please contact support.');
-  }
-
-  return { user, session: authData.session };
+  await completeIdTokenSignIn('apple', credential.identityToken);
 };
 
 export const googleSignInSecure = async () => {
   const { GoogleSignin } = require('@react-native-google-signin/google-signin');
 
+  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+  if (!webClientId || !webClientId.includes('.apps.googleusercontent.com')) {
+    throw new Error(
+      'Google Sign-In is not configured in this build (EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID). ' +
+        'Set it in expo.dev → Environment variables for this EAS profile, then rebuild.',
+    );
+  }
+
+  // Drop stale Supabase refresh tokens so startup/sign-in does not log AuthApiError noise.
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // best-effort
+  }
+  clearVisitedFavoriteCache();
+
   GoogleSignin.configure({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    webClientId,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
   });
 
   await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-  clearVisitedFavoriteCache();
 
   const response = await GoogleSignin.signIn();
+
+  // v16: signIn() resolves with { type: 'cancelled' } instead of throwing on cancel.
+  if (response.type === 'cancelled' || response.type === 'noSavedCredentialFound') {
+    const err = new Error('SIGN_IN_CANCELLED');
+    err.code = 'SIGN_IN_CANCELLED';
+    throw err;
+  }
 
   if (!response.data?.idToken) {
     throw new Error('Google Sign-In failed — no ID token returned.');
   }
 
-  const { data: authData, error: signInError } = await supabase.auth.signInWithIdToken({
-    provider: 'google',
-    token: response.data.idToken,
-  });
-
-  if (signInError) throw signInError;
-
-  const authUser = authData.user;
-
-  let { data: users } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .limit(1);
-
-  if (!users || users.length === 0) {
-    await ensureUserStub(authUser.id, authUser.email);
-  }
-
-  const createdMs = Date.now() - new Date(authUser.created_at).getTime();
-  const isBrandNewAuthUser = createdMs >= 0 && createdMs < 120_000;
-  if (isBrandNewAuthUser) {
-    await clearUsernameForInAppChoice(authUser.id);
-    await setAuthUsernamePending();
-  }
-
-  const { data: user, error: fetchError } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .single();
-  if (fetchError || !user) {
-    throw new Error('Unable to set up your account. Please contact support.');
-  }
-
-  return { user, session: authData.session };
-};
-
-export const getCurrentUserSecure = async () => {
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) return null;
-
-    const { data: users } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', session.user.id)
-      .limit(1);
-
-    return users && users.length > 0 ? users[0] : null;
-  } catch {
-    return null;
-  }
-};
-
-const syncUserStatsLite = async (userId) => {
-  const { data: existing } = await supabase
-    .from('user_stats')
-    .select('user_id')
-    .eq('user_id', userId)
-    .limit(1);
-
-  if (!existing || existing.length === 0) {
-    await supabase.from('user_stats').insert({
-      user_id: userId,
-      pubs_visited: 0,
-      total_score: 0,
-      level: 1,
-      last_synced_at: new Date().toISOString(),
-    });
-  }
+  await completeIdTokenSignIn('google', response.data.idToken);
 };

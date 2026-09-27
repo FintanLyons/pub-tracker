@@ -7,13 +7,19 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import {
+  consumeSocialAction,
+  markNotificationPromptShown,
+  shouldOfferNotificationPrompt,
+} from '../services/notificationPrompt';
+import { registerPushNotificationsForUser } from '../services/PushNotificationService';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import { getLeagueLeaderboard, removeLeagueMember } from '../services/LeagueService';
 import {
   fetchLeaderboardBundle,
@@ -25,11 +31,27 @@ import CreateLeagueModal from '../components/CreateLeagueModal';
 import JoinLeagueModal from '../components/JoinLeagueModal';
 import LeagueActionsModal from '../components/LeagueActionsModal';
 import ShareLeagueModal from '../components/ShareLeagueModal';
+import AppDialogModal from '../components/AppDialog';
 import { COLORS } from '../constants/theme';
 
+/** What leaving does: last member deletes the league; an owner hands it on. */
+function leaveLeagueMessage(league, members, userId) {
+  const others = (members || []).filter((m) => m.id !== userId).length;
+  if (others === 0) {
+    return `You're the last member of "${league.name}" — leaving deletes the league for good.`;
+  }
+  if (league.created_by === userId) {
+    return `You'll leave "${league.name}" and ownership passes to the longest-standing member. `
+      + 'You can rejoin later with the code.';
+  }
+  return `You'll leave "${league.name}" and disappear from its leaderboard until you join again with the code.`;
+}
+
 export default function LeaderboardScreen() {
+  const { showAppAlert } = useAppAlert();
   const { user: authUser } = useAuth();
-  const [currentUser, setCurrentUser] = useState(null);
+  // The app only shows this screen when signed in; use the auth user directly.
+  const currentUser = authUser;
   const [activeTab, setActiveTab] = useState('friends'); // 'friends' or 'leagues'
   const [friendsLeaderboard, setFriendsLeaderboard] = useState([]);
   const [leagues, setLeagues] = useState([]);
@@ -47,7 +69,12 @@ export default function LeaderboardScreen() {
   const [leavingLeague, setLeavingLeague] = useState(false);
   const [showShareLeagueModal, setShowShareLeagueModal] = useState(false);
   const [showLeaveLeagueModal, setShowLeaveLeagueModal] = useState(false);
+  const [feedback, setFeedback] = useState(null);
   const selectedLeagueIdRef = useRef(null);
+  /** Only the latest loadData call may apply its result (focus, refresh and notification taps can overlap). */
+  const loadSeqRef = useRef(0);
+  const navigation = useNavigation();
+  const route = useRoute();
 
   useEffect(() => {
     selectedLeagueIdRef.current = selectedLeague?.id ?? null;
@@ -75,26 +102,30 @@ export default function LeaderboardScreen() {
       return;
     }
 
-    setCurrentUser(authUser);
 
-    const cachedData = getCachedLeaderboardData();
+    const cachedData = getCachedLeaderboardData(authUser.id);
     if (cachedData) {
       applyBundle(cachedData);
       setLoading(false);
       setRefreshing(false);
     }
 
+    const seq = ++loadSeqRef.current;
     try {
       const bundle = await fetchLeaderboardBundle(
         authUser.id,
         selectedLeagueIdRef.current,
       );
-      cacheLeaderboardData(bundle);
-      applyBundle(bundle);
+      cacheLeaderboardData(authUser.id, bundle);
+      if (seq === loadSeqRef.current) applyBundle(bundle);
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
-      if (!getCachedLeaderboardData()) {
-        Alert.alert('Error', 'Failed to load leaderboard data');
+      if (seq === loadSeqRef.current && !getCachedLeaderboardData(authUser.id)) {
+        showAppAlert({
+          title: 'Error',
+          message: 'Failed to load leaderboard data',
+          tone: 'error',
+        });
       }
     } finally {
       setLoading(false);
@@ -107,6 +138,34 @@ export default function LeaderboardScreen() {
       loadData();
     }, [loadData])
   );
+
+  // Opened from a push notification (services/notificationNavigation.js).
+  const { openFriendRequests, showLeagueId, showLeagueNonce, showLeagues, showFriends } =
+    route.params || {};
+  useEffect(() => {
+    if (!openFriendRequests && !showLeagueNonce && !showLeagues && !showFriends) return;
+    if (openFriendRequests) {
+      setActiveTab('friends');
+      setOpenAddFriendOnRequests(true);
+      setShowAddFriendModal(true);
+    } else if (showLeagueNonce || showLeagues) {
+      setActiveTab('leagues');
+      if (showLeagueId) {
+        // Just added: the league may not be in the cached list yet, so reload with it selected.
+        selectedLeagueIdRef.current = showLeagueId;
+        loadData();
+      }
+    } else {
+      setActiveTab('friends');
+    }
+    navigation.setParams({
+      openFriendRequests: undefined,
+      showLeagueId: undefined,
+      showLeagueNonce: undefined,
+      showLeagues: undefined,
+      showFriends: undefined,
+    });
+  }, [openFriendRequests, showLeagueId, showLeagueNonce, showLeagues, showFriends, loadData, navigation]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -122,11 +181,70 @@ export default function LeaderboardScreen() {
       setLeagueLeaderboard(leagueBoard);
     } catch (error) {
       console.error('Error loading league leaderboard:', error);
-      Alert.alert('Error', 'Failed to load league leaderboard');
+      showAppAlert({
+        title: 'Error',
+        message: 'Failed to load league leaderboard',
+        tone: 'error',
+      });
     } finally {
       setLoading(false);
     }
   };
+
+  /**
+   * "Turn on notifications?" with a reason, instead of asking at first launch.
+   * At most once per device (shouldOfferNotificationPrompt); the OS prompt only
+   * follows "Turn on". Delay lets a closing modal finish animating.
+   */
+  const anyModalOpenRef = useRef(false);
+  const offeredForContextRef = useRef(false);
+  const offerNotificationPrompt = useCallback(() => {
+    setTimeout(async () => {
+      if (anyModalOpenRef.current) {
+        // A pop-up opened meanwhile (e.g. from a notification tap) — try again later.
+        offeredForContextRef.current = false;
+        return;
+      }
+      if (!(await shouldOfferNotificationPrompt())) return;
+      markNotificationPromptShown();
+      showAppAlert({
+        title: 'Turn on notifications?',
+        message: 'Get a notification when friends send or accept a request, add you to a league or summon you to the pub.',
+        tone: 'neutral',
+        buttons: [
+          { text: 'Not now', variant: 'secondary' },
+          {
+            text: 'Turn on',
+            variant: 'primary',
+            onPress: () => {
+              if (authUser?.id) registerPushNotificationsForUser(authUser.id, { prompt: true });
+            },
+          },
+        ],
+      });
+    }, 450);
+  }, [authUser?.id, showAppAlert]);
+
+  /** After the user's own friend request / league action (see noteSocialAction). */
+  const offerNotificationsAfterSocialAction = useCallback(() => {
+    if (!consumeSocialAction()) return;
+    offerNotificationPrompt();
+  }, [offerNotificationPrompt]);
+
+  // People who mostly receive requests never take a social action themselves, so
+  // also offer once they have friends, a league or a request waiting.
+  const hasSocialContext =
+    friendsLeaderboard.length > 1 || leagues.length > 0 || pendingRequestsCount > 0;
+  const anyModalOpen =
+    showAddFriendModal || showCreateLeagueModal || showJoinLeagueModal
+    || showLeagueActionsModal || showShareLeagueModal || showLeaveLeagueModal
+    || showLeagueSelector || !!feedback;
+  anyModalOpenRef.current = anyModalOpen;
+  useEffect(() => {
+    if (!hasSocialContext || anyModalOpen || offeredForContextRef.current) return;
+    offeredForContextRef.current = true;
+    offerNotificationPrompt();
+  }, [hasSocialContext, anyModalOpen, offerNotificationPrompt]);
 
   const confirmLeaveLeague = async () => {
     if (!selectedLeague || !currentUser || leavingLeague) {
@@ -142,10 +260,18 @@ export default function LeaderboardScreen() {
       await removeLeagueMember(leagueId, currentUser.id);
       setShowLeaveLeagueModal(false);
       await loadData();
-      Alert.alert('League Left', `You have left ${leagueName}.`);
+      setFeedback({
+        title: 'Left league',
+        message: `You have left ${leagueName}.`,
+        tone: 'success',
+      });
     } catch (error) {
       console.error('Error leaving league:', error);
-      Alert.alert('Error', 'Failed to leave league. Please try again.');
+      setFeedback({
+        title: 'Could not leave',
+        message: 'Failed to leave league. Please try again.',
+        tone: 'error',
+      });
     } finally {
       setLeavingLeague(false);
       setLoading(false);
@@ -226,81 +352,56 @@ export default function LeaderboardScreen() {
     );
   }
 
-  if (!currentUser) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.contentContainerLoggedOut}>
-          <View style={styles.headerContainer}>
-            <View style={styles.headerSideSlot} />
-            <View style={styles.headerTitleWrap}>
-              <Text style={styles.headerTitle}>Leaderboard</Text>
-            </View>
-            <View style={styles.headerSideSlot} />
-          </View>
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Please log in to view the leaderboard</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.amber} colors={[COLORS.amber]} />
-      }
-    >
-      <View style={styles.headerContainer}>
-        <View style={styles.headerSideSlot} />
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>Leaderboard</Text>
+    <>
+    <View style={styles.container}>
+      <View style={styles.fixedChrome}>
+        <View style={styles.headerContainer}>
+          <View style={styles.headerSideSlot} />
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Leaderboard</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => {
+              setOpenAddFriendOnRequests(true);
+              setShowAddFriendModal(true);
+            }}
+            accessibilityLabel="Friend requests and notifications"
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
+            {pendingRequestsCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.notificationButton}
-          onPress={() => {
-            setOpenAddFriendOnRequests(true);
-            setShowAddFriendModal(true);
-          }}
-          accessibilityLabel="Friend requests and notifications"
-          accessibilityRole="button"
-        >
-          <MaterialCommunityIcons name="bell-outline" size={24} color={COLORS.darkGrey} />
-          {pendingRequestsCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
 
-      {/* Tab Selector */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
-          onPress={() => setActiveTab('friends')}
-        >
-          <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>
-            Friends
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'leagues' && styles.activeTab]}
-          onPress={() => setActiveTab('leagues')}
-        >
-          <Text style={[styles.tabText, activeTab === 'leagues' && styles.activeTabText]}>
-            Leagues
-          </Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
+            onPress={() => setActiveTab('friends')}
+          >
+            <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>
+              Friends
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'leagues' && styles.activeTab]}
+            onPress={() => setActiveTab('leagues')}
+          >
+            <Text style={[styles.tabText, activeTab === 'leagues' && styles.activeTabText]}>
+              Leagues
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      {/* Friends Tab */}
-      {activeTab === 'friends' && (
-        <View style={styles.tabContent}>
+        {activeTab === 'friends' && (
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Friends Leaderboard</Text>
             <TouchableOpacity
@@ -312,138 +413,167 @@ export default function LeaderboardScreen() {
               <MaterialCommunityIcons name="account-plus" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
+        )}
 
-          {friendsLeaderboard.length === 0 ? (
+        {activeTab === 'leagues' && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>League</Text>
+              <View style={styles.leagueHeaderRight}>
+                {leagues.length > 1 ? (
+                  <TouchableOpacity
+                    style={styles.leagueListButton}
+                    onPress={() => setShowLeagueSelector(!showLeagueSelector)}
+                    accessibilityLabel="Choose league"
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons name="format-list-bulleted" size={22} color={COLORS.darkGrey} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={() => setShowLeagueActionsModal(true)}
+                  accessibilityLabel="Create or join league"
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {showLeagueSelector && leagues.length > 0 && (
+              <View style={styles.leagueSelector}>
+                {leagues.map((league) => (
+                  <TouchableOpacity
+                    key={league.id}
+                    style={[
+                      styles.leagueOption,
+                      selectedLeague?.id === league.id && styles.selectedLeagueOption,
+                    ]}
+                    onPress={() => handleLeagueSelect(league)}
+                  >
+                    <View style={styles.leagueOptionContent}>
+                      <Text
+                        style={[
+                          styles.leagueOptionText,
+                          selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
+                        ]}
+                      >
+                        {league.name}
+                      </Text>
+                      {league.code && (
+                        <Text style={styles.leagueOptionCode}>{league.code}</Text>
+                      )}
+                    </View>
+                    {selectedLeague?.id === league.id && (
+                      <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.leagueCurrentCard}>
+              {selectedLeague ? (
+                <View style={styles.leagueCurrentRow}>
+                  <View style={styles.leagueCurrentMain}>
+                    <Text style={styles.leagueCurrentName}>{selectedLeague.name}</Text>
+                    {selectedLeague.code ? (
+                      <Text style={styles.leagueCurrentCode}>
+                        {String(selectedLeague.code).toUpperCase()}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.leagueCurrentActions}>
+                    <TouchableOpacity
+                      style={styles.leagueInlineIconButton}
+                      onPress={() => setShowShareLeagueModal(true)}
+                      accessibilityLabel="Share league"
+                      accessibilityRole="button"
+                    >
+                      <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.darkGrey} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.leagueLeaveIconButton,
+                        (leavingLeague || loading) && styles.leagueLeaveIconButtonDisabled,
+                      ]}
+                      onPress={() => setShowLeaveLeagueModal(true)}
+                      disabled={leavingLeague || loading}
+                      accessibilityLabel="Leave league"
+                      accessibilityRole="button"
+                    >
+                      <MaterialCommunityIcons name="exit-to-app" size={18} color={COLORS.errorRed} />
+                      <Text style={styles.leagueLeaveText}>Leave</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.leagueEmptyCardInner}>
+                  <MaterialCommunityIcons name="trophy-outline" size={36} color={COLORS.mediumGrey} />
+                  <Text style={styles.leagueEmptyTitle}>No league yet</Text>
+                  <Text style={styles.leagueEmptySubtext}>
+                    Tap + to create a league or join with a code.
+                  </Text>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+      </View>
+
+      <ScrollView
+        style={styles.membersScroll}
+        contentContainerStyle={styles.membersScrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.amber}
+            colors={[COLORS.amber]}
+          />
+        }
+        keyboardShouldPersistTaps="handled"
+      >
+        {activeTab === 'friends' && (
+          <>
+            {friendsLeaderboard.length > 0 ? (
+              <View style={styles.leaderboardContainer}>
+                {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
+              </View>
+            ) : null}
+            {/* The board always includes you, so "no friends" means one row or fewer. */}
+            {friendsLeaderboard.length <= 1 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialCommunityIcons name="account-group-outline" size={56} color={COLORS.mediumGrey} />
+                <Text style={styles.emptyText}>It's just you so far</Text>
+                <Text style={styles.emptySubtext}>Add friends to see who's visited the most pubs.</Text>
+                <TouchableOpacity
+                  style={styles.emptyActionButton}
+                  onPress={() => setShowAddFriendModal(true)}
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons name="account-plus" size={18} color={COLORS.white} />
+                  <Text style={styles.emptyActionText}>Add friends</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </>
+        )}
+
+        {activeTab === 'leagues' && selectedLeague && (
+          leagueLeaderboard.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="account-group-outline" size={64} color={COLORS.mediumGrey} />
-              <Text style={styles.emptyText}>No friends yet</Text>
-              <Text style={styles.emptySubtext}>Add friends to compete with them!</Text>
+              <Text style={styles.emptyText}>No members in this league</Text>
             </View>
           ) : (
             <View style={styles.leaderboardContainer}>
-              {friendsLeaderboard.map((user) => renderLeaderboardRow(user))}
+              {leagueLeaderboard.map((user) => renderLeaderboardRow(user))}
             </View>
-          )}
-        </View>
-      )}
-
-      {/* Leagues Tab */}
-      {activeTab === 'leagues' && (
-        <View style={styles.tabContent}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>League</Text>
-            <View style={styles.leagueHeaderRight}>
-              {leagues.length > 1 ? (
-                <TouchableOpacity
-                  style={styles.leagueListButton}
-                  onPress={() => setShowLeagueSelector(!showLeagueSelector)}
-                  accessibilityLabel="Choose league"
-                  accessibilityRole="button"
-                >
-                  <MaterialCommunityIcons name="format-list-bulleted" size={22} color={COLORS.darkGrey} />
-                </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => setShowLeagueActionsModal(true)}
-                accessibilityLabel="Create or join league"
-                accessibilityRole="button"
-              >
-                <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {showLeagueSelector && leagues.length > 0 && (
-            <View style={styles.leagueSelector}>
-              {leagues.map((league) => (
-                <TouchableOpacity
-                  key={league.id}
-                  style={[
-                    styles.leagueOption,
-                    selectedLeague?.id === league.id && styles.selectedLeagueOption,
-                  ]}
-                  onPress={() => handleLeagueSelect(league)}
-                >
-                  <View style={styles.leagueOptionContent}>
-                    <Text
-                      style={[
-                        styles.leagueOptionText,
-                        selectedLeague?.id === league.id && styles.selectedLeagueOptionText,
-                      ]}
-                    >
-                      {league.name}
-                    </Text>
-                    {league.code && (
-                      <Text style={styles.leagueOptionCode}>{league.code}</Text>
-                    )}
-                  </View>
-                  {selectedLeague?.id === league.id && (
-                    <MaterialCommunityIcons name="check" size={20} color={COLORS.darkGrey} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          <View style={styles.leagueCurrentCard}>
-            {selectedLeague ? (
-              <View style={styles.leagueCurrentRow}>
-                <View style={styles.leagueCurrentMain}>
-                  <Text style={styles.leagueCurrentName}>{selectedLeague.name}</Text>
-                  {selectedLeague.code ? (
-                    <Text style={styles.leagueCurrentCode}>
-                      {String(selectedLeague.code).toUpperCase()}
-                    </Text>
-                  ) : null}
-                </View>
-                <View style={styles.leagueCurrentActions}>
-                  <TouchableOpacity
-                    style={styles.leagueInlineIconButton}
-                    onPress={() => setShowShareLeagueModal(true)}
-                    accessibilityLabel="Share league"
-                    accessibilityRole="button"
-                  >
-                    <MaterialCommunityIcons name="share-variant" size={22} color={COLORS.darkGrey} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.leagueLeaveIconButton,
-                      (leavingLeague || loading) && styles.leagueLeaveIconButtonDisabled,
-                    ]}
-                    onPress={() => setShowLeaveLeagueModal(true)}
-                    disabled={leavingLeague || loading}
-                    accessibilityLabel="Leave league"
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.leagueLeaveMinus}>-</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.leagueEmptyCardInner}>
-                <MaterialCommunityIcons name="trophy-outline" size={36} color={COLORS.mediumGrey} />
-                <Text style={styles.leagueEmptyTitle}>No league yet</Text>
-                <Text style={styles.leagueEmptySubtext}>
-                  Tap + to create a league or join with a code.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {selectedLeague ? (
-            leagueLeaderboard.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No members in this league</Text>
-              </View>
-            ) : (
-              <View style={styles.leaderboardContainer}>
-                {leagueLeaderboard.map((user) => renderLeaderboardRow(user))}
-              </View>
-            )
-          ) : null}
-        </View>
-      )}
+          )
+        )}
+      </ScrollView>
+    </View>
 
       {/* Modals */}
       <AddFriendModal
@@ -451,21 +581,37 @@ export default function LeaderboardScreen() {
         onClose={() => {
           setShowAddFriendModal(false);
           setOpenAddFriendOnRequests(false);
+          offerNotificationsAfterSocialAction();
         }}
         currentUserId={currentUser?.id}
         currentUsername={currentUser?.username}
         onFriendAdded={loadData}
+        onFriendRemoved={(username) => {
+          setShowAddFriendModal(false);
+          loadData();
+          setFeedback({
+            title: 'Friend removed',
+            message: `${username} was removed from your friends.`,
+            tone: 'success',
+          });
+        }}
         initialTab={openAddFriendOnRequests ? 'requests' : 'search'}
       />
       <CreateLeagueModal
         visible={showCreateLeagueModal}
-        onClose={() => setShowCreateLeagueModal(false)}
+        onClose={() => {
+          setShowCreateLeagueModal(false);
+          offerNotificationsAfterSocialAction();
+        }}
         currentUserId={currentUser?.id}
         onLeagueCreated={loadData}
       />
       <JoinLeagueModal
         visible={showJoinLeagueModal}
-        onClose={() => setShowJoinLeagueModal(false)}
+        onClose={() => {
+          setShowJoinLeagueModal(false);
+          offerNotificationsAfterSocialAction();
+        }}
         currentUserId={currentUser?.id}
         onJoined={loadData}
       />
@@ -532,9 +678,7 @@ export default function LeaderboardScreen() {
             </View>
 
             <Text style={styles.leaveLeagueBody}>
-              {selectedLeague
-                ? `You will leave "${selectedLeague.name}" and disappear from its leaderboard until you join again.`
-                : ''}
+              {selectedLeague ? leaveLeagueMessage(selectedLeague, leagueLeaderboard, currentUser?.id) : ''}
             </Text>
 
             <View style={styles.leaveLeagueActions}>
@@ -571,7 +715,15 @@ export default function LeaderboardScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+
+      <AppDialogModal
+        visible={!!feedback}
+        title={feedback?.title ?? ''}
+        message={feedback?.message ?? ''}
+        tone={feedback?.tone ?? 'success'}
+        onClose={() => setFeedback(null)}
+      />
+    </>
   );
 }
 
@@ -580,9 +732,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  contentContainer: {
-    padding: 20,
+  fixedChrome: {
+    paddingHorizontal: 20,
     paddingTop: 40,
+  },
+  membersScroll: {
+    flex: 1,
+  },
+  membersScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    flexGrow: 1,
   },
   contentContainerLoggedOut: {
     padding: 20,
@@ -674,9 +834,6 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: COLORS.darkGrey,
   },
-  tabContent: {
-    marginBottom: 20,
-  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -701,7 +858,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: COLORS.divider,
   },
@@ -744,11 +901,12 @@ const styles = StyleSheet.create({
     borderColor: COLORS.divider,
   },
   leagueLeaveIconButton: {
-    width: 44,
     height: 44,
+    paddingHorizontal: 14,
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: COLORS.divider,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: COLORS.white,
@@ -756,11 +914,26 @@ const styles = StyleSheet.create({
   leagueLeaveIconButtonDisabled: {
     opacity: 0.5,
   },
-  leagueLeaveMinus: {
-    fontSize: 26,
+  emptyActionButton: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: COLORS.amber,
+  },
+  emptyActionText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  leagueLeaveText: {
+    marginLeft: 4,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.errorRed,
-    lineHeight: 28,
   },
   leagueEmptyCardInner: {
     paddingVertical: 4,

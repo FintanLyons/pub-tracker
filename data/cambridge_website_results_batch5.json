@@ -1,0 +1,155 @@
+[
+  {
+    "id": "way/234005325",
+    "name": "The Bell Inn",
+    "search_query": "\"The Bell Inn\" pub Cambridge CB21",
+    "suggested_website": "https://thebellinnbalsham.com/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Balsham village pub at 2 West Wickham Road CB21 4DZ; official site with menu PDF and phone 01223 892999 matching OSM."
+  },
+  {
+    "id": "way/234094833",
+    "name": "The Black Bull",
+    "search_query": "\"The Black Bull\" pub Cambridge CB21",
+    "suggested_website": "https://blackbull-balsham.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Grade II listed gastropub/inn at 27 High Street Balsham CB21 4DJ; phone 01223 893844 matches OSM."
+  },
+  {
+    "id": "way/338544409",
+    "name": "Three Horseshoes",
+    "search_query": "\"Three Horseshoes\" pub Cambridge South Street CB23",
+    "suggested_website": "https://www.threehorseshoescomberton.co.uk/",
+    "confidence": 0.85,
+    "alternates": [],
+    "notes": "Comberton pub at 22 South Street CB23 7DZ; official Wix site (distinct from Madingley Three Horseshoes at threehorseshoesmadingley.co.uk)."
+  },
+  {
+    "id": "way/349728016",
+    "name": "White Horse",
+    "search_query": "\"White Horse\" pub Cambridge Longstanton Road CB24",
+    "suggested_website": "https://www.whitehorse-oakington.co.uk/",
+    "confidence": 0.92,
+    "alternates": ["https://www.twho.co.uk/"],
+    "notes": "Oakington village pub at 28 Longstanton Road CB24 3AB; twho.co.uk redirects to whitehorse-oakington.co.uk."
+  },
+  {
+    "id": "way/369262851",
+    "name": "Black Horse",
+    "search_query": "\"Black Horse\" pub Cambridge CB24",
+    "suggested_website": "https://theblackhorserampton.co.uk/",
+    "confidence": 0.9,
+    "alternates": ["https://www.theblackhorserampton.co.uk/"],
+    "notes": "Rampton village pub at 6 High Street CB24 8QE; coordinates match Rampton area (calc_postcode CB24 8PR)."
+  },
+  {
+    "id": "way/372486548",
+    "name": "Six Bells",
+    "search_query": "\"Six Bells\" pub Cambridge Covent Garden CB1",
+    "suggested_website": "https://sixbellspub.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "City pub at 11 Covent Garden CB1 2HS off Mill Road; official site lists address and phone 01223 355559."
+  },
+  {
+    "id": "way/477382783",
+    "name": "White Horse Inn",
+    "search_query": "\"White Horse Inn\" pub Cambridge Market Street CB24",
+    "suggested_website": "https://www.thewhitehorseswavesey.com/",
+    "confidence": 0.7,
+    "alternates": [],
+    "notes": "Swavesey pub at 1 Market Street CB24 4QG; former official domain (Pubs Galore/Wikidata) but site returned 503 and pub closed long-term March 2026."
+  },
+  {
+    "id": "way/490373509",
+    "name": "Golden Ball Inn",
+    "search_query": "\"Golden Ball Inn\" pub Cambridge High Street CB23",
+    "suggested_website": "https://www.goldenballhotel.co.uk/",
+    "confidence": 0.6,
+    "alternates": [],
+    "notes": "Boxworth pub at 35 High Street CB23 4LY; goldenballhotel.co.uk was the listed official site but appears offline and pub closed long-term since June 2025."
+  },
+  {
+    "id": "way/561109559",
+    "name": "White Horse",
+    "search_query": "\"White Horse\" pub Cambridge CB22",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "Foxton village pub at 45 High Street CB22 6RP; CAMRA and Pubs Galore report no known official website (Facebook only)."
+  },
+  {
+    "id": "way/616021928",
+    "name": "The Plough",
+    "search_query": "\"The Plough\" pub Cambridge High Street CB22",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "Great Shelford pub at 2 High Street CB22 5EH; no standalone website found; Visit South Cambs directs to Facebook for menus/hours."
+  },
+  {
+    "id": "way/617704032",
+    "name": "The Greyhound",
+    "search_query": "\"The Greyhound\" pub Cambridge CB22",
+    "suggested_website": "https://thegreyhoundsawston.co.uk/",
+    "confidence": 0.65,
+    "alternates": ["https://greyhoundsawston.co.uk/"],
+    "notes": "Sawston pub at 2 High Street CB22 3BG; domain listed in business directories and CAMRA email thegreyhound@sawston, but site did not load during verification."
+  },
+  {
+    "id": "way/619000773",
+    "name": "Tickell Arms",
+    "search_query": "\"Tickell Arms\" pub Cambridge North Road CB22",
+    "suggested_website": "https://thetickellarms.co.uk/",
+    "confidence": 0.93,
+    "alternates": ["https://www.cambscuisine.com/the-tickell-whittlesford"],
+    "notes": "Whittlesford pub/restaurant at 1 North Road CB22 4NZ; Cambscuisine group venue with active official site."
+  },
+  {
+    "id": "way/661740178",
+    "name": "Duke of Wellington",
+    "search_query": "\"Duke of Wellington\" pub Cambridge Church Street CB24",
+    "suggested_website": "",
+    "confidence": 0.0,
+    "alternates": [],
+    "notes": "Willingham pub at 55 Church Street CB24 5HS; Pubs Galore and CAMRA confirm no official website (Facebook page only)."
+  },
+  {
+    "id": "way/945508474",
+    "name": "The Old Red Lion",
+    "search_query": "\"The Old Red Lion\" pub Cambridge Linton Road CB21",
+    "suggested_website": "https://www.theoldredlion.co.uk/",
+    "confidence": 0.93,
+    "alternates": [],
+    "notes": "Horseheath pub/inn on Linton Road CB21 4QF; official site with food, rooms and contact details."
+  },
+  {
+    "id": "way/1115730232",
+    "name": "White Swan",
+    "search_query": "\"White Swan\" pub Cambridge Main Street CB25",
+    "suggested_website": "https://thewhiteswanquy.com/",
+    "confidence": 0.9,
+    "alternates": [],
+    "notes": "Stow-cum-Quy freehouse at 9 Main Street CB25 9AB; official site matches address."
+  },
+  {
+    "id": "way/1115734363",
+    "name": "The Hop Bind",
+    "search_query": "\"The Hop Bind\" pub Cambridge High Street CB24",
+    "suggested_website": "https://www.thehopbind.co.uk/",
+    "confidence": 0.92,
+    "alternates": [],
+    "notes": "Cottenham coaching inn at 212 High Street CB24 8RZ; active official site."
+  },
+  {
+    "id": "way/1426256714",
+    "name": "Royal Oak",
+    "search_query": "\"Royal Oak\" pub Cambridge West Green CB22",
+    "suggested_website": "https://theroyaloakbarrington.co.uk/",
+    "confidence": 0.93,
+    "alternates": ["https://www.cambscuisine.com/the-royal-oak-barrington"],
+    "notes": "Barrington pub at 31 West Green CB22 7RZ; Cambscuisine venue with verified active official site."
+  }
+]

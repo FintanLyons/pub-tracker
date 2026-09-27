@@ -6,54 +6,46 @@ import { Provider as PaperProvider } from 'react-native-paper';
 import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ErrorBoundary from './components/ErrorBoundary';
-import OfflineOverlay from './components/OfflineOverlay';
+import OfflineBanner from './components/OfflineBanner';
+import ConnectionErrorScreen from './components/ConnectionErrorScreen';
 import TabNavigator from './navigation/TabNavigator';
 import AuthScreen from './screens/AuthScreen';
 import ChooseUsernameScreen from './screens/ChooseUsernameScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AppAlertProvider } from './contexts/AppAlertContext';
 import { NetworkProvider } from './contexts/NetworkContext';
 import { UserStatsProvider } from './contexts/UserStatsContext';
 import { LocationProvider } from './contexts/LocationContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { COLORS } from './constants/theme';
 import { isValidUsernameFormat } from './services/SecureAuthService';
 import {
   installNotificationPresentationHandler,
   registerPushNotificationsForUser,
 } from './services/PushNotificationService';
+import { navigationRef } from './services/notificationNavigation';
+import { promiseWithTimeout } from './utils/promiseWithTimeout';
+
+/** Avoid infinite spinner if AsyncStorage read hangs (corrupt / full storage on device). */
+const ONBOARDING_READ_TIMEOUT_MS = 5000;
 
 function onboardingKeyForUser(userId) {
   return `hasSeenOnboarding:${userId}`;
 }
 
 /**
- * Choose username before onboarding/tabs when:
- * - New signup set app_username_chosen === false in auth metadata, or
- * - DB username missing/empty, or
- * - DB username is not a valid app handle (common trigger placeholders e.g. email local-part with dots).
- *
- * If metadata is still false but public.users already has a valid handle (e.g. metadata sync deferred),
- * do not block — avoids spinner after successful UPDATE.
+ * Choose username before onboarding/tabs when the profile has none (every new account —
+ * the sign-up trigger leaves it NULL) or an invalid legacy handle (e.g. containing dots).
  */
 function needsUsername(user) {
   if (!user) return false;
-
-  const raw = user.username;
-  const trimmed = raw == null ? '' : String(raw).trim();
-  const hasValidHandle = trimmed !== '' && isValidUsernameFormat(trimmed);
-
-  if (user.appUsernameChosen === false) {
-    if (hasValidHandle) return false;
-    return true;
-  }
-
-  if (trimmed === '') return true;
-  if (!isValidUsernameFormat(trimmed)) return true;
-  return false;
+  const trimmed = String(user.username ?? '').trim();
+  return !isValidUsernameFormat(trimmed);
 }
 
 function AppContent() {
-  const { user, loading, refreshUser } = useAuth();
+  const { user, loading, connectionError, retryConnection, refreshUser } = useAuth();
   /** null = still reading storage; true/false = done for current user */
   const [userOnboardingDone, setUserOnboardingDone] = useState(null);
 
@@ -68,13 +60,28 @@ function AppContent() {
   useEffect(() => {
     if (!user?.id) {
       setUserOnboardingDone(null);
-      return;
+      return undefined;
     }
-    const uid = user.id;
-    const key = onboardingKeyForUser(uid);
-    AsyncStorage.getItem(key).then((v) => {
-      setUserOnboardingDone(v === 'true');
-    });
+    let cancelled = false;
+    const key = onboardingKeyForUser(user.id);
+
+    promiseWithTimeout(
+      AsyncStorage.getItem(key),
+      ONBOARDING_READ_TIMEOUT_MS,
+      'onboarding flag read',
+    )
+      .then((v) => {
+        if (!cancelled) setUserOnboardingDone(v === 'true');
+      })
+      .catch((err) => {
+        console.warn('App: onboarding flag read failed', err?.message ?? err);
+        // Prefer loading the app over blocking on a stuck flag read.
+        if (!cancelled) setUserOnboardingDone(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   /**
@@ -92,11 +99,25 @@ function AppContent() {
     return () => sub.remove();
   }, [user?.id]);
 
+  /**
+   * Straight after the location prompt: ask for notifications. The OS only shows its
+   * prompt while the answer is undecided (iOS: once ever), so later launches just
+   * register the token if allowed. Leaderboard still offers it for anyone who skipped.
+   */
+  const askForNotifications = useCallback(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    void registerPushNotificationsForUser(user.id, { prompt: true });
+  }, [user?.id]);
+
   const completeOnboarding = useCallback(async () => {
     if (!user?.id) return;
-    const key = onboardingKeyForUser(user.id);
-    await AsyncStorage.setItem(key, 'true');
     setUserOnboardingDone(true);
+    try {
+      await AsyncStorage.setItem(onboardingKeyForUser(user.id), 'true');
+    } catch (err) {
+      // Worst case onboarding shows again next launch — never block the user here.
+      console.warn('App: onboarding flag write failed', err?.message ?? err);
+    }
   }, [user?.id]);
 
   if (loading) {
@@ -107,12 +128,16 @@ function AppContent() {
     );
   }
 
+  if (!user && connectionError) {
+    return <ConnectionErrorScreen onRetry={retryConnection} />;
+  }
+
   if (!user) {
     return (
       <PaperProvider>
         <View style={styles.appContainer}>
           <AuthScreen onAuthSuccess={refreshUser} />
-          <OfflineOverlay />
+          <OfflineBanner />
         </View>
       </PaperProvider>
     );
@@ -123,7 +148,7 @@ function AppContent() {
       <PaperProvider>
         <View style={styles.appContainer}>
           <ChooseUsernameScreen />
-          <OfflineOverlay />
+          <OfflineBanner />
         </View>
       </PaperProvider>
     );
@@ -145,15 +170,17 @@ function AppContent() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <PaperProvider>
         <View style={styles.appContainer}>
-          <LocationProvider userId={user.id}>
+          <LocationProvider userId={user.id} onPermissionAnswered={askForNotifications}>
             <UserStatsProvider userId={user.id}>
-              <TabNavigator />
+              <ToastProvider>
+                <TabNavigator />
+              </ToastProvider>
             </UserStatsProvider>
           </LocationProvider>
-          <OfflineOverlay />
+          <OfflineBanner aboveTabBar />
         </View>
       </PaperProvider>
     </NavigationContainer>
@@ -172,7 +199,9 @@ export default function App() {
       <ErrorBoundary fallbackMessage="The app encountered an unexpected error. Please restart.">
         <NetworkProvider>
           <AuthProvider>
-            <AppContent />
+            <AppAlertProvider>
+              <AppContent />
+            </AppAlertProvider>
           </AuthProvider>
         </NetworkProvider>
       </ErrorBoundary>

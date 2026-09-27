@@ -8,15 +8,16 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Alert,
   Share,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { searchUsers } from '../services/UserService';
-import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejectFriendRequest, getFriends, removeFriend } from '../services/FriendsService';
+import { sendFriendRequest, getPendingFriendRequests, acceptFriendRequest, rejectFriendRequest, getFriends, removeFriend, getFriendshipStatusMap } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
 import { APP_DISPLAY_NAME, buildFriendInviteMessage } from '../constants/app';
 import UserAvatar from './UserAvatar';
+import { AppDialogOverlay } from './AppDialog';
+import { useAppAlert } from '../contexts/AppAlertContext';
 
 export default function AddFriendModal({
   visible,
@@ -24,8 +25,10 @@ export default function AddFriendModal({
   currentUserId,
   currentUsername,
   onFriendAdded,
+  onFriendRemoved,
   initialTab = 'search',
 }) {
+  const { showAppAlert } = useAppAlert();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -33,15 +36,31 @@ export default function AddFriendModal({
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab); // 'search', 'requests', or 'friends'
   const [feedback, setFeedback] = useState(null); // { title, message, tone: 'success' | 'error' }
+  const [removeConfirm, setRemoveConfirm] = useState(null); // { friendId, friendUsername }
+  const [removingFriend, setRemovingFriend] = useState(false);
   const searchTimeoutRef = useRef(null);
+  /** otherUserId → { kind: 'friends' | 'sent' | 'received', friendshipId } for search results. */
+  const [relationships, setRelationships] = useState(() => new Map());
+
+  const loadRelationships = useCallback(async () => {
+    if (!currentUserId) return;
+    try {
+      setRelationships(await getFriendshipStatusMap(currentUserId));
+    } catch (error) {
+      console.warn('AddFriendModal: loading friendship statuses failed', error?.message ?? error);
+    }
+  }, [currentUserId]);
 
   useEffect(() => {
     if (visible) {
       loadPendingRequests();
       loadFriends();
+      loadRelationships();
       setActiveTab(initialTab);
     } else {
       setFeedback(null);
+      setRemoveConfirm(null);
+      setRemovingFriend(false);
     }
   }, [visible, initialTab]);
 
@@ -66,7 +85,7 @@ export default function AddFriendModal({
       setSearchResults(filtered);
     } catch (error) {
       console.error('Error searching users:', error);
-      Alert.alert('Error', 'Failed to search users');
+      showAppAlert({ title: 'Error', message: 'Failed to search users', tone: 'error' });
     } finally {
       setLoading(false);
     }
@@ -111,21 +130,22 @@ export default function AddFriendModal({
 
   const handleSendRequest = async (friendId) => {
     try {
-      await sendFriendRequest(currentUserId, friendId);
-      showFeedback('Request sent', 'Your friend request was sent.');
-      setSearchQuery('');
-      setSearchResults([]);
-    } catch (error) {
-      console.error('Error sending friend request:', error);
-      if (String(error.message || '').includes('already exists')) {
+      const result = await sendFriendRequest(currentUserId, friendId);
+      if (result?.alreadyExists) {
         showFeedback(
-          'Could not send',
+          'Already connected',
           'A request already exists or you are already friends.',
-          'error',
         );
       } else {
-        showFeedback('Could not send', 'Failed to send friend request. Please try again.', 'error');
+        showFeedback('Request sent', 'Your friend request was sent.');
       }
+      // Clear the search so the next friend can be typed straight away.
+      setSearchQuery('');
+      setSearchResults([]);
+      loadRelationships();
+    } catch (error) {
+      console.error('Error sending friend request:', error);
+      showFeedback('Could not send', 'Failed to send friend request. Please try again.', 'error');
     }
   };
 
@@ -134,6 +154,7 @@ export default function AddFriendModal({
       await acceptFriendRequest(friendshipId);
       showFeedback("You're friends now", 'Friend request accepted.');
       loadPendingRequests();
+      loadRelationships();
       if (onFriendAdded) onFriendAdded();
     } catch (error) {
       console.error('Error accepting friend request:', error);
@@ -146,6 +167,9 @@ export default function AddFriendModal({
       await rejectFriendRequest(friendshipId);
       showFeedback('Request declined', 'You declined this friend request.');
       loadPendingRequests();
+      loadRelationships();
+      // Reloads the Leaderboard too, so its requests badge drops the declined one.
+      if (onFriendAdded) onFriendAdded();
     } catch (error) {
       console.error('Error rejecting friend request:', error);
       showFeedback('Could not decline', 'Failed to decline friend request. Please try again.', 'error');
@@ -162,29 +186,42 @@ export default function AddFriendModal({
     }
   };
 
-  const handleRemoveFriend = async (friendId, friendUsername) => {
-    Alert.alert(
-      'Remove Friend',
-      `Remove ${friendUsername} from your friends?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await removeFriend(currentUserId, friendId);
-              Alert.alert('Success', 'Friend removed');
-              loadFriends();
-              if (onFriendAdded) onFriendAdded(); // Refresh leaderboard
-            } catch (error) {
-              console.error('Error removing friend:', error);
-              Alert.alert('Error', 'Failed to remove friend');
-            }
-          }
-        }
-      ]
-    );
+  const handleRemoveFriend = (friendId, friendUsername) => {
+    setRemoveConfirm({ friendId, friendUsername });
+  };
+
+  const cancelRemoveFriend = () => {
+    if (!removingFriend) setRemoveConfirm(null);
+  };
+
+  const confirmRemoveFriend = async () => {
+    if (!removeConfirm || !currentUserId || removingFriend) return;
+
+    const { friendId, friendUsername } = removeConfirm;
+    setRemovingFriend(true);
+    try {
+      await removeFriend(currentUserId, friendId);
+      setRemoveConfirm(null);
+      loadFriends();
+      if (onFriendRemoved) {
+        onFriendRemoved(friendUsername);
+      } else {
+        showFeedback(
+          'Friend removed',
+          `${friendUsername} was removed from your friends.`,
+        );
+      }
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      setRemoveConfirm(null);
+      showFeedback(
+        'Could not remove',
+        'Failed to remove friend. Please try again.',
+        'error',
+      );
+    } finally {
+      setRemovingFriend(false);
+    }
   };
 
   const renderSearchResult = ({ item }) => (
@@ -196,14 +233,63 @@ export default function AddFriendModal({
           Joined {new Date(item.created_at).toLocaleDateString()}
         </Text>
       </View>
+      {renderSearchResultAction(item)}
+    </View>
+  );
+
+  /** Friends / Request sent / Accept / Add — instead of a dead-end "Already connected". */
+  const renderSearchResultAction = (item) => {
+    const relation = relationships.get(item.id);
+    if (relation?.kind === 'friends') {
+      return (
+        <View style={styles.statusPill} accessibilityLabel={`${item.username} is your friend`}>
+          <MaterialCommunityIcons name="account-check" size={16} color={COLORS.successGreen} />
+          <Text style={styles.statusPillText}>Friends</Text>
+        </View>
+      );
+    }
+    if (relation?.kind === 'sent') {
+      return (
+        <View style={styles.statusPill} accessibilityLabel={`Friend request sent to ${item.username}`}>
+          <MaterialCommunityIcons name="clock-outline" size={16} color={COLORS.mediumGrey} />
+          <Text style={styles.statusPillText}>Request sent</Text>
+        </View>
+      );
+    }
+    if (relation?.kind === 'received') {
+      // Same accept / decline buttons as the Requests tab.
+      return (
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.acceptButton}
+            onPress={() => handleAcceptRequest(relation.friendshipId)}
+            accessibilityRole="button"
+            accessibilityLabel={`Accept friend request from ${item.username}`}
+          >
+            <MaterialCommunityIcons name="check" size={24} color={COLORS.white} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.rejectButton}
+            onPress={() => handleRejectRequest(relation.friendshipId)}
+            accessibilityRole="button"
+            accessibilityLabel={`Decline friend request from ${item.username}`}
+          >
+            <MaterialCommunityIcons name="close" size={24} color={COLORS.white} />
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
       <TouchableOpacity
         style={styles.addButton}
         onPress={() => handleSendRequest(item.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Send a friend request to ${item.username}`}
       >
-        <MaterialCommunityIcons name="account-plus" size={24} color="#FFFFFF" />
+        <MaterialCommunityIcons name="account-plus" size={24} color={COLORS.white} />
       </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   const renderPendingRequest = ({ item }) => (
     <View style={styles.requestItem}>
@@ -249,13 +335,18 @@ export default function AddFriendModal({
     </View>
   );
 
+  const handleModalRequestClose = () => {
+    if (feedback) dismissFeedback();
+    else if (removeConfirm) cancelRemoveFriend();
+    else onClose();
+  };
+
   return (
-    <>
     <Modal
       visible={visible}
       animationType="slide"
       transparent={true}
-      onRequestClose={onClose}
+      onRequestClose={handleModalRequestClose}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
@@ -411,59 +502,58 @@ export default function AddFriendModal({
             </>
           )}
         </View>
-      </View>
-    </Modal>
 
-    <Modal
-      visible={!!feedback}
-      animationType="fade"
-      transparent
-      onRequestClose={dismissFeedback}
-    >
-      <View style={styles.feedbackOverlay}>
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={dismissFeedback}
-          accessibilityLabel="Dismiss"
-        />
-        <View style={styles.feedbackCard}>
-          <View style={styles.feedbackHeader}>
-            <Text style={styles.feedbackTitle}>{feedback?.title}</Text>
+        {removeConfirm && !feedback ? (
+          <View style={styles.confirmLayer} pointerEvents="box-none">
             <TouchableOpacity
-              onPress={dismissFeedback}
-              style={styles.feedbackClose}
-              accessibilityLabel="Close"
-              accessibilityRole="button"
-            >
-              <MaterialCommunityIcons name="close" size={22} color={COLORS.darkGrey} />
-            </TouchableOpacity>
-          </View>
-          {feedback?.tone === 'success' ? (
-            <View style={styles.feedbackIconWrap}>
-              <MaterialCommunityIcons name="check-circle" size={48} color={COLORS.amber} />
+              style={styles.confirmBackdrop}
+              activeOpacity={1}
+              onPress={cancelRemoveFriend}
+              accessibilityLabel="Dismiss"
+            />
+            <View style={styles.confirmCard}>
+              <Text style={styles.confirmTitle}>Remove friend?</Text>
+              <Text style={styles.confirmBody}>
+                Remove {removeConfirm.friendUsername} from your friends?
+              </Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, styles.confirmBtnSecondary]}
+                  onPress={cancelRemoveFriend}
+                  disabled={removingFriend}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.confirmBtnTextSecondary}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmBtn, styles.confirmBtnDanger]}
+                  onPress={confirmRemoveFriend}
+                  disabled={removingFriend}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                >
+                  {removingFriend ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmBtnTextDanger}>Remove</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          ) : (
-            <View style={styles.feedbackIconWrap}>
-              <MaterialCommunityIcons name="alert-circle-outline" size={48} color={COLORS.errorRed} />
-            </View>
-          )}
-          <Text style={styles.feedbackBody}>{feedback?.message}</Text>
-          <View style={styles.feedbackActions}>
-            <TouchableOpacity
-              style={styles.feedbackPrimaryBtn}
-              onPress={dismissFeedback}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="OK"
-            >
-              <Text style={styles.feedbackPrimaryBtnText}>OK</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        ) : null}
+
+        {feedback ? (
+          <AppDialogOverlay
+            title={feedback.title}
+            message={feedback.message}
+            tone={feedback.tone}
+            onClose={dismissFeedback}
+          />
+        ) : null}
       </View>
     </Modal>
-    </>
   );
 }
 
@@ -472,6 +562,76 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+  },
+  confirmLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    zIndex: 10,
+    elevation: 24,
+  },
+  confirmBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkGrey,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  confirmBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: COLORS.accentGrey,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+  },
+  confirmBtn: {
+    flex: 1,
+    minHeight: 48,
+    marginHorizontal: 5,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  confirmBtnSecondary: {
+    backgroundColor: COLORS.lightGrey,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.divider,
+  },
+  confirmBtnDanger: {
+    backgroundColor: COLORS.errorRed,
+  },
+  confirmBtnTextSecondary: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
+  confirmBtnTextDanger: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
@@ -644,6 +804,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.mediumGrey,
   },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+  },
+  statusPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkGrey,
+  },
   addButton: {
     width: 40,
     height: 40,
@@ -693,80 +867,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.mediumGrey,
     marginTop: 8,
-    textAlign: 'center',
-  },
-  feedbackOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  feedbackCard: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 16,
-  },
-  feedbackHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.divider,
-  },
-  feedbackTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.darkGrey,
-    paddingRight: 8,
-  },
-  feedbackClose: {
-    padding: 6,
-    marginRight: -2,
-  },
-  feedbackIconWrap: {
-    alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  feedbackBody: {
-    paddingHorizontal: 22,
-    paddingTop: 8,
-    paddingBottom: 20,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '400',
-    color: COLORS.accentGrey,
-    textAlign: 'center',
-  },
-  feedbackActions: {
-    paddingHorizontal: 22,
-    paddingBottom: 22,
-  },
-  feedbackPrimaryBtn: {
-    minHeight: 48,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.amber,
-    alignSelf: 'stretch',
-  },
-  feedbackPrimaryBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.charcoal,
     textAlign: 'center',
   },
 });

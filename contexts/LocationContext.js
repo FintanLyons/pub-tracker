@@ -1,11 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
-import { registerPushNotificationsForUser } from '../services/PushNotificationService';
 
 const LocationContext = createContext({ location: null, isReady: false });
 
-export function LocationProvider({ children, userId }) {
+/** Accept cached fixes up to 5 minutes old for instant map centre on cold start. */
+const LAST_KNOWN_MAX_AGE_MS = 300000;
+
+/**
+ * `onPermissionAnswered` runs once the location prompt has been answered (or skipped
+ * because it was answered before) — App uses it to ask for notifications next, so the
+ * two system prompts come one after the other rather than on top of each other.
+ */
+export function LocationProvider({ children, userId, onPermissionAnswered }) {
   const [location, setLocation] = useState(null);
+  const onPermissionAnsweredRef = useRef(onPermissionAnswered);
+  onPermissionAnsweredRef.current = onPermissionAnswered;
   const [isReady, setIsReady] = useState(false);
   const hasFreshFix = useRef(false);
 
@@ -17,34 +26,37 @@ export function LocationProvider({ children, userId }) {
 
     const resolve = async () => {
       try {
-        const locationPromise = Location.requestForegroundPermissionsAsync().catch((err) => {
+        const { status } = await Location.requestForegroundPermissionsAsync().catch((err) => {
           console.warn('LocationContext: location permission failed', err?.message);
           return { status: null };
         });
 
-        const pushPromise =
-          userId && !cancelled
-            ? registerPushNotificationsForUser(userId).catch((err) => {
-                console.warn('LocationContext: push registration failed', err?.message);
-              })
-            : Promise.resolve();
+        if (!cancelled) onPermissionAnsweredRef.current?.();
 
-        const [loc] = await Promise.all([locationPromise, pushPromise]);
-        const locationStatus = loc?.status ?? null;
-
-        if (locationStatus !== 'granted' || cancelled) return;
+        if (status !== 'granted' || cancelled) return;
 
         try {
-          const last = await Location.getLastKnownPositionAsync();
+          const last = await Location.getLastKnownPositionAsync({
+            maxAge: LAST_KNOWN_MAX_AGE_MS,
+          });
           if (last && !cancelled && !hasFreshFix.current) {
             setLocation({
               latitude: last.coords.latitude,
               longitude: last.coords.longitude,
             });
           }
+        } catch (err) {
+          console.warn('LocationContext: getLastKnownPosition failed', err?.message);
+        }
 
+        // Do not block map launch on a fresh Balanced GPS fix — refine in background.
+        if (!cancelled) setIsReady(true);
+
+        if (cancelled) return;
+
+        try {
           const fresh = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
+            accuracy: Location.Accuracy.Low,
           });
           if (!cancelled) {
             hasFreshFix.current = true;
@@ -54,7 +66,7 @@ export function LocationProvider({ children, userId }) {
             });
           }
         } catch (err) {
-          console.warn('LocationContext: failed to resolve position', err?.message);
+          console.warn('LocationContext: background position refine failed', err?.message);
         }
       } finally {
         if (!cancelled) setIsReady(true);

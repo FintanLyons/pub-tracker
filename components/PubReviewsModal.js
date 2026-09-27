@@ -135,6 +135,7 @@ function ReviewForm({
   onSubmit,
   onDelete,
   onCancel,
+  errorMessage,
   style,
 }) {
   return (
@@ -156,6 +157,7 @@ function ReviewForm({
         returnKeyType="done"
         blurOnSubmit
       />
+      {errorMessage ? <Text style={styles.formError}>{errorMessage}</Text> : null}
       <View style={styles.formActions}>
         <TouchableOpacity
           style={[styles.formButton, styles.formCancel]}
@@ -414,6 +416,8 @@ export default function PubReviewsModal({
   pubName,
   reviews = [],
   reviewsLoading = false,
+  reviewsLoadFailed = false,
+  onRetryLoadReviews,
   userReview = null,
   userId = null,
   avgRating = null,
@@ -424,9 +428,11 @@ export default function PubReviewsModal({
   const [draftRating, setDraftRating] = useState(0);
   const [draftBody, setDraftBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [formMode, setFormMode] = useState(null);
 
   useEffect(() => {
+    setSubmitError(null);
     if (!visible) {
       setFormMode(null);
       return;
@@ -492,9 +498,13 @@ export default function PubReviewsModal({
   const handleSubmit = async () => {
     if (!onSubmitReview || draftRating === 0) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await onSubmitReview(draftRating, draftBody);
       setFormMode(null);
+    } catch (e) {
+      // Keep the form (and the user's text) open so they can retry.
+      setSubmitError(e?.message || "Couldn't save your review. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -503,11 +513,14 @@ export default function PubReviewsModal({
   const handleDelete = async () => {
     if (!onDeleteReview) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await onDeleteReview();
       setDraftRating(0);
       setDraftBody('');
       setFormMode(null);
+    } catch (e) {
+      setSubmitError(e?.message || "Couldn't delete your review. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -523,7 +536,11 @@ export default function PubReviewsModal({
       onBodyChange={setDraftBody}
       onSubmit={handleSubmit}
       onDelete={handleDelete}
-      onCancel={closeForm}
+      onCancel={() => {
+        setSubmitError(null);
+        closeForm();
+      }}
+      errorMessage={submitError}
     />
   );
 
@@ -613,6 +630,14 @@ export default function PubReviewsModal({
                   color={COLORS.amber}
                   style={styles.listLoader}
                 />
+              ) : reviewsLoadFailed ? (
+                <TouchableOpacity
+                  onPress={onRetryLoadReviews}
+                  disabled={!onRetryLoadReviews}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.emptyReviews}>Couldn't load reviews. Tap to retry.</Text>
+                </TouchableOpacity>
               ) : sortedReviews.length === 0 ? (
                 <Text style={styles.emptyReviews}>No reviews yet. Be the first!</Text>
               ) : (
@@ -819,6 +844,11 @@ const styles = StyleSheet.create({
     color: COLORS.darkGrey,
     minHeight: 64,
     textAlignVertical: 'top',
+  },
+  formError: {
+    color: COLORS.errorRed,
+    fontSize: 13,
+    marginTop: 8,
   },
   formActions: {
     flexDirection: 'row',

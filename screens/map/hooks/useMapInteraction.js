@@ -1,12 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard } from 'react-native';
-import { Dimensions } from 'react-native';
+import { AppState, Dimensions, Keyboard } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { searchPubsByName, togglePubFavorite, togglePubVisited } from '../../../services/PubService';
+import {
+  fetchPubById,
+  reloadVisitedFavoriteSets,
+  searchPubsByName,
+  setPubFavorite,
+  setPubVisited,
+} from '../../../services/PubService';
+import { useToast } from '../../../contexts/ToastContext';
+import {
+  markVisitSaved,
+  pruneVisitChanges,
+  recordVisitChange,
+} from '../../../utils/pendingVisitChanges';
 import { formatDistrictWithCode, getPostcodeDistrictDisplayName } from '../../../utils/postcodeDistrictDisplayNames';
 import { distanceMeters } from '../../../utils/geo';
-import { getFeatureBounds } from '../layerUtils';
+import { getFeatureBounds, ZOOM_LEVELS } from '../layerUtils';
 import {
+  approximateBoundsFromCenter,
   boundsContain,
   expandBounds,
   findDistrictFeatureBySearchQuery,
@@ -14,8 +26,14 @@ import {
   findFeatureByPostcodeArea,
   findFeatureContainingCoordinate,
 } from '../mapUtils';
-import postcodeDistrictGeojson from '../../../data/geo/london_postcode_districts.min.json';
-import postcodeAreaOutlinesGeojson from '../../../data/geo/london_postcode_areas.min.json';
+import {
+  postcodeAreaOutlinesGeojson,
+  postcodeDistrictGeojson,
+} from '../../../data/geo/supportedPostcodeGeo';
+
+const SAVE_FAILED_MESSAGE = "Couldn't save — check your connection and try again.";
+/** Wait for taps to settle before recomputing stats (one refresh for several taps). */
+const STATS_REFRESH_DELAY_MS = 1200;
 
 /**
  * Combined search + selection + deep-link hook.
@@ -37,10 +55,13 @@ export function useMapInteraction({
   postcodeAreaSummaries,
   currentLocation,
   refreshUserStats,
+  statsAsOf,
   navigation,
   route,
 }) {
   const [selectedPub, setSelectedPub] = useState(null);
+  /** Bumped on every pub select so the sheet re-opens when the same pub is tapped again. */
+  const [pubSelectionSeq, setPubSelectionSeq] = useState(0);
   /** Map marker highlight; cleared as soon as dismiss starts (before sheet animation ends). */
   const [mapHighlightedPubId, setMapHighlightedPubId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,6 +76,7 @@ export function useMapInteraction({
   const clearedPostcodeAreaRef = useRef(null);
   const processedDistrictRef = useRef(null);
   const processedPostcodeAreaRef = useRef(null);
+  const processedSummonPubRef = useRef(null);
   const pubSearchTimeoutRef = useRef(null);
   const normalizeSearchText = useCallback((value) => String(value || '').trim().toLowerCase(), []);
   const removeLeadingThe = useCallback((value) => value.replace(/^the\s+/i, '').trim(), []);
@@ -85,6 +107,22 @@ export function useMapInteraction({
     }
     return null;
   }, [getQueryVariants]);
+  /** Map/typeahead rows carry only what markers and filters need; the card needs full details. */
+  const needsFullPubFetch = useCallback(
+    (pub) => pub?.id != null && !pub.detailsLoaded,
+    [],
+  );
+
+  const resolvePubForSelection = useCallback(async (pub) => {
+    if (!pub?.id || !needsFullPubFetch(pub)) return pub;
+    try {
+      const full = await fetchPubById(pub.id);
+      return full || pub;
+    } catch {
+      return pub;
+    }
+  }, [needsFullPubFetch]);
+
   const rankPubsForQuery = useCallback((pubs, rawQuery, limit = 8) => {
     const ranked = (Array.isArray(pubs) ? pubs : [])
       .map((pub) => ({ pub, rank: getPubMatchRank(pub?.name, rawQuery) }))
@@ -182,7 +220,8 @@ export function useMapInteraction({
   const closeCard = useCallback((expectedPubId = null) => {
     setSelectedPub((current) => {
       if (!expectedPubId) return null;
-      return current?.id === expectedPubId ? null : current;
+      if (current?.id == null) return current;
+      return String(current.id) === String(expectedPubId) ? null : current;
     });
   }, []);
 
@@ -218,69 +257,190 @@ export function useMapInteraction({
     fitFeature(feature);
   }, [fitFeature, hasUserInteractedRef]);
 
-  const selectPub = useCallback((pub, updateSearch = true) => {
+  const focusCameraOnPub = useCallback((pub) => {
+    const lat = Number(pub?.lat);
+    const lon = Number(pub?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !cameraRef.current) return;
+
+    const targetZoom = ZOOM_LEVELS.PUB_SEARCH;
+    mapZoomRef.current = targetZoom;
+    try {
+      cameraRef.current.easeTo({
+        center: [lon, lat],
+        zoom: targetZoom,
+        duration: 700,
+        easing: 'ease',
+      });
+    } catch (err) {
+      console.warn('useMapInteraction: focusCameraOnPub failed', err?.message);
+    }
+  }, [cameraRef, mapZoomRef]);
+
+  const selectPub = useCallback((pub, updateSearch = true, focusCamera = false) => {
     if (!pub) return;
     hasUserInteractedRef.current = true;
     setSelectedDistrictName(null);
     setSelectedPostcodeArea(null);
+    setPubSelectionSeq((seq) => seq + 1);
     setSelectedPub(pub);
     setMapHighlightedPubId(pub.id);
     // Selecting a pub should focus the map/card state, not leave a sticky query.
     if (updateSearch) setSearchQuery('');
+    if (focusCamera) focusCameraOnPub(pub);
     // Server/typeahead suggestions can reference a pub not yet in viewport `allPubs`. Toggles use
     // `allPubs.find` for baseline state and map updates — without this, visited/favourite can look
     // broken until a viewport fetch adds the row (feels like "wait for load").
     if (pub.id != null) {
       setAllPubs((current) => (current.some((p) => p.id === pub.id) ? current : [...current, pub]));
     }
-  }, [hasUserInteractedRef, setAllPubs]);
+    // Open the card straight away, then fill in description / contact / photos.
+    if (pub.id != null && !pub.detailsLoaded) {
+      fetchPubById(pub.id)
+        .then((full) => {
+          if (!full) return;
+          const merge = (current) => ({
+            ...full,
+            // Keep optimistic state from taps made while details were loading.
+            isVisited: current.isVisited,
+            isFavorite: current.isFavorite,
+          });
+          setSelectedPub((current) => (current?.id === full.id ? merge(current) : current));
+          setAllPubs((current) => current.map((p) => (p.id === full.id ? merge(p) : p)));
+        })
+        .catch((err) => console.warn('useMapInteraction: loading pub details failed', err?.message ?? err));
+    }
+  }, [focusCameraOnPub, hasUserInteractedRef, setAllPubs]);
 
-  // ── Toggle callbacks (optimistic) ────────────────────────────
+  // ── Visited / favourite (optimistic, idempotent) ─────────────
 
-  const handleToggleVisited = useCallback(async (pubId) => {
-    const originalPubs = [...allPubs];
-    const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const prev =
-      selectedPub?.id === pubId
-        ? selectedPub
-        : allPubs.find((pub) => pub.id === pubId);
-    const newState = !prev?.isVisited;
+  const { showToast } = useToast();
+  const statsRefreshTimerRef = useRef(null);
+  /** Visited taps the server stats don't include yet (see utils/pendingVisitChanges). */
+  const [pendingVisitChanges, setPendingVisitChanges] = useState(() => new Map());
 
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isVisited: newState });
-    setAllPubs((current) => current.map((pub) => (
-      pub.id === pubId ? { ...pub, isVisited: newState } : pub
-    )));
+  useEffect(() => {
+    setPendingVisitChanges((current) => pruneVisitChanges(current, statsAsOf || 0));
+  }, [statsAsOf]);
+  /** `${field}:${pubId}` → sequence number of the latest tap, so stale failures don't revert newer taps. */
+  const latestWriteSeqRef = useRef(new Map());
+  const writeSeqCounterRef = useRef(0);
 
-    try {
-      await togglePubVisited(pubId);
+  useEffect(() => () => {
+    if (statsRefreshTimerRef.current) clearTimeout(statsRefreshTimerRef.current);
+  }, []);
+
+  const scheduleStatsRefresh = useCallback(() => {
+    if (statsRefreshTimerRef.current) clearTimeout(statsRefreshTimerRef.current);
+    statsRefreshTimerRef.current = setTimeout(() => {
+      statsRefreshTimerRef.current = null;
       refreshUserStats();
-    } catch {
-      setAllPubs(originalPubs);
-      if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
-    }
-  }, [allPubs, refreshUserStats, selectedPub, setAllPubs]);
+    }, STATS_REFRESH_DELAY_MS);
+  }, [refreshUserStats]);
 
-  const handleToggleFavorite = useCallback(async (pubId) => {
-    const originalPubs = [...allPubs];
-    const originalSelected = selectedPub ? { ...selectedPub } : null;
-    const prev =
-      selectedPub?.id === pubId
-        ? selectedPub
-        : allPubs.find((pub) => pub.id === pubId);
-    const newState = !prev?.isFavorite;
-
-    if (selectedPub?.id === pubId) setSelectedPub({ ...selectedPub, isFavorite: newState });
+  /** Update one flag on one pub in both the map list and the open card. */
+  const applyPubFlag = useCallback((pubId, field, value) => {
     setAllPubs((current) => current.map((pub) => (
-      pub.id === pubId ? { ...pub, isFavorite: newState } : pub
+      pub.id === pubId && pub[field] !== value ? { ...pub, [field]: value } : pub
     )));
+    setSelectedPub((current) => (
+      current?.id === pubId && current[field] !== value ? { ...current, [field]: value } : current
+    ));
+  }, [setAllPubs]);
 
-    try {
-      await togglePubFavorite(pubId);
-    } catch {
-      setAllPubs(originalPubs);
-      if (originalSelected?.id === pubId) setSelectedPub(originalSelected);
+  const setPubFlag = useCallback(async (pubId, field, desired, saveFn, pub) => {
+    const key = `${field}:${pubId}`;
+    const seq = ++writeSeqCounterRef.current;
+    latestWriteSeqRef.current.set(key, seq);
+    const isVisitField = field === 'isVisited';
+
+    if (isVisitField) {
+      setPendingVisitChanges((current) => recordVisitChange(current, {
+        pubId,
+        district: pub?.area,
+        area: pub?.postcodeArea,
+        previous: Boolean(pub?.isVisited),
+        desired,
+      }));
     }
-  }, [allPubs, selectedPub, setAllPubs]);
+    applyPubFlag(pubId, field, desired);
+    try {
+      await saveFn(pubId, desired);
+      if (isVisitField) {
+        if (latestWriteSeqRef.current.get(key) === seq) {
+          setPendingVisitChanges((current) => markVisitSaved(current, pubId, { desired, at: Date.now() }));
+        }
+        scheduleStatsRefresh();
+      }
+    } catch (err) {
+      console.warn(`useMapInteraction: saving ${field} failed`, err?.message ?? err);
+      // Only undo if no newer tap on this pub has happened since.
+      if (latestWriteSeqRef.current.get(key) === seq) {
+        applyPubFlag(pubId, field, !desired);
+        if (isVisitField) {
+          setPendingVisitChanges((current) => markVisitSaved(current, pubId, { desired: !desired, at: Date.now() }));
+          scheduleStatsRefresh();
+        }
+        showToast(SAVE_FAILED_MESSAGE);
+      }
+    } finally {
+      if (latestWriteSeqRef.current.get(key) === seq) latestWriteSeqRef.current.delete(key);
+    }
+  }, [applyPubFlag, scheduleStatsRefresh, showToast]);
+
+  const findPub = useCallback(
+    (pubId) => (selectedPub?.id === pubId ? selectedPub : allPubs.find((p) => p.id === pubId)),
+    [allPubs, selectedPub],
+  );
+
+  /**
+   * Toggle visited, or pass `visited` to set it explicitly (drinks / reviews mark a pub
+   * visited without toggling).
+   */
+  const handleToggleVisited = useCallback((pubId, visited) => {
+    const pub = findPub(pubId);
+    const desired = typeof visited === 'boolean' ? visited : !pub?.isVisited;
+    return setPubFlag(pubId, 'isVisited', desired, setPubVisited, pub);
+  }, [findPub, setPubFlag]);
+
+  const handleToggleFavorite = useCallback((pubId) => {
+    const pub = findPub(pubId);
+    return setPubFlag(pubId, 'isFavorite', !pub?.isFavorite, setPubFavorite, pub);
+  }, [findPub, setPubFlag]);
+
+  // Returning to the app: pick up visits/favourites changed on another device.
+  useEffect(() => {
+    let lastState = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const cameToForeground = lastState !== 'active' && next === 'active';
+      lastState = next;
+      if (!cameToForeground) return;
+      reloadVisitedFavoriteSets()
+        .then((sets) => {
+          if (!sets) return;
+          const pending = latestWriteSeqRef.current;
+          const sync = (pub) => {
+            if (!pub?.id) return pub;
+            const isVisited = pending.has(`isVisited:${pub.id}`) ? pub.isVisited : sets.visitedSet.has(pub.id);
+            const isFavorite = pending.has(`isFavorite:${pub.id}`) ? pub.isFavorite : sets.favoritesSet.has(pub.id);
+            return isVisited === pub.isVisited && isFavorite === pub.isFavorite
+              ? pub
+              : { ...pub, isVisited, isFavorite };
+          };
+          setAllPubs((current) => {
+            let changed = false;
+            const next = current.map((pub) => {
+              const synced = sync(pub);
+              if (synced !== pub) changed = true;
+              return synced;
+            });
+            return changed ? next : current;
+          });
+          setSelectedPub((current) => (current ? sync(current) : current));
+        })
+        .catch((err) => console.warn('useMapInteraction: visited/favourite reload failed', err?.message ?? err));
+    });
+    return () => sub.remove();
+  }, [setAllPubs]);
 
   // ── Layer press handlers ──────────────────────────────────────
 
@@ -318,27 +478,29 @@ export function useMapInteraction({
     setShowSuggestions(false);
     Keyboard.dismiss();
 
+    // Area codes (E, SW, CB…) only on an exact match — "b" must not jump to Cambridge.
     const exactArea = allPostcodeAreaNames.find((n) => n.toLowerCase() === query);
     if (exactArea) { selectPostcodeArea(exactArea, true); return; }
-    const partialArea = allPostcodeAreaNames.find((n) => n.toLowerCase().includes(query));
-    if (partialArea) { selectPostcodeArea(partialArea, true); return; }
 
     const districtMatch = findDistrictFeatureBySearchQuery(postcodeDistrictGeojson, rawQuery.trim())
-      || postcodeDistrictGeojson.features.find(
-        (feature) => feature?.properties?.name?.toLowerCase?.().includes?.(query),
-      );
+      || (query.length >= 2 && postcodeDistrictGeojson.features.find(
+        (feature) => feature?.properties?.name?.toLowerCase?.().startsWith?.(query),
+      ));
     if (districtMatch) { selectDistrict(districtMatch, true); return; }
 
     const localPubMatch = rankPubsForQuery(allPubs, rawQuery, 1)[0];
-    if (localPubMatch) { selectPub(localPubMatch, true); return; }
+    if (localPubMatch) { selectPub(localPubMatch, true, true); return; }
 
     try {
       const serverResults = await searchPubsByName(rawQuery.trim(), 1);
-      if (serverResults?.length > 0) selectPub(serverResults[0], true);
+      if (serverResults?.length > 0) {
+        const resolved = await resolvePubForSelection(serverResults[0]);
+        selectPub(resolved, true, true);
+      }
     } catch {
       // server search unavailable
     }
-  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub, rankPubsForQuery]);
+  }, [allPubs, allPostcodeAreaNames, searchQuery, selectDistrict, selectPostcodeArea, selectPub, rankPubsForQuery, resolvePubForSelection]);
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
@@ -372,11 +534,12 @@ export function useMapInteraction({
     Keyboard.dismiss();
   }, [selectDistrict]);
 
-  const handlePubSuggestionPress = useCallback((pub) => {
+  const handlePubSuggestionPress = useCallback(async (pub) => {
     setShowSuggestions(false);
     Keyboard.dismiss();
-    selectPub(pub, true);
-  }, [selectPub]);
+    const resolved = await resolvePubForSelection(pub);
+    selectPub(resolved, true, true);
+  }, [selectPub, resolvePubForSelection]);
 
   const dismissSearchSuggestions = useCallback(() => {
     setShowSuggestions(false);
@@ -388,10 +551,12 @@ export function useMapInteraction({
   // Keyboard tracking
   useEffect(() => {
     const keyboardShow = Keyboard.addListener('keyboardDidShow', (event) => {
-      setKeyboardHeight(event.endCoordinates.height);
-      const top = event.endCoordinates.screenY !== undefined
-        ? event.endCoordinates.screenY
-        : Dimensions.get('window').height - event.endCoordinates.height;
+      const end = event?.endCoordinates;
+      const height = end?.height ?? 0;
+      setKeyboardHeight(height);
+      const top = end?.screenY != null
+        ? end.screenY
+        : Dimensions.get('window').height - height;
       setKeyboardTop(top);
     });
     const keyboardHide = Keyboard.addListener('keyboardDidHide', () => {
@@ -501,12 +666,61 @@ export function useMapInteraction({
       } else if (!postcodeAreaToSearch) {
         processedPostcodeAreaRef.current = null;
       }
-    }, [route.params, selectDistrict, selectPostcodeArea, cameraRef, mapZoomRef, hasUserInteractedRef]),
+
+      const summonPubId = route.params?.summonPubId;
+      if (summonPubId && String(summonPubId) !== processedSummonPubRef.current) {
+        const id = String(summonPubId);
+        processedSummonPubRef.current = id;
+
+        (async () => {
+          try {
+            let pub = allPubs.find((item) => String(item.id) === id);
+            if (!pub) {
+              pub = await fetchPubById(id);
+            }
+            if (!pub) {
+              processedSummonPubRef.current = null;
+              return;
+            }
+
+            const lat = Number(pub.lat);
+            const lon = Number(pub.lon);
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+              const viewport = approximateBoundsFromCenter(lat, lon, ZOOM_LEVELS.PUB_SEARCH);
+              const buffered = expandBounds(viewport);
+              if (buffered) requestViewportPubs(buffered);
+            }
+
+            selectPub(pub, false, true);
+          } catch (err) {
+            console.warn('useMapInteraction: summon pub deep link failed', err?.message);
+            processedSummonPubRef.current = null;
+          } finally {
+            const { summonPubId: _omit, ...remainingParams } = route.params || {};
+            navigation.setParams(remainingParams);
+          }
+        })();
+      } else if (!summonPubId) {
+        processedSummonPubRef.current = null;
+      }
+    }, [
+      allPubs,
+      navigation,
+      requestViewportPubs,
+      route.params,
+      selectDistrict,
+      selectPostcodeArea,
+      selectPub,
+      cameraRef,
+      mapZoomRef,
+      hasUserInteractedRef,
+    ]),
   );
 
   return {
     selectedPub,
     setSelectedPub,
+    pubSelectionSeq,
     mapHighlightedPubId,
     clearMapHighlight,
     searchQuery,
@@ -526,6 +740,7 @@ export function useMapInteraction({
     selectPub,
     handleToggleVisited,
     handleToggleFavorite,
+    pendingVisitChanges,
     handlePostcodeAreaLayerPress,
     handlePostcodeDistrictLayerPress,
     handlePubPress,

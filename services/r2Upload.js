@@ -1,5 +1,9 @@
 import { supabase } from '../config/supabase';
 
+const UPLOAD_FAILED_MESSAGE = "Couldn't upload the photo. Check your connection and try again.";
+/** Must match MAX_UPLOAD_BYTES in supabase/functions/presign-r2-upload/index.ts. */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
 /** Must match the Edge Function slug in Supabase (default: presign-r2-upload). */
 const PRESIGN_FUNCTION =
   (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SUPABASE_PRESIGN_FUNCTION) ||
@@ -31,7 +35,18 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
   const contentType =
     fileExt === 'png' ? 'image/png' : fileExt === 'webp' ? 'image/webp' : 'image/jpeg';
 
-  const body = { purpose, contentType, fileExt };
+  // Read first: the upload URL is signed for this exact size.
+  const res = await fetch(localUri);
+  if (!res.ok) {
+    throw new Error("Couldn't read that photo. Try a different one.");
+  }
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > MAX_UPLOAD_BYTES) {
+    throw new Error('That photo is too large (max 5 MB). Try a different one.');
+  }
+
+  // fileExt: only read by servers deployed before audit Batch 7.
+  const body = { purpose, contentType, contentLength: buf.byteLength, fileExt };
   if (purpose === 'pub_gallery') {
     body.pubId = pubId;
     body.slot = slot;
@@ -61,23 +76,15 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
       }
     }
     const statusBit = status ? ` [HTTP ${status}]` : '';
-    const hint = `${error.message || String(error)}${detail}${statusBit}`;
-    throw new Error(
-      hint.includes('Failed to send') || hint.includes('fetch')
-        ? `Upload service unavailable. Check network and that Edge Function "${PRESIGN_FUNCTION}" exists (404 = wrong name).`
-        : hint
-    );
+    // Technical detail for debugging; users get a plain message.
+    console.warn(`r2Upload: presign failed (${PRESIGN_FUNCTION})`, `${error.message || String(error)}${detail}${statusBit}`);
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
 
   if (!data?.uploadUrl || !data?.publicUrl) {
-    throw new Error(data?.error || 'Could not get upload URL.');
+    console.warn('r2Upload: presign returned no URL', data?.error);
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
-
-  const res = await fetch(localUri);
-  if (!res.ok) {
-    throw new Error('Could not read photo file.');
-  }
-  const buf = await res.arrayBuffer();
 
   const put = await fetch(data.uploadUrl, {
     method: 'PUT',
@@ -87,9 +94,8 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
 
   if (!put.ok) {
     const t = await put.text().catch(() => '');
-    throw new Error(
-      `Upload to storage failed (${put.status}). ${t.slice(0, 120)}`.trim()
-    );
+    console.warn(`r2Upload: storage PUT failed (${put.status})`, t.slice(0, 200));
+    throw new Error(UPLOAD_FAILED_MESSAGE);
   }
 
   return data.publicUrl;

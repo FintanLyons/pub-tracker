@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-Build data/postcode_district_display_names.json for every district in london_postcode_districts.min.json.
+Build data/postcode_district_display_names.json for every district in supported geo files.
 
 Colloquial / primary locality names (not official boundaries). Edit NAMES below and re-run:
   python3 scripts/generate_postcode_district_display_names.py
 """
 
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-GEO = ROOT / "data/geo/london_postcode_districts.min.json"
+GEO_FILES = [
+    ROOT / "data/geo/london_postcode_districts.min.json",
+    ROOT / "data/geo/cambridge_postcode_districts.min.json",
+]
 OUT = ROOT / "data/postcode_district_display_names.json"
 
 # Primary recognisable locality per outward code (London coverage only).
@@ -189,16 +193,45 @@ NAMES = {
     "WC2R": "Embankment",
 }
 
+CAMBRIDGE_NAMES = {
+    "CB1": "Cambridge City Centre",
+    "CB2": "Cambridge (Trumpington)",
+    "CB3": "Cambridge (Newnham & Girton)",
+    "CB4": "Cambridge (Arbury)",
+    "CB5": "Cambridge (Abbey)",
+    "CB6": "Ely & Fens",
+    "CB7": "Newmarket",
+    "CB8": "Haverhill",
+    "CB9": "Halstead & Hedingham",
+    "CB10": "Saffron Walden",
+    "CB11": "Saffron Walden Villages",
+    "CB21": "Fulbourn & Teversham",
+    "CB22": "Sawston & Duxford",
+    "CB23": "Cambridge Villages (West)",
+    "CB24": "Cambridge Villages (North)",
+    "CB25": "Waterbeach & Cottenham",
+}
+
 
 def main():
-    geo = json.loads(GEO.read_text(encoding="utf-8"))
-    codes = sorted({(f.get("properties") or {}).get("name", "").strip().upper() for f in geo.get("features") or []})
+    codes = set()
+    for geo_path in GEO_FILES:
+        if not geo_path.is_file():
+            print(f"WARN: missing {geo_path}", file=sys.stderr)
+            continue
+        geo = json.loads(geo_path.read_text(encoding="utf-8"))
+        codes.update(
+            (f.get("properties") or {}).get("name", "").strip().upper()
+            for f in geo.get("features") or []
+        )
+    codes = sorted(c for c in codes if c)
     codes = [c for c in codes if c]
     out = {}
     missing = []
+    all_names = {**NAMES, **CAMBRIDGE_NAMES}
     for c in codes:
-        if c in NAMES:
-            out[c] = NAMES[c]
+        if c in all_names:
+            out[c] = all_names[c]
         elif c == "UNKNOWN":
             out[c] = "Unknown"
         else:

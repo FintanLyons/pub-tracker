@@ -1,0 +1,83 @@
+accept,suggested_website,id,name,operator,calc_postcode_district,calc_postcode_area,addr_housenumber,addr_street,addr_city,confidence,notes
+1,https://www.sixbellsfulbourn.co.uk/,node/17708621,Six Bells,Pubmaster,CB21,CB,9,High Street,Fulbourn,0.920,"Official pub site for 9 High Street, Fulbourn CB21 5DH. Punch Pubs tenant; ourlocal.pub is operator portal."
+1,https://www.earlofbeaconsfieldcambridge.co.uk/,node/20458787,Earl of Beaconsfield,,CB1,CB,133,Mill Road,Cambridge,0.950,Star Pubs official site; 133 Mill Road CB1 3AA. User-found.
+1,https://whiteswanpubcambridge.co.uk/,node/20827166,White Swan,,CB1,CB,109,Mill Road,Cambridge,0.930,Official site with matching name and address 107-109 Mill Road CB1 2AZ.
+1,https://www.thecastlebarcambridge.com/,node/20922157,The Castle Bar,Greene King,CB2,CB,37,St Andrew's Street,Cambridge,0.910,Official pub/B&B site for 37 St Andrew's Street CB2 3AR. Greene King freehold but not listed on greeneking.co.uk.
+1,https://www.thepuntercambridge.com/,node/20940220,The Punter,,CB3,CB,3,Pound Hill,Cambridge,0.930,Official site for 3 Pound Hill CB3 0AE coaching-inn pub and restaurant.
+1,https://www.carpentersarmscambridge.com/,node/20940431,Carpenters Arms,,CB4,CB,182-186,Victoria Road,Cambridge,0.920,Official Brewpoint/Wells craft pub site for 184-186 Victoria Road CB4 3DZ.
+1,https://greendragoncambridge.co.uk/,node/21137287,Green Dragon,,CB4,CB,5,Water Street,Cambridge,0.930,"Official site for 5 Water Street, Chesterton CB4 1NZ riverside pub."
+1,https://www.thegreenmantrumpington.com/,node/21642213,Green Man,,CB2,CB,55,"High Street, Trumpington",Cambridge,0.920,"Official Mitchells & Butlers pub site for 55 High Street, Trumpington CB2 9HZ."
+1,https://www.thedumplingtree.com/,node/24672502,The Dumpling Tree,,CB1,CB,,Perne Road,Cambridge,0.930,Official site for 59 Perne Road CB1 3RX Chinese bar-restaurant in former pub building.
+1,https://rathmore-club.goto-where.com/,node/24673114,Rathmore Club,,CB1,CB,,Cherry Hinton Road,Cambridge,0.850,Rathmore Club listing site; 70 Cherry Hinton Road CB1 7AA. User-found.
+1,https://www.salisburyarmscambridge.co.uk/,node/25285271,Salisbury Arms,,CB1,CB,76,Tenison Road,Cambridge,0.920,Official Brewpoint craft pub site for 76 Tenison Road CB1 2DW.
+1,https://www.kingbillhiston.co.uk/,node/25612057,King William IV,,CB24,CB,8,Church Street,Cambridge,0.910,"Official site for King Bill at 8 Church Street, Histon CB24 9EP (village pub, not central Cambridge)."
+1,https://www.redlion-sp.co.uk/,node/26113438,Red Lion,,CB25,CB,,,,0.920,"Official pub site for 43 High Street, Swaffham Prior CB25 0LD. Batemans brewery page is chain listing."
+1,https://www.maidshead.co.uk/,node/26117016,Maid's Head,,CB7,CB,,,,0.910,"Official site for 12 High Street, Wicken CB7 5XR (East Cambs village; OSM postcode CB7 5XU approximate)."
+1,https://www.thethreetuns-greatabington.co.uk/,node/26531001,Three Tuns,,CB21,CB,,,,0.930,"Official site for 75 High Street, Great Abington CB21 6AB (Thai restaurant/pub, not Fen Drayton)."
+1,https://www.blackhorsedrydrayton.com/,node/26660989,Black Horse,,CB23,CB,35,Park Street,,0.920,"Official site for 35 Park Street, Dry Drayton CB23 8DA. New owners Oct 2025; still trading."
+1,https://threetunsfendrayton.co.uk/,node/29676417,The Three Tuns,,CB24,CB,,High Street,Cambridge,0.930,"Official site for thatched pub on High Street, Fen Drayton CB24 4SJ (distinct from Great Abington Three Tuns)."
+1,https://www.dogandduck-linton.co.uk/,node/30152966,Dog & Duck,,CB21,CB,63,High Street,,0.950,Dog & Duck Linton
+1,https://crownatlinton.co.uk/,node/30152969,The Crown,,CB21,CB,,,,0.950,Crown Linton
+1,https://www.queensheadnewton.co.uk/,node/33129159,Queen's Head,,CB22,CB,,,,0.950,Queen's Head Newton
+1,https://the-hoops.co.uk/,node/33129704,The Hoops,,CB23,CB,,,,0.950,Hoops Barton
+1,https://theporterhousepub.com/,node/148190061,The Porterhouse,,CB24,CB,1,Station Road,Cambridge,0.950,Porterhouse Willingham
+1,https://www.theredlionstretham.co.uk/,node/255594710,Red Lion,,CB6,CB,47,High Street,Ely,0.950,Red Lion Stretham
+1,https://www.thefoxburwell.co.uk/,node/304736366,The Fox,,CB25,CB,2,North Street,,0.950,Fox Burwell
+1,https://www.theanchorburwell.co.uk/,node/304736391,The Anchor,,CB25,CB,63,North Street,,0.950,Anchor Burwell
+1,https://www.fivebellsburwell.co.uk/,node/304736523,The Five Bells,,CB25,CB,44,High Street,,0.950,Five Bells Burwell
+1,https://www.theclarendonarms.com/,node/429597760,The Clarendon Arms,,CB1,CB,35-36,Clarendon Street,Cambridge,0.950,Clarendon Arms
+1,https://www.carpentersarmswilbraham.co.uk/,node/473728763,Carpenters Arms,,CB7,CB,76,Brook Street,Ely,0.950,Carpenters Arms Great Wilbraham
+1,https://www.craftunionpubs.com/fountain-soham,node/473728905,The Fountain,,CB7,CB,1,Churchgate Street,Ely,0.900,Fountain Inn Soham
+1,https://sohamcomradesclub.co.uk/,node/473729205,Comrades Club,,CB7,CB,3,Market Street,Ely,0.920,Soham Comrades Club official site; Market Street CB7 5JG. User-found.
+1,https://www.redlionsoham.com/,node/473729209,Red Lion,,CB7,CB,17,High Street,,0.950,Red Lion Soham
+1,https://www.thecastleinn.pub/,node/1594688120,The Castle Inn,Adnams,CB3,CB,38,Castle Street,Cambridge,0.950,Castle Inn
+1,https://www.thestationtavern.co.uk/,node/4820111626,Station Tavern,Young's,CB1,CB,2,Station Square,Cambridge,0.950,Station Tavern
+1,https://www.oldticketoffice.com/,node/5676057080,Old Ticket Office,,CB1,CB,,Station Road,Cambridge,0.950,Official City Pub Company site; address Cambridge Railway Station CB1 2JW matches venue.
+1,https://threehorseshoes-pub.com/,node/8423728790,The Three Horseshoes,,CB22,CB,,,,0.900,Stapleford village pub at Church St CB22 5DS; two linked official domains operated by same licensee.
+1,https://thebirdorworm.com/,node/9042161425,The Bird or Worm?,,CB5,CB,122,Newmarket Road,,0.750,Minimal one-page official site (menu only) for Ninja Theory ground-floor bar at 122 Newmarket Rd CB5 8HE; no full pub website.
+1,https://www.jdwetherspoon.com/pubs/the-regal-cambridge/,node/13142721772,The Regal - JD Wetherspoon,,CB2,CB,,,,0.950,Official J D Wetherspoon pub page; 38-39 St Andrews Street CB2 3AR.
+1,https://www.thedobblers.com/,way/52115600,Dobblers Inn,,CB1,CB,184,Sturton Street,Cambridge,0.900,Official pub website at 184 Sturton Street CB1 2QF; Wells & Co community local.
+1,https://www.the-geldart.co.uk/,way/67665889,The Geldart,,CB1,CB,1,Ainsworth Street,Cambridge,0.950,Official site for music/food pub at 1 Ainsworth Street CB1 2PF.
+1,https://www.monkfieldarmspub.co.uk/,way/74341420,Monkfield Arms,,CB23,CB,1,Monkfield Lane,Great Cambourne,0.950,"Official Marston's pub site at 1 Monkfield Lane, Cambourne CB23 6AH."
+1,https://www.barleymowhiston.co.uk/,way/96886062,The Barley Mow,,CB24,CB,7,High Street,,0.900,"Official Greene King Hive pub site; 7 High Street, Histon CB24 9JD."
+1,https://www.foxbarhill.com/,way/101893151,The Fox,,CB23,CB,,,,0.950,"Official Punch Pubs site for The Fox at Gladeside, Bar Hill CB23 8DY."
+1,https://www.thetivoli.co.uk/,way/110256311,The Tivoli,City Pub Group,CB4,CB,16,Chesterton Road,Cambridge,0.950,Official venue site at 16 Chesterton Road CB4 3AX; Young's/City Pub Group.
+1,https://theoldspring.co.uk/,way/110256313,Old Spring,,CB4,CB,1,Ferry Path,Cambridge,0.950,Official gastropub site at 1 Ferry Path CB4 1HB; .co.uk and .com both resolve.
+1,https://www.greeneking.co.uk/pubs/cambridgeshire/boathouse,way/110256317,The Boathouse,,CB4,CB,14,Chesterton Road,Cambridge,0.950,Official Greene King pub page at 14 Chesterton Road CB4 3AX.
+1,https://www.thecornerhousepub.co/,way/118943808,Corner House,,CB5,CB,231,Newmarket Road,Cambridge,0.950,Official Lapen Inns pub site at 231 Newmarket Road CB5 8JE.
+1,https://thewhitehorsemilton.co.uk/,way/125553129,The White Horse,,CB24,CB,20-22,High Street,Cambridge,0.950,Milton village pub at 20-22 High Street CB24 6AJ; distinct from Barton White Horse.
+1,https://www.holeinthewalldining.co.uk/,way/125662864,The Hole in the Wall,,CB21,CB,,,,0.950,"Official country gastro pub site at 2 High Street, Little Wilbraham CB21 5JY."
+1,https://www.theshipcambridge.co.uk/,way/127367856,The Ship,,CB4,CB,,Northfield Avenue,Cambridge,0.900,"Official pub site at Northfield Avenue, King's Hedges CB4 2LG."
+1,https://www.sirisaacnewton-cambridge.co.uk/,way/127812957,Sir Isaac Newton,,CB3,CB,84,Castle Street,Cambridge,0.950,Official pub site at 84 Castle Street CB3 0AJ.
+1,https://www.thewhitehorseinnbarton.co.uk/,way/129105260,The White Horse,,CB23,CB,,,,0.900,Barton village pub (listed as White Horse Inn) at 118 High Street CB23 7BG; OSM name omits 'Inn'.
+1,https://cambridge.pub/royal-standard/,way/134111534,Royal Standard,,CB1,CB,292,Mill Road,Cambridge,0.850,Official venue page on Cambridge Blue Management group site; 292 Mill Road CB1 3NL.
+1,https://cambridge.pub/blue-moon/,way/134385094,The Blue Moon,,CB1,CB,2,Norfolk Street,Cambridge,0.900,Official venue page on Cambridge Blue Management group site; 2 Norfolk Street CB1 2LF.
+1,https://www.thegeorgeinnbabraham.co.uk/,way/147532393,George Inn,,CB22,CB,,,,0.950,"Official site for George Inn at 43 High Street, Babraham CB22 3AG; matches CB22 district and wikidata entry."
+1,https://thetramcambridge.co.uk/,way/148827006,The Tram Depot,,CB1,CB,2-5,Dover Street,Cambridge,0.950,Official operator site; address 5 Dover Street CB1 1DY matches OSM record.
+1,http://poacherelsworth.co.uk/,way/152686984,The Poacher,,CB23,CB,1,Brockley Road,Cambridge,0.850,Official site for Elsworth Poacher at 1 Brockley Road CB23 4JS; CAMRA reports pub closed long-term Feb 2026 but site remains operator-owned.
+1,https://www.grantchestergreenman.com/,way/154730026,The Green Man,,CB3,CB,59,High Street,Cambridge,0.920,Grantchester Green Man at 59 High Street CB3 9NF; distinct from Trumpington Green Man (CB2). URL cited on OpenTable and CAMRA.
+1,https://thegeorgegirton.weebly.com/,way/159256001,George Inn,,CB3,CB,71,High Street,Cambridge,0.880,"Official Weebly site for The George at 71 High Street, Girton CB3 0QD; Thai food and pub menus confirmed."
+1,https://oldcrowngirton.com/,way/159256015,Old Crown,,CB3,CB,89,High Street,Cambridge,0.950,Official pub site at 89 High Street Girton CB3 0QD; Lapen Inns group page is operator site not primary venue URL.
+1,https://thebellbottisham.com/,way/169444849,The Bell,,CB25,CB,16,High Street,,0.950,"Official site for Bell Inn at 16 High Street, Bottisham CB25 9DA; booking and menu pages on same domain."
+1,https://www.redbullcambridge.co.uk/,way/174752202,The Red Bull,,CB3,CB,11,Barton Road,Cambridge,0.950,Official Charles Wells/Wells & Co pub site at 11 Barton Road CB3 9JZ; live site verified.
+1,https://railwayvue.co.uk/,way/188821806,Railway Vue,,CB24,CB,163,Station Road,,0.950,"Official community pub site at 163 Station Road, Impington CB24 9NP; Punch Pubs refurbishment 2025."
+1,https://www.individualpubs.co.uk/roseandcrown/,way/191142638,Rose & Crown,Milton Brewery,CB24,CB,2,Glebe Way,Cambridge,0.920,"Individual Pub Company (Milton Brewery) official page for 2 Glebe Way, Impington CB24 9JB; reopened Nov 2024."
+1,https://thekingsheadfenditton.wordpress.com/,way/211724201,Kings Head,,CB5,CB,50,High Street,Cambridge,0.850,"Official WordPress site for Kings Head at 50 High Street, Fen Ditton CB5 8ST; reopened Jun 2025 under new licensees."
+1,https://www.therose-stapleford.co.uk/,way/218983713,The Rose,,CB22,CB,81,London Road,Stapleford,0.950,"Official site for The Rose at 81 London Road, Stapleford CB22 5DG; Thai food, sister pub to George Inn Babraham."
+1,https://www.georgeanddragon-elsworth.co.uk/,way/219913530,George & Dragon,,CB23,CB,41,Boxworth Road,Cambridge,0.950,"Official family-run gastropub site at 41 Boxworth Road, Elsworth CB23 4JQ."
+1,https://www.theblackhorseswaffhambulbeck.co.uk/,way/220571908,Black Horse Inn,,CB25,CB,35,High Street,,0.950,"Official site for Black Horse Inn at 35 High Street, Swaffham Bulbeck CB25 0HP; pub rooms and dining."
+1,https://www.fivemilesinn.com/,way/220709642,Five Miles Inn,,CB7,CB,,Old School Lane,,0.950,"Official site for Five Miles From Anywhere No Hurry Inn at Old School Lane, Upware CB7 5ZR."
+1,https://roseandcrownashdon.co.uk/,way/224082817,Rose and Crown,,CB10,CB,,Crown Hill,Ashdon,0.950,"Official site for Rose & Crown at Crown Hill, Ashdon CB10 2HA; free house managed by Ian and Tracy Holt."
+1,https://thebellinnbalsham.com/,way/234005325,The Bell Inn,,CB21,CB,,,,0.920,Balsham village pub at 2 West Wickham Road CB21 4DZ; official site with menu PDF and phone 01223 892999 matching OSM.
+1,https://blackbull-balsham.co.uk/,way/234094833,The Black Bull,,CB21,CB,,,,0.930,Grade II listed gastropub/inn at 27 High Street Balsham CB21 4DJ; phone 01223 893844 matches OSM.
+1,https://www.threehorseshoescomberton.co.uk/,way/338544409,Three Horseshoes,,CB23,CB,22,South Street,Cambridge,0.850,Comberton pub at 22 South Street CB23 7DZ; official Wix site (distinct from Madingley Three Horseshoes at threehorseshoesmadingley.co.uk).
+1,https://www.whitehorse-oakington.co.uk/,way/349728016,White Horse,,CB24,CB,,Longstanton Road,Cambridge,0.920,Oakington village pub at 28 Longstanton Road CB24 3AB; twho.co.uk redirects to whitehorse-oakington.co.uk.
+1,https://theblackhorserampton.co.uk/,way/369262851,Black Horse,,CB24,CB,,,,0.900,Rampton village pub at 6 High Street CB24 8QE; coordinates match Rampton area (calc_postcode CB24 8PR).
+1,https://sixbellspub.co.uk/,way/372486548,Six Bells,,CB1,CB,11,Covent Garden,Cambridge,0.930,City pub at 11 Covent Garden CB1 2HS off Mill Road; official site lists address and phone 01223 355559.
+1,https://www.thewhitehorseswavesey.com/,way/477382783,White Horse Inn,,CB24,CB,1,Market Street,Swavesey,0.700,Swavesey pub at 1 Market Street CB24 4QG; former official domain (Pubs Galore/Wikidata) but site returned 503 and pub closed long-term March 2026.
+1,https://thegreyhoundsawston.co.uk/,way/617704032,The Greyhound,,CB22,CB,,,,0.650,"Sawston pub at 2 High Street CB22 3BG; domain listed in business directories and CAMRA email thegreyhound@sawston, but site did not load during verification."
+1,https://thetickellarms.co.uk/,way/619000773,Tickell Arms,,CB22,CB,,North Road,,0.930,Whittlesford pub/restaurant at 1 North Road CB22 4NZ; Cambscuisine group venue with active official site.
+1,https://www.theoldredlion.co.uk/,way/945508474,The Old Red Lion,,CB21,CB,,Linton Road,,0.930,"Horseheath pub/inn on Linton Road CB21 4QF; official site with food, rooms and contact details."
+1,https://thewhiteswanquy.com/,way/1115730232,White Swan,,CB25,CB,9,Main Street,,0.900,Stow-cum-Quy freehouse at 9 Main Street CB25 9AB; official site matches address.
+1,https://www.thehopbind.co.uk/,way/1115734363,The Hop Bind,,CB24,CB,212,High Street,,0.920,Cottenham coaching inn at 212 High Street CB24 8RZ; active official site.
+1,https://theroyaloakbarrington.co.uk/,way/1426256714,Royal Oak,,CB22,CB,31,West Green,retail,0.930,Barrington pub at 31 West Green CB22 7RZ; Cambscuisine venue with verified active official site.

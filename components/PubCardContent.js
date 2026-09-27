@@ -15,6 +15,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { formatDistrictWithCode } from '../utils/postcodeDistrictDisplayNames';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { useUserStats } from '../contexts/UserStatsContext';
+import { createLatestValueSync } from '../utils/latestValueSync';
 import {
   getDrinkCount,
   upsertDrinkCount,
@@ -25,7 +28,15 @@ import {
 } from '../services/ReviewService';
 import { PUB_FEATURES_DISPLAY, hasPubFeature } from '../constants/pubFeatures';
 import { getOpeningStatus } from '../utils/openingHours';
+import { resolvePubPhotoUrls } from '../constants/pubPhotoPlaceholder';
 import PubReviewsModal from './PubReviewsModal';
+import PubSummonTroopsModal from './PubSummonTroopsModal';
+
+const DRINK_SAVE_FAILED_MESSAGE = "Couldn't save your drinks — check your connection and try again.";
+const REVIEW_SAVE_FAILED_MESSAGE = "Couldn't save your review. Check your connection and try again.";
+const REVIEW_DELETE_FAILED_MESSAGE = "Couldn't delete your review. Check your connection and try again.";
+/** Wait for drink taps to settle before recomputing stats. */
+const DRINK_STATS_REFRESH_DELAY_MS = 1500;
 
 const openDirections = async (lat, lon) => {
   const destination = `${lat},${lon}`;
@@ -76,13 +87,18 @@ export default function PubCardContent({
   scrollEnabled,
   scrollRef,
   onToggleVisited,
-  onReviewsModalVisibleChange,
+  onBlockingOverlayVisibleChange,
 }) {
+  const { showToast } = useToast();
+  const { refreshUserStats } = useUserStats();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
   // ── Opening status (OSM opening_hours; empty → until 11 PM daily) ───────────
-  const { isOpen, statusText: openStatusText } = getOpeningStatus(pub?.opening_hours);
+  const inactivePub = pub?.isActive === false;
+  const { isOpen, statusText: openStatusText } = inactivePub
+    ? { isOpen: false, statusText: 'Permanently closed' }
+    : getOpeningStatus(pub?.opening_hours);
 
   // ── Area row segments ──────────────────────────────────────────────────────
   const areaSegments = [
@@ -93,13 +109,24 @@ export default function PubCardContent({
 
   // ── Drinks ─────────────────────────────────────────────────────────────────
   const [drinkCount, setDrinkCount] = useState(0);
-  const [drinkCountLoading, setDrinkCountLoading] = useState(false);
+  /** 'loading' | 'loaded' | 'error' — +/− stay disabled until the real count is known. */
+  const [drinkLoadState, setDrinkLoadState] = useState('loading');
+  /** { pubId, sync } — sync sends only the latest count, one request at a time, in order. */
+  const drinkSyncRef = useRef(null);
+  const drinkStatsTimerRef = useRef(null);
+  // Latest callbacks for save handlers created once per pub load.
+  const refreshUserStatsRef = useRef(refreshUserStats);
+  const showToastRef = useRef(showToast);
+  refreshUserStatsRef.current = refreshUserStats;
+  showToastRef.current = showToast;
 
   // ── Reviews ────────────────────────────────────────────────────────────────
   const [reviews, setReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsLoadFailed, setReviewsLoadFailed] = useState(false);
   const [userReview, setUserReview] = useState(null);
   const [showReviewsModal, setShowReviewsModal] = useState(false);
+  const [showSummonModal, setShowSummonModal] = useState(false);
 
   const [galleryWidth, setGalleryWidth] = useState(Dimensions.get('window').width);
   const [photoIndex, setPhotoIndex] = useState(0);
@@ -107,69 +134,102 @@ export default function PubCardContent({
   const galleryRef = useRef(null);
   const galleryTouchStart = useRef({ x: 0, y: 0 });
 
+  const loadDrinkCount = useCallback((pubId) => {
+    if (!userId || !pubId) return;
+    const entry = { pubId, sync: null };
+    drinkSyncRef.current = entry;
+    setDrinkLoadState('loading');
+    getDrinkCount(userId, pubId)
+      .then((count) => {
+        if (drinkSyncRef.current !== entry) return;
+        entry.sync = createLatestValueSync({
+          confirmed: count,
+          save: (value) => upsertDrinkCount(userId, pubId, value),
+          onSaved: () => {
+            if (drinkStatsTimerRef.current) clearTimeout(drinkStatsTimerRef.current);
+            drinkStatsTimerRef.current = setTimeout(() => {
+              drinkStatsTimerRef.current = null;
+              refreshUserStatsRef.current?.();
+            }, DRINK_STATS_REFRESH_DELAY_MS);
+          },
+          onFailure: (confirmed) => {
+            // Fall back to what the server has; never leave an unsaved number on screen.
+            if (drinkSyncRef.current === entry) setDrinkCount(confirmed);
+            showToastRef.current?.(DRINK_SAVE_FAILED_MESSAGE);
+          },
+        });
+        setDrinkCount(count);
+        setDrinkLoadState('loaded');
+      })
+      .catch(() => {
+        if (drinkSyncRef.current === entry) setDrinkLoadState('error');
+      });
+  }, [userId]);
+
+  const loadReviews = useCallback(async (pubId) => {
+    setReviewsLoading(true);
+    setReviewsLoadFailed(false);
+    try {
+      const [allReviews, mine] = await Promise.all([
+        getReviews(pubId),
+        userId ? getUserReview(userId, pubId) : Promise.resolve(null),
+      ]);
+      setReviews(allReviews);
+      setUserReview(mine);
+    } catch {
+      setReviewsLoadFailed(true);
+    } finally {
+      setReviewsLoading(false);
+    }
+  }, [userId]);
+
   // Reset and re-fetch when the pub changes
   useEffect(() => {
     setDrinkCount(0);
     setReviews([]);
     setUserReview(null);
     setShowReviewsModal(false);
+    setShowSummonModal(false);
     setPhotoIndex(0);
     setGalleryScrollLock(false);
     galleryRef.current?.scrollTo({ x: 0, animated: false });
 
     if (!pub?.id) return;
+    loadDrinkCount(pub.id);
+    loadReviews(pub.id);
+  }, [pub?.id, loadDrinkCount, loadReviews]);
 
-    // Drinks
-    if (userId) {
-      setDrinkCountLoading(true);
-      getDrinkCount(userId, pub.id)
-        .then(setDrinkCount)
-        .catch(() => {})
-        .finally(() => setDrinkCountLoading(false));
-    }
+  useEffect(() => () => {
+    if (drinkStatsTimerRef.current) clearTimeout(drinkStatsTimerRef.current);
+  }, []);
 
-    // Reviews
-    setReviewsLoading(true);
-    const fetchReviews = async () => {
-      try {
-        const [allReviews, mine] = await Promise.all([
-          getReviews(pub.id),
-          userId ? getUserReview(userId, pub.id) : Promise.resolve(null),
-        ]);
-        setReviews(allReviews);
-        setUserReview(mine);
-      } catch {
-        // silently ignore fetch errors
-      } finally {
-        setReviewsLoading(false);
-      }
-    };
-    fetchReviews();
-  }, [pub?.id, userId]);
+  const blockingOverlayOpen = showReviewsModal || showSummonModal;
 
   useEffect(() => {
-    onReviewsModalVisibleChange?.(showReviewsModal);
-    return () => onReviewsModalVisibleChange?.(false);
-  }, [showReviewsModal, onReviewsModalVisibleChange]);
+    onBlockingOverlayVisibleChange?.(blockingOverlayOpen);
+    return () => onBlockingOverlayVisibleChange?.(false);
+  }, [blockingOverlayOpen, onBlockingOverlayVisibleChange]);
+
+  const pubAreaLabel = pub?.area ? formatDistrictWithCode(pub.area) : null;
+
+  const handleOpenSummonModal = useCallback(() => {
+    setShowSummonModal(true);
+  }, []);
 
   // ── Drinks handlers ────────────────────────────────────────────────────────
   const handleChangeDrink = useCallback((delta) => {
-    if (!userId) return;
-    let shouldMarkVisited = false;
-    setDrinkCount((prev) => {
-      const next = Math.max(0, prev + delta);
-      shouldMarkVisited = delta > 0 && prev === 0 && !pub.isVisited;
-      upsertDrinkCount(userId, pub.id, next).catch(() => {
-        setDrinkCount(prev);
-      });
-      return next;
-    });
-    // Never call onToggleVisited inside the setDrinkCount updater — that updates MapScreen
-    // during PubCardContent's state flush ("Cannot update MapScreen while rendering").
-    if (shouldMarkVisited && onToggleVisited) {
-      queueMicrotask(() => onToggleVisited(pub.id));
+    const entry = drinkSyncRef.current;
+    const sync = entry?.sync;
+    if (!userId || !sync || entry.pubId !== pub?.id || drinkLoadState !== 'loaded') return;
+    const next = Math.max(0, sync.desired + delta);
+    if (next === sync.desired) return;
+    const firstDrink = sync.desired === 0 && delta > 0;
+    sync.set(next);
+    setDrinkCount(next);
+    if (firstDrink && !pub.isVisited && onToggleVisited) {
+      onToggleVisited(pub.id, true);
     }
-  }, [userId, pub?.id, pub?.isVisited, onToggleVisited]);
+  }, [userId, pub?.id, pub?.isVisited, drinkLoadState, onToggleVisited]);
 
   // ── Review handlers ────────────────────────────────────────────────────────
   const handleSubmitReview = useCallback(async (rating, body) => {
@@ -179,31 +239,26 @@ export default function PubCardContent({
     const wasVisited = pub?.isVisited;
     try {
       await upsertReview(userId, pubId, rating, body);
-      const [allReviews, mine] = await Promise.all([
-        getReviews(pubId),
-        getUserReview(userId, pubId),
-      ]);
-      setReviews(allReviews);
-      setUserReview(mine);
-      if (isNewReview && !wasVisited && onToggleVisited) {
-        onToggleVisited(pubId);
-      }
     } catch {
-      // silently ignore
+      // Thrown to PubReviewsModal, which shows it inline and keeps the form open.
+      throw new Error(REVIEW_SAVE_FAILED_MESSAGE);
     }
-  }, [userId, pub?.id, pub?.isVisited, userReview, onToggleVisited]);
+    if (isNewReview && !wasVisited && onToggleVisited) {
+      onToggleVisited(pubId, true);
+    }
+    await loadReviews(pubId);
+  }, [userId, pub?.id, pub?.isVisited, userReview, onToggleVisited, loadReviews]);
 
   const handleDeleteReview = useCallback(async () => {
     if (!userId) return;
     try {
       await deleteReview(userId, pub.id);
-      const allReviews = await getReviews(pub.id);
-      setReviews(allReviews);
-      setUserReview(null);
     } catch {
-      // silently ignore
+      throw new Error(REVIEW_DELETE_FAILED_MESSAGE);
     }
-  }, [userId, pub?.id]);
+    setUserReview(null);
+    await loadReviews(pub.id);
+  }, [userId, pub?.id, loadReviews]);
 
   // ── Derived review stats ───────────────────────────────────────────────────
   const reviewCount = reviews.length;
@@ -215,7 +270,7 @@ export default function PubCardContent({
   const hasPhone   = !!pub.phone;
   const hasWebsite = !!pub.website;
 
-  const photoUrls = pub.photoUrls?.length ? pub.photoUrls : pub.photoUrl ? [pub.photoUrl] : [];
+  const photoUrls = resolvePubPhotoUrls(pub.photoUrls, pub.photoUrl);
   const photoCount = photoUrls.length;
   const hasMultiplePhotos = photoCount > 1;
 
@@ -237,13 +292,13 @@ export default function PubCardContent({
     [galleryWidth, photoIndex],
   );
 
-  const verticalScrollEnabled = showReviewsModal
+  const verticalScrollEnabled = blockingOverlayOpen
     ? false
     : galleryScrollLock
       ? false
       : (scrollEnabled !== undefined ? scrollEnabled : isExpanded);
 
-  const contentPointerEvents = showReviewsModal ? 'none' : pointerEvents;
+  const contentPointerEvents = blockingOverlayOpen ? 'none' : pointerEvents;
 
   const handleGalleryTouchStart = useCallback((e) => {
     galleryTouchStart.current = {
@@ -283,7 +338,6 @@ export default function PubCardContent({
       bounces={false}
       directionalLockEnabled={true}
       nestedScrollEnabled={Platform.OS === 'android'}
-      removeClippedSubviews={Platform.OS === 'android'}
       overScrollMode={Platform.OS === 'android' ? 'never' : undefined}
       ref={scrollRef}
     >
@@ -320,6 +374,14 @@ export default function PubCardContent({
                 <MaterialCommunityIcons name="account-group-outline" size={15} color={COLORS.mediumGrey} />
               </View>
             </>
+          ) : reviewsLoadFailed ? (
+            <TouchableOpacity
+              onPress={() => loadReviews(pub.id)}
+              accessibilityRole="button"
+              accessibilityLabel="Couldn't load reviews. Tap to retry."
+            >
+              <Text style={styles.noReviewsYetCompact}>Couldn't load reviews · Retry</Text>
+            </TouchableOpacity>
           ) : (
             <Text style={styles.noReviewsYetCompact}>No reviews</Text>
           )}
@@ -327,8 +389,7 @@ export default function PubCardContent({
       </View>
 
       {/* ── Photos (full-width pages; swipe or tap arrow for more) ───────── */}
-      {photoCount > 0 && (
-        <View
+      <View
           style={styles.photoGalleryWrap}
           onLayout={(e) => {
             const w = e.nativeEvent.layout.width;
@@ -393,7 +454,6 @@ export default function PubCardContent({
             </View>
           )}
         </View>
-      )}
 
       {/* ── Feature icons ────────────────────────────────────────────────── */}
       <View style={styles.featuresContainer}>
@@ -419,6 +479,8 @@ export default function PubCardContent({
           <Text style={styles.achievementText}>{pub.achievements[0]}</Text>
         </View>
       )}
+
+      <View style={styles.dividerBeforeActions} />
 
       {/* ── Action buttons ───────────────────────────────────────────────── */}
       <View style={styles.actionRow}>
@@ -453,7 +515,7 @@ export default function PubCardContent({
       </View>
 
       {/* ── Divider ──────────────────────────────────────────────────────── */}
-      <View style={styles.divider} />
+      <View style={styles.dividerAfterActions} />
 
       {/* ── Reviews + drinks ─────────────────────────────────────────────── */}
       <View style={styles.reviewsSection}>
@@ -467,21 +529,32 @@ export default function PubCardContent({
               accessibilityLabel="Open reviews"
             >
               <MaterialCommunityIcons name="comment-text-outline" size={20} color={COLORS.amber} />
-              <Text style={styles.reviewsButtonLabel}>Reviews</Text>
-              <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.mediumGrey} />
+              <Text style={[styles.reviewsButtonLabel, styles.reviewsButtonLabelSpaced]} numberOfLines={1}>
+                Reviews
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {userId && (
-            <View style={styles.reviewsActionHalf}>
-              <View style={styles.drinksInlineRow}>
+          <TouchableOpacity
+            style={[styles.summonRectButton, styles.reviewsRowSpaced]}
+            onPress={handleOpenSummonModal}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Summon friends to this pub"
+          >
+            <MaterialCommunityIcons name="account-multiple" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {userId ? (
+            <View style={[styles.drinksInlineRow, styles.reviewsRowSpaced]}>
               <TouchableOpacity
                 style={[
-                  styles.drinkRectButton,
-                  (drinkCount === 0 || drinkCountLoading) && styles.drinkRectButtonDisabled,
+                  styles.actionRectButton,
+                  (drinkCount === 0 || drinkLoadState !== 'loaded') && styles.actionRectButtonDisabled,
                 ]}
                 onPress={() => handleChangeDrink(-1)}
-                disabled={drinkCount === 0 || drinkCountLoading}
+                disabled={drinkCount === 0 || drinkLoadState !== 'loaded'}
+                accessibilityLabel="Remove a drink"
                 activeOpacity={0.7}
               >
                 <MaterialCommunityIcons
@@ -491,26 +564,52 @@ export default function PubCardContent({
                 />
               </TouchableOpacity>
 
-              <View style={styles.drinkCenter}>
-                <MaterialCommunityIcons name="beer" size={28} color={COLORS.amber} />
-                {drinkCountLoading ? (
-                  <ActivityIndicator size="small" color={COLORS.amber} />
-                ) : (
-                  <Text style={styles.drinkCountText}>{drinkCount}</Text>
-                )}
+              <View style={[styles.drinkCenter, styles.reviewsRowSpaced]}>
+                <MaterialCommunityIcons
+                  name="beer"
+                  size={DRINK_BEER_ICON_SIZE}
+                  color={COLORS.amber}
+                />
+                <View style={styles.drinkCountSlot}>
+                  {drinkLoadState === 'loading' ? (
+                    <ActivityIndicator size="small" color={COLORS.amber} />
+                  ) : drinkLoadState === 'error' ? (
+                    <TouchableOpacity
+                      onPress={() => loadDrinkCount(pub.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Couldn't load your drinks. Tap to retry."
+                    >
+                      <MaterialCommunityIcons name="refresh" size={24} color={COLORS.amber} />
+                    </TouchableOpacity>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.drinkCountText,
+                        { fontSize: drinkCountDisplayFontSize(drinkCount) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {drinkCount}
+                    </Text>
+                  )}
+                </View>
               </View>
 
               <TouchableOpacity
-                style={[styles.drinkRectButton, drinkCountLoading && styles.drinkRectButtonDisabled]}
+                style={[
+                  styles.actionRectButton,
+                  styles.reviewsRowSpaced,
+                  drinkLoadState !== 'loaded' && styles.actionRectButtonDisabled,
+                ]}
                 onPress={() => handleChangeDrink(1)}
-                disabled={drinkCountLoading}
+                disabled={drinkLoadState !== 'loaded'}
+                accessibilityLabel="Add a drink"
                 activeOpacity={0.7}
               >
                 <MaterialCommunityIcons name="plus" size={26} color="#FFFFFF" />
               </TouchableOpacity>
-              </View>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
@@ -520,12 +619,23 @@ export default function PubCardContent({
         pubName={pub.name}
         reviews={reviews}
         reviewsLoading={reviewsLoading}
+        reviewsLoadFailed={reviewsLoadFailed}
+        onRetryLoadReviews={() => loadReviews(pub.id)}
         userReview={userReview}
         userId={userId}
         avgRating={avgRatingNumeric}
         reviewCount={reviewCount}
         onSubmitReview={handleSubmitReview}
         onDeleteReview={handleDeleteReview}
+      />
+
+      <PubSummonTroopsModal
+        visible={showSummonModal}
+        onClose={() => setShowSummonModal(false)}
+        pubId={pub.id}
+        pubName={pub.name}
+        pubAreaLabel={pubAreaLabel}
+        currentUserId={userId}
       />
 
       {/* ── History / description ───────────────────────────────────────── */}
@@ -538,6 +648,31 @@ export default function PubCardContent({
     </ScrollView>
   );
 }
+
+/** Same as featuresContainer: paddingVertical 10×2 + featureIconWrapper height 32 */
+const REVIEWS_ACTIONS_ROW_HEIGHT = 52;
+const REVIEWS_ROW_GAP = 8;
+/** Icon-only summon control — fixed width so drinks +/- are not clipped on narrow Android rows. */
+const SUMMON_BUTTON_WIDTH = 44;
+const DRINK_ACTION_BUTTON_WIDTH = 40;
+const DRINK_BEER_ICON_SIZE = 22;
+const DRINK_ICON_COUNT_GAP = 4;
+const DRINK_COUNT_FONT_SIZE_TWO_DIGITS = 22;
+/** Slot width for two digits at DRINK_COUNT_FONT_SIZE_TWO_DIGITS; 3+ digits use smaller type. */
+const DRINK_COUNT_SLOT_WIDTH = 34;
+
+function drinkCountDisplayFontSize(count) {
+  const digits = String(Math.max(0, count)).length;
+  if (digits <= 2) return DRINK_COUNT_FONT_SIZE_TWO_DIGITS;
+  if (digits === 3) return 17;
+  if (digits === 4) return 14;
+  return 12;
+}
+
+const DRINK_CENTER_WIDTH =
+  DRINK_BEER_ICON_SIZE + DRINK_ICON_COUNT_GAP + DRINK_COUNT_SLOT_WIDTH;
+const DRINKS_INLINE_ROW_WIDTH =
+  DRINK_ACTION_BUTTON_WIDTH * 2 + REVIEWS_ROW_GAP * 2 + DRINK_CENTER_WIDTH;
 
 const styles = StyleSheet.create({
   cardContent: {
@@ -659,16 +794,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
     paddingVertical: 10,
     paddingHorizontal: 8,
     borderRadius: 12,
     backgroundColor: COLORS.lightGrey,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 0,
+      },
+      default: {},
+    }),
   },
   featureIconWrapper: {
     alignItems: 'center',
@@ -685,7 +827,7 @@ const styles = StyleSheet.create({
   achievementContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   achievementText: {
     fontSize: 14,
@@ -698,7 +840,7 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 8,
     gap: 8,
   },
   actionButton: {
@@ -729,18 +871,40 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.lightGrey,
     marginVertical: 8,
   },
+  dividerBeforeActions: {
+    height: 1,
+    backgroundColor: COLORS.lightGrey,
+    marginBottom: 8,
+  },
+  dividerAfterActions: {
+    height: 1,
+    backgroundColor: COLORS.lightGrey,
+    marginBottom: 8,
+  },
 
   // ── Drinks counter ────────────────────────────────────────────────────────
+  drinkCountSlot: {
+    width: DRINK_COUNT_SLOT_WIDTH,
+    height: DRINK_COUNT_FONT_SIZE_TWO_DIGITS + 4,
+    marginLeft: DRINK_ICON_COUNT_GAP,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
   drinkCountText: {
-    fontSize: 26,
     fontWeight: '700',
     color: COLORS.darkGrey,
-    minWidth: 28,
     textAlign: 'center',
+    width: DRINK_COUNT_SLOT_WIDTH,
+    fontVariant: ['tabular-nums'],
+    includeFontPadding: false,
+    ...(Platform.OS === 'android' ? { textAlignVertical: 'center' } : null),
   },
 
   // ── Reviews ───────────────────────────────────────────────────────────────
-  reviewsSection: {},
+  reviewsSection: {
+    width: '100%',
+  },
   ratingSummaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -771,19 +935,25 @@ const styles = StyleSheet.create({
   reviewsActionsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 12,
+    width: '100%',
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
+  },
+  reviewsRowSpaced: {
+    marginLeft: REVIEWS_ROW_GAP,
   },
   reviewsActionHalf: {
     flex: 1,
-    flexBasis: 0,
-    minWidth: 0,
+    flexShrink: 1,
+    minWidth: 92,
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
+    alignSelf: 'stretch',
   },
   reviewsButton: {
-    width: '100%',
+    flex: 1,
+    height: REVIEWS_ACTIONS_ROW_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1.5,
@@ -791,35 +961,48 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   reviewsButtonLabel: {
-    flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: COLORS.darkGrey,
   },
+  reviewsButtonLabelSpaced: {
+    marginLeft: 8,
+  },
   drinksInlineRow: {
-    width: '100%',
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 6,
+    width: DRINKS_INLINE_ROW_WIDTH,
   },
-  drinkRectButton: {
-    width: 44,
-    marginVertical: 4,
+  summonRectButton: {
+    width: SUMMON_BUTTON_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignSelf: 'stretch',
     backgroundColor: COLORS.amber,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  drinkRectButtonDisabled: {
+  actionRectButton: {
+    width: DRINK_ACTION_BUTTON_WIDTH,
+    alignSelf: 'stretch',
+    backgroundColor: COLORS.amber,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionRectButtonDisabled: {
     backgroundColor: '#E0E0E0',
   },
   drinkCenter: {
-    flex: 1,
+    alignSelf: 'stretch',
+    width: DRINK_CENTER_WIDTH,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    overflow: 'hidden',
   },
   // ── History ───────────────────────────────────────────────────────────────
   historyContainer: {

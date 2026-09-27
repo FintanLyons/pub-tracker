@@ -8,16 +8,17 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createLeague, addLeagueMember } from '../services/LeagueService';
 import { getFriends } from '../services/FriendsService';
 import { COLORS } from '../constants/theme';
+import { useAppAlert } from '../contexts/AppAlertContext';
 import ShareLeagueModal from './ShareLeagueModal';
 import UserAvatar from './UserAvatar';
 
 export default function CreateLeagueModal({ visible, onClose, currentUserId, onLeagueCreated }) {
+  const { showAppAlert } = useAppAlert();
   const [leagueName, setLeagueName] = useState('');
   const [friends, setFriends] = useState([]);
   const [selectedFriends, setSelectedFriends] = useState([]);
@@ -58,7 +59,11 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
   /** Creates the league on the server so the invite code exists before the add-friends step. */
   const handleNext = async () => {
     if (!leagueName.trim()) {
-      Alert.alert('Error', 'Please enter a league name');
+      showAppAlert({
+        title: 'Error',
+        message: 'Please enter a league name',
+        tone: 'error',
+      });
       return;
     }
 
@@ -70,7 +75,7 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
       if (onLeagueCreated) onLeagueCreated();
     } catch (error) {
       console.error('Error creating league:', error);
-      Alert.alert('Error', 'Failed to create league');
+      showAppAlert({ title: 'Error', message: 'Failed to create league', tone: 'error' });
     } finally {
       setLoading(false);
     }
@@ -114,13 +119,16 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
     );
   };
 
+  const handleModalRequestClose = showShareModal
+    ? () => setShowShareModal(false)
+    : onClose;
+
   return (
-    <>
       <Modal
         visible={visible}
         animationType="slide"
         transparent={true}
-        onRequestClose={onClose}
+        onRequestClose={handleModalRequestClose}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -231,16 +239,18 @@ export default function CreateLeagueModal({ visible, onClose, currentUserId, onL
               </View>
             )}
           </View>
+
+          {showShareModal && createdLeague ? (
+            <ShareLeagueModal
+              embedded
+              visible
+              onClose={() => setShowShareModal(false)}
+              leagueName={createdLeague.name}
+              leagueCode={createdLeague.code}
+            />
+          ) : null}
         </View>
       </Modal>
-
-      <ShareLeagueModal
-        visible={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        leagueName={createdLeague?.name}
-        leagueCode={createdLeague?.code}
-      />
-    </>
   );
 }
 
