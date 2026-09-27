@@ -10,7 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
   consumeSocialAction,
   markNotificationPromptShown,
@@ -71,6 +71,10 @@ export default function LeaderboardScreen() {
   const [showLeaveLeagueModal, setShowLeaveLeagueModal] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const selectedLeagueIdRef = useRef(null);
+  /** Only the latest loadData call may apply its result (focus, refresh and notification taps can overlap). */
+  const loadSeqRef = useRef(0);
+  const navigation = useNavigation();
+  const route = useRoute();
 
   useEffect(() => {
     selectedLeagueIdRef.current = selectedLeague?.id ?? null;
@@ -106,16 +110,17 @@ export default function LeaderboardScreen() {
       setRefreshing(false);
     }
 
+    const seq = ++loadSeqRef.current;
     try {
       const bundle = await fetchLeaderboardBundle(
         authUser.id,
         selectedLeagueIdRef.current,
       );
       cacheLeaderboardData(authUser.id, bundle);
-      applyBundle(bundle);
+      if (seq === loadSeqRef.current) applyBundle(bundle);
     } catch (error) {
       console.error('Error loading leaderboard data:', error);
-      if (!getCachedLeaderboardData(authUser.id)) {
+      if (seq === loadSeqRef.current && !getCachedLeaderboardData(authUser.id)) {
         showAppAlert({
           title: 'Error',
           message: 'Failed to load leaderboard data',
@@ -133,6 +138,34 @@ export default function LeaderboardScreen() {
       loadData();
     }, [loadData])
   );
+
+  // Opened from a push notification (services/notificationNavigation.js).
+  const { openFriendRequests, showLeagueId, showLeagueNonce, showLeagues, showFriends } =
+    route.params || {};
+  useEffect(() => {
+    if (!openFriendRequests && !showLeagueNonce && !showLeagues && !showFriends) return;
+    if (openFriendRequests) {
+      setActiveTab('friends');
+      setOpenAddFriendOnRequests(true);
+      setShowAddFriendModal(true);
+    } else if (showLeagueNonce || showLeagues) {
+      setActiveTab('leagues');
+      if (showLeagueId) {
+        // Just added: the league may not be in the cached list yet, so reload with it selected.
+        selectedLeagueIdRef.current = showLeagueId;
+        loadData();
+      }
+    } else {
+      setActiveTab('friends');
+    }
+    navigation.setParams({
+      openFriendRequests: undefined,
+      showLeagueId: undefined,
+      showLeagueNonce: undefined,
+      showLeagues: undefined,
+      showFriends: undefined,
+    });
+  }, [openFriendRequests, showLeagueId, showLeagueNonce, showLeagues, showFriends, loadData, navigation]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
