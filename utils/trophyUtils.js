@@ -21,16 +21,6 @@ const sortTrophiesEarnedFirst = (trophies) =>
     return 0;
   });
 
-export const isAreaTrophyType = (trophy) => {
-  const type = trophy?.type;
-  return (
-    type === 'district'
-    || type === 'area'
-    || type === 'postcode_area'
-    || type === 'borough'
-  );
-};
-
 /** District + postcode-area completion trophies for the Areas tab. */
 export const getAreaTrophies = (achievements) => {
   if (!achievements) return [];
