@@ -15,14 +15,14 @@ const PAGES = [
     image: require('../assets/onboarding-discover-pubs.png'),
     icon: 'map-search',
     headline: 'Discover new Pubs',
-    body: 'Explore London on the map, search by area, and find your next pint.',
+    body: 'Explore London on the map, search by district, and find your next pint.',
   },
   {
     key: 'track',
     image: require('../assets/onboarding-track-visits.png'),
     icon: 'star-circle',
     headline: 'Earn points and track visits',
-    body: 'Mark pubs visited, log drinks, level up, and complete areas for bonus points.',
+    body: 'Mark pubs visited, log drinks, level up, and complete districts and areas for bonus points.',
   },
   {
     key: 'compete',

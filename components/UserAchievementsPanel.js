@@ -191,7 +191,7 @@ export default function UserAchievementsPanel() {
             accessibilityState={{ selected: activeTab === TROPHY_TABS.AREAS }}
           >
             <Text style={[styles.tabText, activeTab === TROPHY_TABS.AREAS && styles.activeTabText]}>
-              Areas
+              Districts & areas
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -244,8 +244,8 @@ export default function UserAchievementsPanel() {
         activeTrophies.length === 0 ? (
           <TrophyEmpty
             icon="trophy-outline"
-            title="No area trophies yet"
-            subtitle="Visit every pub in a district or region to earn your first trophy"
+            title="No district or area trophies yet"
+            subtitle="Visit every pub in a district or area to earn your first trophy"
           />
         ) : (
           <TrophyGrid trophies={activeTrophies} />

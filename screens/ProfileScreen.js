@@ -513,7 +513,7 @@ export default function ProfileScreen({
   const areasListEmpty = useMemo(
     () => (
       <Text style={styles.emptyText}>
-        {viewMode === VIEW_MODES.DISTRICT ? 'No areas found' : 'No regions found'}
+        {viewMode === VIEW_MODES.DISTRICT ? 'No districts found' : 'No areas found'}
       </Text>
     ),
     [viewMode],
@@ -1026,7 +1026,7 @@ export default function ProfileScreen({
       {/* ── Primary stats card: Drinks | Pubs ─────────────────────── */}
       <View style={styles.statsCard}>
         <View style={styles.statsRow}>
-          <View style={styles.statItem}>
+          <View style={styles.statItem} accessible accessibilityLabel={`${drinkStats.total} drinks`}>
             <AnimatedStatTextInput
               animatedProps={mapReturnDrinksAnimatedProps}
               style={styles.statNumberInput}
@@ -1038,7 +1038,7 @@ export default function ProfileScreen({
             <Text style={styles.statItemLabel}>Drinks</Text>
           </View>
           <View style={styles.statDivider} />
-          <View style={styles.statItem}>
+          <View style={styles.statItem} accessible accessibilityLabel={`${totalVisited} pubs visited`}>
             <AnimatedStatTextInput
               animatedProps={mapReturnPubsAnimatedProps}
               style={styles.statNumberInput}
@@ -1055,12 +1055,12 @@ export default function ProfileScreen({
       {/* ── Secondary stats card: Areas | Level | Score + level progress bar ─ */}
       <View style={[styles.statsCard, styles.statsCardSecondary]}>
         <View style={styles.statsRow}>
-          <View style={styles.statItem}>
+          <View style={styles.statItem} accessible accessibilityLabel={`${completedAreas} districts completed`}>
             <Text style={styles.statNumberSmall}>{completedAreas}</Text>
-            <Text style={styles.statItemLabelSmall}>Areas</Text>
+            <Text style={styles.statItemLabelSmall}>Districts</Text>
           </View>
           <View style={styles.statDividerSmall} />
-          <View style={styles.statItem}>
+          <View style={styles.statItem} accessible accessibilityLabel={`Level ${levelProgress.level}`}>
             <AnimatedStatTextInput
               animatedProps={mapReturnLevelAnimatedProps}
               style={styles.statNumberSmallInput}
@@ -1072,7 +1072,7 @@ export default function ProfileScreen({
             <Text style={styles.statItemLabelSmall}>Level</Text>
           </View>
           <View style={styles.statDividerSmall} />
-          <View style={styles.statItem}>
+          <View style={styles.statItem} accessible accessibilityLabel={`Score ${totalScore}`}>
             <AnimatedStatTextInput
               animatedProps={mapReturnScoreAnimatedProps}
               style={[styles.statNumberSmallInput, styles.statScoreAnimatedInput]}
@@ -1120,10 +1120,7 @@ export default function ProfileScreen({
         <View style={styles.statsErrorBanner}>
           <MaterialCommunityIcons name="alert-circle-outline" size={20} color="#C62828" />
           <Text style={styles.statsErrorText}>
-            Could not load area stats. Pull to refresh or check your connection.
-            {typeof statsError?.message === 'string' && statsError.message
-              ? `\n${statsError.message}`
-              : ''}
+            Couldn't load your stats. Pull down to try again.
           </Text>
         </View>
       )}
@@ -1146,14 +1143,14 @@ export default function ProfileScreen({
             />
           </TouchableOpacity>
           <Text style={[styles.sectionTitle, styles.sectionTitleLeft]} numberOfLines={1}>
-            {viewMode === VIEW_MODES.DISTRICT ? 'By area' : 'By region'}
+            {viewMode === VIEW_MODES.DISTRICT ? 'By district' : 'By area'}
           </Text>
           <View style={styles.sectionRightControls}>
             <TouchableOpacity 
               onPress={() => setShowFilterModal(true)}
               style={styles.filterButton}
               activeOpacity={0.8}
-              accessibilityLabel="Sort and filter areas"
+              accessibilityLabel="Sort list"
               accessibilityRole="button"
             >
               <MaterialCommunityIcons name="filter-variant" size={20} color={COLORS.darkGrey} />
@@ -1542,7 +1539,7 @@ export default function ProfileScreen({
                   </View>
                 </View>
 
-                <Text style={styles.scoringSectionTitle}>Area</Text>
+                <Text style={styles.scoringSectionTitle}>Completion bonuses</Text>
 
                 <View style={styles.scoringGridRow}>
                   {AREA_COMPLETION_SIZE_TIERS.map((tier) => (
@@ -1551,7 +1548,7 @@ export default function ProfileScreen({
                     </View>
                   ))}
                   <View style={styles.scoringGridCell}>
-                    <Text style={styles.scoringGridLabel}>Region</Text>
+                    <Text style={styles.scoringGridLabel}>Area</Text>
                   </View>
                 </View>
 
@@ -1567,6 +1564,12 @@ export default function ProfileScreen({
                     </Text>
                   </View>
                 </View>
+
+                <Text style={styles.scoringExplainer}>
+                  District bonus when you've visited every pub in a district, by its size: S under 10 pubs · M 10–19 · L 20–29 · XL 30 or more.
+                  {'\n'}Area bonus when you've visited every pub in an area, e.g. all of SW.
+                  {'\n'}Some pubs also carry extra points for awards and milestones — see Trophies.
+                </Text>
 
                 <Text style={styles.scoringSectionTitle}>Corrections (when accepted)</Text>
 
@@ -1672,8 +1675,9 @@ export default function ProfileScreen({
               </TouchableOpacity>
             </View>
             <Text style={styles.floatingCardBody}>
-              Your profile, visits, favourites, friends, and league memberships will be removed
-              permanently. This cannot be undone.
+              This permanently deletes your profile, visits, drinks, reviews, favourites and friends.
+              Leagues you own are deleted for all their members. Pub reports you've sent stay,
+              but are no longer linked to your account. This can't be undone.
             </Text>
             <View style={styles.floatingCardActions}>
               <TouchableOpacity
@@ -2132,6 +2136,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.amber,
     textAlign: 'center',
+  },
+  scoringExplainer: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: COLORS.mediumGrey,
+    marginTop: 8,
+    marginBottom: 14,
   },
   scoringSectionTitle: {
     fontSize: 13,
