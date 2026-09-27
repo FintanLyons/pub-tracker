@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { distanceKm } from '../utils/geo';
 import { useUserStats } from '../contexts/UserStatsContext';
 import { useUserLocation } from '../contexts/LocationContext';
+import { useNetworkStatus } from '../contexts/NetworkContext';
 import { COLORS } from '../constants/theme';
 import { getAchievedTrophyIds } from '../utils/trophyUtils';
 import { SUPPORTED_POSTCODE_AREAS } from '../constants/londonAreas';
@@ -53,6 +54,7 @@ export default function ProfileScreen({
     refreshUserStats,
   } = useUserStats();
   const location = useUserLocation();
+  const { isConnected } = useNetworkStatus();
   const [districtStatsRaw, setDistrictStatsRaw] = useState([]);
   const [postcodeAreaStatsRaw, setPostcodeAreaStatsRaw] = useState([]);
   const [sortMode, setSortMode] = useState(SORT_MODES.LOCATION);
@@ -343,6 +345,15 @@ export default function ProfileScreen({
 
   const completedAreas = districtStatsRaw.filter(d => d.percentage >= 100).length;
   const totalScore = achievements?.totalScore ?? 0;
+  // Back online after a failed refresh: retry instead of asking the user to pull down.
+  useEffect(() => {
+    if (!isConnected || statsError == null) return;
+    refreshUserStats().catch((error) => {
+      console.error('Error refreshing profile stats after reconnect:', error);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
+
   const handleMapReturnStart = useCallback(() => {
     skipNextProfileFocusRefreshRef.current = true;
   }, []);
@@ -443,7 +454,8 @@ export default function ProfileScreen({
       />
 
 
-      {statsError != null && (
+      {/* Offline: the offline banner already explains why stats can't refresh. */}
+      {statsError != null && isConnected && (
         <View style={styles.statsErrorBanner}>
           <MaterialCommunityIcons name="alert-circle-outline" size={20} color="#C62828" />
           <Text style={styles.statsErrorText}>
