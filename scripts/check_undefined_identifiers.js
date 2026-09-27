@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Usage: npm run check:undefined — lists identifiers used but never declared/imported,
-// and styles.X references missing from the file's StyleSheet.create
-// (would crash at runtime with ReferenceError; Metro bundling does not catch these).
+// consts read above their declaration while the function is still running, and
+// styles.X references missing from the file's StyleSheet.create
+// (runtime ReferenceError / silent undefined; Metro bundling does not catch these).
 const babel=require('@babel/core'); const traverse=require('@babel/traverse').default; const fs=require('fs');
 const GLOBALS=new Set(['console','require','module','exports','process','global','globalThis','window','document','navigator','fetch','Promise','setTimeout','clearTimeout','setInterval','clearInterval','queueMicrotask','requestAnimationFrame','cancelAnimationFrame','JSON','Math','Date','Number','String','Boolean','Array','Object','Map','Set','WeakMap','WeakSet','Symbol','Error','TypeError','RangeError','RegExp','Intl','URL','URLSearchParams','encodeURIComponent','decodeURIComponent','parseInt','parseFloat','isNaN','isFinite','Infinity','NaN','undefined','arguments','Buffer','__DEV__','FormData','Blob','Headers','Response','Request','AbortController','TextEncoder','TextDecoder','atob','btoa','structuredClone','Uint8Array','ArrayBuffer','DataView','Reflect','Proxy','BigInt','performance','crypto','alert','XMLHttpRequest','WebSocket','Event','EventTarget','Function']);
 let issues=0;
@@ -36,6 +37,27 @@ for (const f of files) {
     if (!sheets.get(object.name).has(property.name)) { console.log(`${f}:${p.node.loc.start.line}  ${object.name}.${property.name} (style not defined)`); issues++; }
   } });
   traverse(ast,{ ReferencedIdentifier(p){ const n=p.node.name; if (p.parentPath.isJSXMemberExpression()||p.isJSXIdentifier()&&/^[a-z]/.test(n)) return; if(!p.scope.hasBinding(n,true)&&!GLOBALS.has(n)){ console.log(`${f}:${p.node.loc.start.line}  ${n}`); issues++; } } });
+  // Used before declared: a const/let read while its function is still running, above
+  // the line that declares it (hook deps arrays, useMemo factories, JSX props…). Babel
+  // compiles const to var, so this silently yields undefined instead of throwing.
+  // Reads inside callbacks/effects are fine — those run later.
+  const RENDER_TIME_CALLBACKS = new Set(['useMemo', 'useState', 'useReducer']);
+  traverse(ast, { ReferencedIdentifier(p) {
+    const binding = p.scope.getBinding(p.node.name);
+    if (!binding || (binding.kind !== 'const' && binding.kind !== 'let')) return;
+    const decl = binding.path.node;
+    if (p.node.start >= decl.start) return;
+    const owner = binding.scope.getFunctionParent() || binding.scope.getProgramParent();
+    for (let cur = p.parentPath; cur && cur.node !== owner.block; cur = cur.parentPath) {
+      if (!cur.isFunction()) continue;
+      const call = cur.parentPath;
+      const callee = call.isCallExpression() && call.node.arguments[0] === cur.node ? call.node.callee : null;
+      const name = callee && (callee.name || callee.property?.name);
+      if (!RENDER_TIME_CALLBACKS.has(name)) return; // runs later
+    }
+    console.log(`${f}:${p.node.loc.start.line}  ${p.node.name} (used before its declaration on line ${decl.loc.start.line} — it is undefined here)`);
+    issues++;
+  } });
 }
 console.log(issues? `${issues} undefined reference(s)` : 'no undefined references');
 process.exitCode = issues ? 1 : 0;
