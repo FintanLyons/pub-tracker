@@ -98,6 +98,37 @@ Deno.serve(async (req) => {
           .in("expo_push_token", tokens);
         if (error) throw error;
       },
+      saveTickets: async (rows) => {
+        for (const r of rows) {
+          const { error } = await supabase
+            .from("notification_outbox")
+            .update({ push_tickets: r.tickets })
+            .eq("id", r.id);
+          if (error) throw error;
+        }
+      },
+      loadUncheckedTickets: async (limit) => {
+        const { data, error } = await supabase
+          .from("notification_outbox")
+          .select("id, sent_at, push_tickets")
+          .not("push_tickets", "is", null)
+          .is("receipts_checked_at", null)
+          .not("sent_at", "is", null)
+          .order("sent_at", { ascending: true })
+          .limit(limit);
+        if (error) throw error;
+        return data ?? [];
+      },
+      markReceipts: async (rows) => {
+        const checkedAt = new Date().toISOString();
+        for (const r of rows) {
+          const { error } = await supabase
+            .from("notification_outbox")
+            .update({ receipts_checked_at: checkedAt, receipt_error: r.error })
+            .eq("id", r.id);
+          if (error) throw error;
+        }
+      },
       send: (messages) => sendExpoPushMessages(expoToken, messages),
       receipts: (ids) => fetchExpoReceipts(expoToken, ids),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
