@@ -1,19 +1,19 @@
 // @ts-nocheck — Deno Edge runtime
 /**
- * Drains notification_outbox and sends via Expo Push API.
+ * Drains notification_outbox and sends via Expo Push API (logic: _shared/outbox-worker.ts).
+ * Needs scripts/notification_queue_2026_09.sql (claim_notification_batch /
+ * finish_notification_batch).
  *
- * Schedule: Supabase Dashboard → Edge Functions → cron every 1–2 minutes, or invoke manually.
+ * Schedule: cron-job.org every 1–2 minutes, or invoke manually.
  * Headers: x-cron-secret: <NOTIFICATION_CRON_SECRET>
  *
  * Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, EXPO_ACCESS_TOKEN, NOTIFICATION_CRON_SECRET
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { APP_DISPLAY_NAME } from "../_shared/app-brand.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { assertCronSecret } from "../_shared/cron-auth.ts";
-import { sendExpoPushMulticast } from "../_shared/expo-push.ts";
-
-const BATCH = 50;
+import { fetchExpoReceipts, sendExpoPushMessages } from "../_shared/expo-push.ts";
+import { drainOutbox } from "../_shared/outbox-worker.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -36,189 +36,80 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  const { data: rows, error: selErr } = await supabase
-    .from("notification_outbox")
-    .select("id, target_user_id, kind, payload")
-    .is("sent_at", null)
-    .order("created_at", { ascending: true })
-    .limit(BATCH);
-
-  if (selErr) {
-    console.error(selErr);
-    return json({ error: selErr.message }, 500);
-  }
-
-  if (!rows?.length) {
-    return json({ processed: 0, message: "empty queue" }, 200);
-  }
-
-  let processed = 0;
-  for (const row of rows) {
-    const { id, target_user_id: targetUserId, kind, payload } = row;
-    try {
-      const { title, body, data } = await resolveMessage(supabase, kind, payload);
-
-      const { data: tokenRows, error: tokErr } = await supabase
-        .from("user_push_tokens")
-        .select("expo_push_token")
-        .eq("user_id", targetUserId);
-
-      if (tokErr) throw tokErr;
-
-      const tokens = (tokenRows ?? []).map((r) => r.expo_push_token).filter(Boolean);
-      if (tokens.length === 0) {
-        await supabase
-          .from("notification_outbox")
-          .update({
-            last_error:
-              "no_push_tokens: recipient has no row in user_push_tokens (open app after login, allow notifications)",
-          })
-          .eq("id", id);
-        continue;
-      }
-
-      const results = await sendExpoPushMulticast({
-        expoAccessToken: expoToken,
-        tokens,
-        title,
-        body,
-        data: { ...data, kind },
-      });
-
-      for (const r of results) {
-        if (!r.ok && r.error === "DeviceNotRegistered") {
-          await supabase
-            .from("user_push_tokens")
-            .delete()
-            .eq("expo_push_token", r.token);
-        }
-      }
-
-      const anyOk = results.some((r) => r.ok);
-      const errs = results.filter((r) => !r.ok).map((r) => r.error).join("; ");
-      if (!anyOk && tokens.length > 0) {
-        await supabase
-          .from("notification_outbox")
-          .update({
-            last_error: errs || "all recipients failed",
-          })
-          .eq("id", id);
-      } else {
-        await supabase
-          .from("notification_outbox")
-          .update({
-            sent_at: new Date().toISOString(),
-            last_error: anyOk ? null : errs,
-          })
-          .eq("id", id);
-        processed += 1;
-      }
-    } catch (e) {
-      console.error("outbox row", id, e);
-      const msg = e instanceof Error ? e.message : String(e);
-      await supabase
-        .from("notification_outbox")
-        .update({ last_error: msg })
-        .eq("id", id);
-    }
-  }
-
-  return json({ processed, batchSize: rows.length }, 200);
-});
-
-async function resolveMessage(
-  supabase: ReturnType<typeof createClient>,
-  kind: string,
-  payload: Record<string, unknown> | null,
-): Promise<{ title: string; body: string; data: Record<string, unknown> }> {
-  const p = payload ?? {};
-
-  if (kind === "friend_request") {
-    const requesterId = p.requester_id as string | undefined;
-    let name = "Someone";
-    if (requesterId) {
-      const { data: u } = await supabase
-        .from("users")
-        .select("username")
-        .eq("id", requesterId)
-        .maybeSingle();
-      if (u?.username) name = u.username;
-    }
-    return {
-      title: "Friend request",
-      body: `${name} wants to be friends on ${APP_DISPLAY_NAME}`,
-      data: { friendship_id: p.friendship_id, requester_id: requesterId },
-    };
-  }
-
-  if (kind === "pub_summon") {
-    const summonerId = p.summoner_id as string | undefined;
-    let summonerName = "Someone";
-    if (summonerId) {
-      const { data: u } = await supabase
-        .from("users")
-        .select("username")
-        .eq("id", summonerId)
-        .maybeSingle();
-      if (u?.username) summonerName = u.username;
-    }
-
-    const pubName = (p.pub_name as string | undefined)?.trim() || "a pub";
-    const pubArea = (p.pub_area as string | undefined)?.trim() || "London";
-    const lat = p.lat as number | undefined;
-    const lon = p.lon as number | undefined;
-    const mapsUrl =
-      lat != null && lon != null
-        ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`
-        : undefined;
-
-    return {
-      title: "Summon the troops!",
-      body: `${summonerName} has summoned you to ${pubName} in ${pubArea}. Tap here for directions.`,
-      data: {
-        pub_id: p.pub_id,
-        summoner_id: summonerId,
-        lat,
-        lon,
-        maps_url: mapsUrl,
+  try {
+    const result = await drainOutbox({
+      claimBatch: async (limit, leaseSeconds) => {
+        const { data, error } = await supabase.rpc("claim_notification_batch", {
+          p_limit: limit,
+          p_lease_seconds: leaseSeconds,
+        });
+        if (error) throw error;
+        return data ?? [];
       },
-    };
+      finishBatch: async (sent, failed) => {
+        const { error } = await supabase.rpc("finish_notification_batch", {
+          p_sent: sent,
+          p_failed_ids: failed.map((f) => f.id),
+          p_failed_errors: failed.map((f) => f.error),
+        });
+        // Not fatal: the lease expires and the rows are retried.
+        if (error) console.error("finish_notification_batch", error);
+      },
+      fetchTokens: async (userIds) => {
+        const map = new Map<string, string[]>();
+        if (!userIds.length) return map;
+        const { data, error } = await supabase
+          .from("user_push_tokens")
+          .select("user_id, expo_push_token")
+          .in("user_id", userIds);
+        if (error) throw error;
+        for (const r of data ?? []) {
+          if (!r.expo_push_token) continue;
+          map.set(r.user_id, [...(map.get(r.user_id) ?? []), r.expo_push_token]);
+        }
+        return map;
+      },
+      fetchUsernames: async (userIds) => {
+        const map = new Map<string, string>();
+        if (!userIds.length) return map;
+        const { data, error } = await supabase
+          .from("users")
+          .select("id, username")
+          .in("id", userIds);
+        if (error) throw error;
+        for (const u of data ?? []) if (u.username) map.set(u.id, u.username);
+        return map;
+      },
+      fetchLeagueNames: async (leagueIds) => {
+        const map = new Map<string, string>();
+        if (!leagueIds.length) return map;
+        const { data, error } = await supabase
+          .from("leagues")
+          .select("id, name")
+          .in("id", leagueIds);
+        if (error) throw error;
+        for (const l of data ?? []) if (l.name) map.set(l.id, l.name);
+        return map;
+      },
+      deleteTokens: async (tokens) => {
+        const { error } = await supabase
+          .from("user_push_tokens")
+          .delete()
+          .in("expo_push_token", tokens);
+        if (error) throw error;
+      },
+      send: (messages) => sendExpoPushMessages(expoToken, messages),
+      receipts: (ids) => fetchExpoReceipts(expoToken, ids),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      now: () => Date.now(),
+    });
+    return json(result, 200);
+  } catch (e) {
+    console.error("process-notification-queue", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    return json({ error: msg }, 500);
   }
-
-  if (kind === "league_added") {
-    const leagueId = p.league_id as string | undefined;
-    const addedBy = p.added_by_user_id as string | undefined;
-    let leagueName = "a league";
-    if (leagueId) {
-      const { data: lg } = await supabase
-        .from("leagues")
-        .select("name")
-        .eq("id", leagueId)
-        .maybeSingle();
-      if (lg?.name) leagueName = lg.name;
-    }
-    let who = "Someone";
-    if (addedBy) {
-      const { data: u } = await supabase
-        .from("users")
-        .select("username")
-        .eq("id", addedBy)
-        .maybeSingle();
-      if (u?.username) who = u.username;
-    }
-    return {
-      title: "League",
-      body: `${who} added you to ${leagueName}`,
-      data: { league_id: leagueId, added_by_user_id: addedBy },
-    };
-  }
-
-  return {
-    title: APP_DISPLAY_NAME,
-    body: "You have a new notification",
-    data: {},
-  };
-}
+});
 
 function json(body: Record<string, unknown>, status: number) {
   return new Response(JSON.stringify(body), {
