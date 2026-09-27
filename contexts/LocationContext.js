@@ -6,8 +6,15 @@ const LocationContext = createContext({ location: null, isReady: false });
 /** Accept cached fixes up to 5 minutes old for instant map centre on cold start. */
 const LAST_KNOWN_MAX_AGE_MS = 300000;
 
-export function LocationProvider({ children, userId }) {
+/**
+ * `onPermissionAnswered` runs once the location prompt has been answered (or skipped
+ * because it was answered before) — App uses it to ask for notifications next, so the
+ * two system prompts come one after the other rather than on top of each other.
+ */
+export function LocationProvider({ children, userId, onPermissionAnswered }) {
   const [location, setLocation] = useState(null);
+  const onPermissionAnsweredRef = useRef(onPermissionAnswered);
+  onPermissionAnsweredRef.current = onPermissionAnswered;
   const [isReady, setIsReady] = useState(false);
   const hasFreshFix = useRef(false);
 
@@ -23,6 +30,8 @@ export function LocationProvider({ children, userId }) {
           console.warn('LocationContext: location permission failed', err?.message);
           return { status: null };
         });
+
+        if (!cancelled) onPermissionAnsweredRef.current?.();
 
         if (status !== 'granted' || cancelled) return;
 

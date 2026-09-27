@@ -3,10 +3,11 @@ import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
- * Ask for notification permission at a moment it makes sense — right after the user's
- * first social action (friend request, league) — instead of at first launch next to
- * the location prompt. Asked at most once per device; the OS prompt follows only if
- * the user taps "Turn on".
+ * Fallback "Turn on notifications?" explainer, for anyone who skipped the system prompt
+ * shown right after the location prompt (App.js askForNotifications): offered after a
+ * social action or once the user has friends / leagues / requests (LeaderboardScreen).
+ * At most once per device, and only while the OS can still ask; the OS prompt follows
+ * only if the user taps "Turn on".
  */
 
 const PROMPT_SHOWN_KEY = 'push:promptShown:v1';

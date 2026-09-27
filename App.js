@@ -99,6 +99,16 @@ function AppContent() {
     return () => sub.remove();
   }, [user?.id]);
 
+  /**
+   * Straight after the location prompt: ask for notifications. The OS only shows its
+   * prompt while the answer is undecided (iOS: once ever), so later launches just
+   * register the token if allowed. Leaderboard still offers it for anyone who skipped.
+   */
+  const askForNotifications = useCallback(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    void registerPushNotificationsForUser(user.id, { prompt: true });
+  }, [user?.id]);
+
   const completeOnboarding = useCallback(async () => {
     if (!user?.id) return;
     setUserOnboardingDone(true);
@@ -163,7 +173,7 @@ function AppContent() {
     <NavigationContainer ref={navigationRef}>
       <PaperProvider>
         <View style={styles.appContainer}>
-          <LocationProvider userId={user.id}>
+          <LocationProvider userId={user.id} onPermissionAnswered={askForNotifications}>
             <UserStatsProvider userId={user.id}>
               <ToastProvider>
                 <TabNavigator />
