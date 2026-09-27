@@ -18,16 +18,16 @@ Users earn points by visiting pubs, completing entire **postcode districts** (e.
 | Maps | MapLibre (bundled GeoJSON layers + markers) |
 | Build | Expo EAS |
 
-## Push notification scheduling (important)
+## Push notifications (important)
 
-- On Supabase Free tier, scheduled invokes are handled via **`cron-job.org`** (external scheduler), not Supabase built-in scheduler.
-- Two Edge Functions are scheduled:
-  - `process-notification-queue` — every 1-2 minutes (drains `notification_outbox`)
-  - `monthly-friends-digest` — hourly (`0 * * * *`); function itself only sends on last day of month at 17:00 Europe/London
-- Scheduler requests must include header `x-cron-secret` with the same value as Edge secret `NOTIFICATION_CRON_SECRET`.
-- Function endpoints:
-  - `https://<project-ref>.supabase.co/functions/v1/process-notification-queue`
-  - `https://<project-ref>.supabase.co/functions/v1/monthly-friends-digest`
+- Rows go into `notification_outbox` (friend request / league triggers, `enqueue_pub_summon_notifications`, `enqueue_monthly_digest`). Edge Function `process-notification-queue` sends them via Expo (logic in `supabase/functions/_shared/outbox-worker.ts`).
+- **Triggering is inside Supabase** (`scripts/notification_scheduling_2026_09.sql`):
+  - trigger `tr_kick_notification_queue` calls the worker via pg_net right after an insert commits (delivery in seconds)
+  - Supabase Cron (pg_cron): `process-notification-queue` every minute (safety net + retries), `monthly-friends-digest` hourly (it only queues on the last day of the month, 17:00–20:00 Europe/London)
+  - `invoke_notification_function()` sends header `x-cron-secret` from Vault secret `notification_cron_secret`, which must equal Edge secret `NOTIFICATION_CRON_SECRET`
+- Queue rules (`claim_notification_batch` / `finish_notification_batch`): rows are leased so overlapping runs never double-send; retries after 1 min, 5 min, 30 min, 2 h, then `failed_at`; expiry: summon 2 h, digest 12 h, others 7 days.
+- Tapping a notification routes via `services/notificationNavigation.js` (`notificationTarget`).
+- Deploy functions: `npx supabase functions deploy <name>` (project is linked).
 - Required Edge secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EXPO_ACCESS_TOKEN`, `NOTIFICATION_CRON_SECRET`.
 
 ## Scoring system
@@ -102,7 +102,7 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 ### ⚠️ Pending database migrations
 
 - **`scripts/social_security_phase_b_2026_09.sql` — NOT YET RUN (deliberately).** Hides leagues and invite codes from non-members. Run it only once most users have updated to a build that joins leagues via `join_league_by_code()` (commit "Join leagues by code on the server"); older builds can't join leagues after it runs. Remind the user about this whenever database or release work comes up. After running: verify via MCP, update the schema baseline, and delete this bullet.
-- **Batch 7 notifications — in progress.** Order: (1) `scripts/notification_queue_2026_09.sql`; (2) deploy `process-notification-queue`, `monthly-friends-digest`, `presign-r2-upload` (`npx supabase functions deploy <name>`); (3) Vault secret + `scripts/notification_scheduling_2026_09.sql`; (4) once pushes are verified, disable the cron-job.org jobs and rewrite the "Push notification scheduling" section above. After each SQL file: verify via MCP, sync the baseline, update this bullet.
+- **cron-job.org jobs — to disable.** Superseded by Supabase Cron (verified 2026-09-27). Once the user has disabled both jobs, delete this bullet.
 - **Edge secret `R2_REQUIRE_CONTENT_LENGTH=true` on `presign-r2-upload` — NOT YET SET (deliberately).** Builds before Batch 7 don't send `contentLength`; set it alongside Phase B, once most users have updated. Until then old builds can still upload without a size limit.
 
 ### Tables

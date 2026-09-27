@@ -5,7 +5,8 @@
 -- ddfdwxrnouneqqzactus AFTER scripts/security_lockdown_2026_09.sql was applied
 -- (updated for scripts/signup_username_null_2026_09.sql and
 -- scripts/social_security_phase_a_2026_09.sql, scripts/pub_rating_summaries_view_2026_09.sql,
--- scripts/username_case_insensitive_2026_09.sql, scripts/league_ownership_transfer_2026_09.sql).
+-- scripts/username_case_insensitive_2026_09.sql, scripts/league_ownership_transfer_2026_09.sql,
+-- scripts/notification_queue_2026_09.sql, scripts/notification_scheduling_2026_09.sql).
 -- Generated from the Postgres catalogs (pg_get_functiondef, pg_policies, etc.),
 -- so function bodies and policy expressions are exactly what is deployed.
 --
@@ -33,6 +34,7 @@
 -- 0. Extensions, types, sequences
 -- =============================================================================
 CREATE EXTENSION IF NOT EXISTS http WITH SCHEMA extensions;                -- v1.6 (geocoding for missing-pub reports)
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;             -- v1.6.4 (Supabase Cron; jobs in section 3f)
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;              -- v0.19.5
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions;  -- v1.11
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;            -- v1.3
@@ -284,6 +286,9 @@ CREATE TABLE public.notification_outbox (
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   sent_at timestamp with time zone,
   last_error text,
+  attempts integer DEFAULT 0 NOT NULL,              -- claims so far (give up after 5)
+  not_before timestamp with time zone,              -- claim lease / retry backoff
+  failed_at timestamp with time zone,               -- gave up (expired or 5 failures)
   CONSTRAINT notification_outbox_pkey PRIMARY KEY (id),
   CONSTRAINT notification_outbox_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -419,7 +424,7 @@ CREATE INDEX idx_league_members_league_id ON public.league_members USING btree (
 CREATE INDEX idx_league_members_user_id ON public.league_members USING btree (user_id);
 CREATE INDEX idx_leagues_created_by ON public.leagues USING btree (created_by);
 CREATE UNIQUE INDEX leagues_code_key ON public.leagues USING btree (code);
-CREATE INDEX idx_notification_outbox_pending ON public.notification_outbox USING btree (created_at) WHERE (sent_at IS NULL);
+CREATE INDEX idx_notification_outbox_pending ON public.notification_outbox USING btree (created_at) WHERE ((sent_at IS NULL) AND (failed_at IS NULL));
 CREATE INDEX idx_pub_achievements_pub_id ON public.pub_achievements USING btree (pub_id);
 CREATE UNIQUE INDEX idx_pub_achievements_pub_title ON public.pub_achievements USING btree (pub_id, lower(TRIM(BOTH FROM title)));
 CREATE INDEX idx_user_push_tokens_user_id ON public.user_push_tokens USING btree (user_id);
@@ -1924,6 +1929,215 @@ $function$
 ;
 
 
+-- --- 3f. Notification queue + scheduling (server-only) -------------------------
+-- Edge Function process-notification-queue claims/finishes rows; monthly-friends-digest
+-- calls enqueue_monthly_digest. invoke_notification_function reads the Vault secret
+-- `notification_cron_secret` (same value as Edge secret NOTIFICATION_CRON_SECRET).
+
+CREATE OR REPLACE FUNCTION public.claim_notification_batch(
+  p_limit integer DEFAULT 100,
+  p_lease_seconds integer DEFAULT 120
+)
+ RETURNS TABLE (id bigint, target_user_id uuid, kind text, payload jsonb, attempts integer)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  -- Too old to be useful: give up instead of delivering late.
+  UPDATE public.notification_outbox o
+     SET failed_at = now(),
+         not_before = NULL,
+         last_error = left('expired: ' || coalesce(o.last_error, 'not sent in time'), 500)
+   WHERE o.sent_at IS NULL
+     AND o.failed_at IS NULL
+     AND o.created_at < now() - CASE o.kind
+           WHEN 'pub_summon' THEN interval '2 hours'
+           WHEN 'monthly_digest' THEN interval '12 hours'
+           ELSE interval '7 days'
+         END;
+
+  RETURN QUERY
+  WITH picked AS (
+    SELECT o.id
+      FROM public.notification_outbox o
+     WHERE o.sent_at IS NULL
+       AND o.failed_at IS NULL
+       AND (o.not_before IS NULL OR o.not_before <= now())
+     ORDER BY o.created_at, o.id
+     LIMIT greatest(1, least(coalesce(p_limit, 100), 500))
+     FOR UPDATE SKIP LOCKED
+  )
+  UPDATE public.notification_outbox o
+     SET attempts = o.attempts + 1,
+         -- Lease: another run won't pick this row until it expires.
+         not_before = now() + make_interval(secs => greatest(30, coalesce(p_lease_seconds, 120)))
+    FROM picked
+   WHERE o.id = picked.id
+  RETURNING o.id, o.target_user_id, o.kind, o.payload, o.attempts;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.finish_notification_batch(
+  p_sent bigint[],
+  p_failed_ids bigint[],
+  p_failed_errors text[]
+)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  UPDATE public.notification_outbox o
+     SET sent_at = now(),
+         not_before = NULL,
+         last_error = NULL
+   WHERE o.id = ANY (coalesce(p_sent, '{}'))
+     AND o.sent_at IS NULL;
+
+  UPDATE public.notification_outbox o
+     SET last_error = left(coalesce(f.err, 'unknown error'), 500),
+         failed_at = CASE WHEN o.attempts >= 5 THEN now() END,
+         not_before = CASE
+           WHEN o.attempts >= 5 THEN NULL
+           ELSE now() + (ARRAY[
+             interval '1 minute', interval '5 minutes',
+             interval '30 minutes', interval '2 hours'
+           ])[greatest(1, o.attempts)]
+         END
+    FROM unnest(coalesce(p_failed_ids, '{}'), coalesce(p_failed_errors, '{}')) AS f(id, err)
+   WHERE o.id = f.id
+     AND o.sent_at IS NULL
+     AND o.failed_at IS NULL;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.enqueue_monthly_digest(p_year_month text)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_count integer;
+BEGIN
+  IF p_year_month IS NULL OR p_year_month !~ '^\d{4}-\d{2}$' THEN
+    RAISE EXCEPTION 'year_month must look like 2026-09' USING ERRCODE = '22023';
+  END IF;
+
+  WITH claimed AS (
+    INSERT INTO public.notification_monthly_digest_log (user_id, year_month)
+    SELECT DISTINCT t.user_id, p_year_month
+      FROM public.user_push_tokens t
+      JOIN public.users u ON u.id = t.user_id
+    ON CONFLICT (user_id, year_month) DO NOTHING
+    RETURNING user_id
+  ),
+  friends AS (
+    SELECT c.user_id,
+           CASE WHEN f.user_id = c.user_id THEN f.friend_id ELSE f.user_id END AS friend_id
+      FROM claimed c
+      JOIN public.friendships f
+        ON f.status = 'accepted'
+       AND (f.user_id = c.user_id OR f.friend_id = c.user_id)
+  ),
+  ranked AS (
+    SELECT c.user_id,
+           count(DISTINCT fr.friend_id) FILTER (WHERE fr.friend_id <> c.user_id)::integer AS friend_count,
+           1 + count(DISTINCT fr.friend_id) FILTER (
+                 WHERE fr.friend_id <> c.user_id
+                   AND coalesce(fs.total_score, 0) > coalesce(ms.total_score, 0)
+               )::integer AS rank
+      FROM claimed c
+      LEFT JOIN public.user_stats ms ON ms.user_id = c.user_id
+      LEFT JOIN friends fr ON fr.user_id = c.user_id
+      LEFT JOIN public.user_stats fs ON fs.user_id = fr.friend_id
+     GROUP BY c.user_id, ms.total_score
+  )
+  INSERT INTO public.notification_outbox (target_user_id, kind, payload)
+  SELECT r.user_id,
+         'monthly_digest',
+         jsonb_build_object(
+           'year_month', p_year_month,
+           'friend_count', r.friend_count,
+           'rank', CASE WHEN r.friend_count > 0 THEN r.rank END,
+           'total_in_board', r.friend_count + 1
+         )
+    FROM ranked r;
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.invoke_notification_function(p_function text)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_secret text;
+  v_url text;
+BEGIN
+  IF p_function NOT IN ('process-notification-queue', 'monthly-friends-digest') THEN
+    RAISE EXCEPTION 'unknown function %', p_function USING ERRCODE = '22023';
+  END IF;
+
+  SELECT ds.decrypted_secret INTO v_secret
+    FROM vault.decrypted_secrets ds
+   WHERE ds.name = 'notification_cron_secret'
+   LIMIT 1;
+  IF v_secret IS NULL OR v_secret = '' THEN
+    RAISE WARNING 'invoke_notification_function: vault secret notification_cron_secret is missing';
+    RETURN NULL;
+  END IF;
+
+  v_url := 'https://ddfdwxrnouneqqzactus.supabase.co/functions/v1/' || p_function;
+
+  RETURN net.http_post(
+    url := v_url,
+    body := '{}'::jsonb,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cron-secret', v_secret
+    ),
+    timeout_milliseconds := 30000
+  );
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.tr_kick_notification_queue()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  -- pg_net sends queued requests after commit; if one for the worker is already
+  -- queued (e.g. earlier in this transaction), don't add another.
+  IF NOT EXISTS (
+    SELECT 1 FROM net.http_request_queue q
+     WHERE q.url LIKE '%/functions/v1/process-notification-queue'
+  ) THEN
+    PERFORM public.invoke_notification_function('process-notification-queue');
+  END IF;
+  RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+  -- Never block the insert; the every-minute cron job picks the row up.
+  RAISE WARNING 'tr_kick_notification_queue: %', SQLERRM;
+  RETURN NULL;
+END;
+$function$;
+
+-- Supabase Cron jobs (pg_cron):
+--   SELECT cron.schedule('process-notification-queue', '* * * * *',
+--     $$SELECT public.invoke_notification_function('process-notification-queue')$$);
+--   SELECT cron.schedule('monthly-friends-digest', '0 * * * *',
+--     $$SELECT public.invoke_notification_function('monthly-friends-digest')$$);
+
+
 -- =============================================================================
 -- 4. Triggers
 -- =============================================================================
@@ -1936,6 +2150,7 @@ CREATE TRIGGER trg_reports_recompute_user_stats AFTER INSERT ON public.reports F
 CREATE TRIGGER trg_reports_after_status_change AFTER UPDATE OF status ON public.reports FOR EACH ROW EXECUTE FUNCTION trg_reports_after_status_change();
 CREATE TRIGGER tr_friend_request_notification AFTER INSERT ON public.friendships FOR EACH ROW EXECUTE FUNCTION tr_enqueue_friend_request_notification();
 CREATE TRIGGER tr_league_member_added_notification AFTER INSERT ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_enqueue_league_added_notification();
+CREATE TRIGGER tr_kick_notification_queue AFTER INSERT ON public.notification_outbox FOR EACH STATEMENT EXECUTE FUNCTION tr_kick_notification_queue();
 CREATE TRIGGER tr_delete_league_if_empty AFTER DELETE ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_delete_league_if_empty();
 CREATE TRIGGER tr_transfer_league_ownership AFTER DELETE ON public.league_members FOR EACH ROW EXECUTE FUNCTION tr_transfer_league_ownership();
 CREATE TRIGGER update_leagues_updated_at BEFORE UPDATE ON public.leagues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -2175,4 +2390,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 --   policies. Appears unused — photos are stored in Cloudflare R2 via the
 --   `presign-r2-upload` Edge Function.
 -- Edge Functions: supabase/functions/{presign-r2-upload,process-notification-queue,monthly-friends-digest}
--- Cron: cron-job.org (see CLAUDE.md).
+-- Cron: Supabase Cron (pg_cron, section 3f) + instant pg_net trigger on notification_outbox.
+--   cron-job.org jobs are redundant once disabled (see CLAUDE.md).
