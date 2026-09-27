@@ -1,6 +1,8 @@
 import { supabase } from '../config/supabase';
 
 const UPLOAD_FAILED_MESSAGE = "Couldn't upload the photo. Check your connection and try again.";
+/** Must match MAX_UPLOAD_BYTES in supabase/functions/presign-r2-upload/index.ts. */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Must match the Edge Function slug in Supabase (default: presign-r2-upload). */
 const PRESIGN_FUNCTION =
@@ -33,7 +35,18 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
   const contentType =
     fileExt === 'png' ? 'image/png' : fileExt === 'webp' ? 'image/webp' : 'image/jpeg';
 
-  const body = { purpose, contentType, fileExt };
+  // Read first: the upload URL is signed for this exact size.
+  const res = await fetch(localUri);
+  if (!res.ok) {
+    throw new Error("Couldn't read that photo. Try a different one.");
+  }
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > MAX_UPLOAD_BYTES) {
+    throw new Error('That photo is too large (max 5 MB). Try a different one.');
+  }
+
+  // fileExt: only read by servers deployed before audit Batch 7.
+  const body = { purpose, contentType, contentLength: buf.byteLength, fileExt };
   if (purpose === 'pub_gallery') {
     body.pubId = pubId;
     body.slot = slot;
@@ -72,12 +85,6 @@ export async function presignAndPutImage(localUri, { purpose, pubId, slot }) {
     console.warn('r2Upload: presign returned no URL', data?.error);
     throw new Error(UPLOAD_FAILED_MESSAGE);
   }
-
-  const res = await fetch(localUri);
-  if (!res.ok) {
-    throw new Error("Couldn't read that photo. Try a different one.");
-  }
-  const buf = await res.arrayBuffer();
 
   const put = await fetch(data.uploadUrl, {
     method: 'PUT',

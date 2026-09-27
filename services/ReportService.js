@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase';
 import { presignAndPutImage } from './r2Upload';
 import { parseUkPostcode } from '../utils/ukPostcode';
+import { prepareReportPhotoForUpload } from '../utils/reportImagePrep';
 
 /**
  * Report photos: Cloudflare R2 via Supabase Edge Function `presign-r2-upload`.
@@ -36,7 +37,8 @@ async function uploadReportPhotoUris(imageUris) {
   if (!capped.length) return [];
   const out = [];
   for (let i = 0; i < capped.length; i++) {
-    const publicUrl = await presignAndPutImage(capped[i], { purpose: 'report' });
+    const uri = await prepareReportPhotoForUpload(capped[i]);
+    const publicUrl = await presignAndPutImage(uri, { purpose: 'report' });
     out.push(publicUrl);
   }
   return out;

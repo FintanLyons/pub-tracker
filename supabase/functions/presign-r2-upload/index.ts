@@ -5,6 +5,11 @@
  *   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_BASE_URL
  * Optional:
  *   R2_ALLOW_CLIENT_PUB_UPLOAD=true  — allow purpose "pub_gallery" from the app (default off)
+ *   R2_REQUIRE_CONTENT_LENGTH=true   — refuse requests without contentLength. Builds before
+ *     audit Batch 7 don't send it; turn this on once most users have updated.
+ *
+ * Size / type: when the app sends contentLength (bytes, max MAX_UPLOAD_BYTES), the URL
+ * signs Content-Length and Content-Type, so the PUT must match both exactly.
  *
  * Object keys (single bucket, prefix layout):
  *   reports/{userId}/{uuid}.{ext}
@@ -22,6 +27,14 @@ const cors = {
 };
 
 type Purpose = "report" | "avatar" | "pub_gallery";
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+/** Extension comes from the content type, never from the client. */
+const EXT_BY_TYPE: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -50,19 +63,29 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as {
       purpose?: string;
       contentType?: string;
-      fileExt?: string;
+      contentLength?: number;
       pubId?: string;
       slot?: number;
     };
 
     const purpose = body.purpose as Purpose;
     const contentType = body.contentType ?? "";
-    const rawExt = String(body.fileExt ?? "jpg").toLowerCase();
-    const fileExt = /^[a-z0-9]+$/.test(rawExt) ? rawExt : "jpg";
-
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(contentType)) {
+    const fileExt = EXT_BY_TYPE[contentType];
+    if (!fileExt) {
       return json({ error: "Invalid content type" }, 400);
+    }
+
+    const contentLength = body.contentLength;
+    if (contentLength == null) {
+      if (Deno.env.get("R2_REQUIRE_CONTENT_LENGTH") === "true") {
+        return json({ error: "contentLength required" }, 400);
+      }
+    } else if (
+      !Number.isInteger(contentLength) ||
+      contentLength <= 0 ||
+      contentLength > MAX_UPLOAD_BYTES
+    ) {
+      return json({ error: "Image must be 5 MB or smaller" }, 413);
     }
 
     const allowedPurposes: Purpose[] = ["report", "avatar", "pub_gallery"];
@@ -123,9 +146,17 @@ Deno.serve(async (req) => {
       Bucket: bucket,
       Key: objectKey,
       ContentType: contentType,
+      ...(contentLength != null ? { ContentLength: contentLength } : {}),
     });
 
-    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 120 });
+    // Signing these headers is what enforces the size and type on the PUT.
+    // Old builds (no contentLength) get an unsigned-size URL as before.
+    const uploadUrl = await getSignedUrl(client, command, {
+      expiresIn: 120,
+      ...(contentLength != null
+        ? { signableHeaders: new Set(["content-length", "content-type"]) }
+        : {}),
+    });
     const publicUrl = `${publicBase}/${objectKey}`;
 
     return json({ uploadUrl, publicUrl, objectKey }, 200);
