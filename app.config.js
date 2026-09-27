@@ -33,7 +33,7 @@ export default {
   expo: {
     name: APP_DISPLAY_NAME,
     slug: 'pub-tracker',
-    version: '1.0.2',
+    version: '1.1.0',
     orientation: 'portrait',
     // Charcoal + amber visited pub pin (1024); Android uses adaptive layers below.
     icon: './assets/app-icon.png',
