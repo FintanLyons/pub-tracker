@@ -139,7 +139,9 @@ export default function AddFriendModal({
       } else {
         showFeedback('Request sent', 'Your friend request was sent.');
       }
-      // Keep the results so the row now shows "Request sent".
+      // Clear the search so the next friend can be typed straight away.
+      setSearchQuery('');
+      setSearchResults([]);
       loadRelationships();
     } catch (error) {
       console.error('Error sending friend request:', error);
