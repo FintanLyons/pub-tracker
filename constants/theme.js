@@ -4,6 +4,7 @@ export const COLORS = {
   darkGrey:     '#2C2C2C', // Primary text on light backgrounds
   accentGrey:   '#424242', // Secondary dark text
   mediumGrey:   '#757575', // Supporting text and icons
+  tabInactive:  '#9E9E9E', // Inactive tab icon/label on the charcoal tab bar (6.4:1 contrast)
   /** Input placeholder / example copy only — lighter than typed text */
   inputPlaceholder: '#BDBDBD',
   lightGrey:    '#F5F5F5', // Card backgrounds and surfaces

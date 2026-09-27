@@ -145,7 +145,7 @@ export default function TabNavigator() {
             headerShown: false,
             freezeOnBlur: true,
             tabBarActiveTintColor: COLORS.amber,
-            tabBarInactiveTintColor: COLORS.amber,
+            tabBarInactiveTintColor: COLORS.tabInactive,
             tabBarStyle: {
               backgroundColor: COLORS.charcoal,
               borderTopColor: COLORS.charcoal,
@@ -154,10 +154,10 @@ export default function TabNavigator() {
               paddingBottom: Math.max(insets.bottom, 8),
               paddingTop: 8,
             },
+            // No fixed label colour: labels follow the active / inactive tint.
             tabBarLabelStyle: {
               fontSize: 12,
               fontWeight: '600',
-              color: COLORS.amber,
             },
           }}
         >
