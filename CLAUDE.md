@@ -47,8 +47,8 @@ Scoring logic lives in two places — keep them in sync if rules change:
 ## Architecture
 
 ```
-contexts/         AuthContext, NetworkContext, LocationContext,
-                  UserStatsContext, LoadingContext
+contexts/         AuthContext, NetworkContext, LocationContext, UserStatsContext,
+                  LoadingContext, ToastContext (useToast), AppAlertContext (showAppAlert)
 
 services/         PubService       — fetch pubs, toggle visited/favourite
                   FriendsService   — send/accept requests, leaderboard
@@ -56,11 +56,17 @@ services/         PubService       — fetch pubs, toggle visited/favourite
                   UserService      — username search
                   SecureAuthService — email/password login & register, Apple/Google, password reset (emailed code), `ensureUserStub`, `updatePublicUsername` + deferred auth metadata sync, logout
                   authErrors       — isNetworkError / isInvalidSessionError classification
-                  ReportService    — report pubs / missing pubs
-                  LeaderboardCache — in-memory leaderboard cache
+                  ReportService    — report pubs / missing pubs (photos via r2Upload)
+                  ReviewService    — pub reviews + rating summaries
+                  LeaderboardCache / leaderboardData — cached friends + league boards
+                  PushNotificationService — token registration; notificationNavigation — tap routing
+                  r2Upload         — presigned photo uploads (presign-r2-upload Edge Function)
 
-screens/          MapScreen, ProfileScreen (stats + trophy modal), LeaderboardScreen,
+screens/          MapScreen, ProfileScreen, LeaderboardScreen,
                   AuthScreen, ChooseUsernameScreen (post-auth until username set), OnboardingScreen, FilterScreen
+
+screens/profile/  ProfileStatsCards (stat cards + map-return animation), ProfileSettingsModal,
+                  DeleteAccountModals, AreaSortModal, AreaStatRows, TrophiesModal
 
 screens/map/hooks/  useMapCamera — camera ref, location, fit/center/zoom
                     useViewportPubs — pub fetching, merge, bounds tracking
@@ -76,12 +82,12 @@ data/geo/           london_postcode_districts.min.json (district polygons);
 data/               postcode_district_display_names.json — district code → locality label (Balham, …); regenerate via scripts/generate_postcode_district_display_names.py
 utils/              postcodeDistrictDisplayNames.js — getPostcodeDistrictDisplayName, formatDistrictWithCode
 
-components/       DraggablePubCard, PubCardContent, SearchBar,
-                  SearchSuggestions, AddFriendModal, CreateLeagueModal,
-                  JoinLeagueModal, LeagueActionsModal, PubReportFormModal,
-                  OfflineOverlay, ErrorBoundary,
-                  UserAchievementsPanel (trophy grid in Profile modal),
-                  PintGlassIcon, RangeSlider
+components/       DraggablePubCard, PubCardContent, PubReviewsModal, PubSummonTroopsModal,
+                  SearchBar, SearchSuggestions, AddFriendModal, CreateLeagueModal,
+                  JoinLeagueModal, LeagueActionsModal, ShareLeagueModal, PubReportFormModal,
+                  ForgotPasswordModal, AppDialog (the one dialog: AppDialogModal / Overlay / Card),
+                  OfflineBanner, ConnectionErrorScreen, ErrorBoundary,
+                  UserAchievementsPanel (trophy grid), UserAvatar, PintGlassIcon, RangeSlider
 
 scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, functions,
                   RLS, triggers, grants); dated migration files; Python data-pipeline
@@ -102,7 +108,7 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 ### ⚠️ Pending database migrations
 
 - **`scripts/social_security_phase_b_2026_09.sql` — NOT YET RUN (deliberately).** Hides leagues and invite codes from non-members. Run it only once most users have updated to a build that joins leagues via `join_league_by_code()` (commit "Join leagues by code on the server"); older builds can't join leagues after it runs. Remind the user about this whenever database or release work comes up. After running: verify via MCP, update the schema baseline, and delete this bullet.
-- **cron-job.org jobs — to disable.** Superseded by Supabase Cron (verified 2026-09-27). Once the user has disabled both jobs, delete this bullet.
+- **`scripts/db_cleanup_2026_09.sql` — NOT YET RUN.** Batch 8a: archives the legacy tables, drops dead functions/duplicate indexes, adds FK indexes, fixes RLS initplan, and changes `delete_my_account` (leagues pass on; reports lose the username). After running: verify via MCP, sync the baseline, update the Tables row below, delete this bullet.
 - **Edge secret `R2_REQUIRE_CONTENT_LENGTH=true` on `presign-r2-upload` — NOT YET SET (deliberately).** Builds before Batch 7 don't send `contentLength`; set it alongside Phase B, once most users have updated. Until then old builds can still upload without a size limit.
 
 ### Tables
@@ -122,7 +128,7 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 | `reports` | User pub corrections / missing-pub submissions. Users insert own `pending` rows; approving (set `status='approved'` in dashboard) auto-applies to `Pubs_List` via trigger |
 | `user_push_tokens` | Expo push tokens |
 | `notification_outbox` / `notification_monthly_digest_log` | Push queue + digest log — server-only (no RLS policies) |
-| `pubs`, `pubs_all`, `pub_spatial_assignments` | **Legacy, unused by the app** — pending removal |
+| `pubs`, `pubs_all`, `pub_spatial_assignments` | **Legacy, unused by the app** — moved to the non-exposed `archive` schema by `db_cleanup_2026_09.sql` |
 
 ### Server RPCs (callable by the app)
 
@@ -130,8 +136,10 @@ scripts/          schema_baseline_2026_09.sql — full live DB schema (tables, f
 - `get_borough_stats(user_id)` — per-**postcode area** stats + district completion counts (`total_districts`, `completed_districts`)
 - `get_achievements(user_id)` — trophies (`districtTrophies`, `postcodeAreaTrophies`, `pubAchievements`); `totalScore` / `level` / `pubsVisited` read from `user_stats`
 - `search_pubs(query, limit)` — name search over active pubs; includes `postcode_district`, `postcode_area`
-- `delete_my_account()` — removes all of the caller's data and auth user
+- `delete_my_account()` — removes all of the caller's data and auth user; leagues they own pass to the longest-standing member
 - `enqueue_pub_summon_notifications(pub_id, friend_ids, area_label)` — "summon the troops" push to accepted friends
+- `join_league_by_code(code)` — join a league by invite code
+- `claim_push_token(token, platform)` — register this device's Expo push token for the caller
 
 The stats RPCs reject calls for another user's id. Everything else (`compute_user_stats`, report apply/approve, geocoding/HTTP helpers) is server-only. Login is **email + password** (plus Google).
 
@@ -152,7 +160,7 @@ The stats RPCs reject calls for another user's id. Everything else (`compute_use
 ## Checks before committing
 
 There are no tests or linter. At minimum run:
-- `npm run check:undefined` — identifiers used but never declared/imported (runtime `ReferenceError`; Metro bundling does not catch these)
+- `npm run check:undefined` — identifiers used but never declared/imported (runtime `ReferenceError`), consts read above their declaration (silently `undefined` — Babel compiles const to var), missing/duplicate style keys. Metro bundling catches none of these
 - `npx expo export --platform android --output-dir /tmp/…` — the app bundles
 
 ## Colour theme
