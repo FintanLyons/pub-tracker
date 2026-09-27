@@ -1676,8 +1676,8 @@ export default function ProfileScreen({
             </View>
             <Text style={styles.floatingCardBody}>
               This permanently deletes your profile, visits, drinks, reviews, favourites and friends.
-              Leagues you own are deleted for all their members. Pub reports you've sent stay,
-              but are no longer linked to your account. This can't be undone.
+              Leagues you own pass to their longest-standing member. Pub reports you've sent stay,
+              but no longer show your username. This can't be undone.
             </Text>
             <View style={styles.floatingCardActions}>
               <TouchableOpacity
