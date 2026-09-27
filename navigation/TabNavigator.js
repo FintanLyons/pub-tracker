@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -33,6 +33,26 @@ const SafeProfileScreen = withErrorBoundary(ProfileScreen, 'Your profile failed 
 const SafeLeaderboardScreen = withErrorBoundary(LeaderboardScreen, 'The leaderboard failed to load. Please try again.');
 
 const Tab = createBottomTabNavigator();
+
+/**
+ * Active tab: soft amber pill behind a filled icon + bold label.
+ * Inactive: outline icon in dimmed amber. (Replaces a harsher amber/grey split.)
+ */
+function TabIcon({ focused, color, size, icon }) {
+  return (
+    <View style={[styles.tabIconPill, focused && styles.tabIconPillActive]}>
+      <MaterialCommunityIcons name={focused ? icon : `${icon}-outline`} size={size} color={color} />
+    </View>
+  );
+}
+
+function TabLabel({ focused, color, children }) {
+  return (
+    <Text style={[styles.tabLabel, { color }, focused && styles.tabLabelActive]} numberOfLines={1}>
+      {children}
+    </Text>
+  );
+}
 
 /** Minimum splash duration so the map can centre on GPS before first reveal. */
 const MIN_SPLASH_MS = 850;
@@ -154,28 +174,20 @@ export default function TabNavigator() {
               paddingBottom: Math.max(insets.bottom, 8),
               paddingTop: 8,
             },
-            // No fixed label colour: labels follow the active / inactive tint.
-            tabBarLabelStyle: {
-              fontSize: 12,
-              fontWeight: '600',
-            },
+            tabBarLabel: TabLabel,
           }}
         >
           <Tab.Screen 
             name="Map" 
             component={MapScreenWithBoundary}
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="map-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="map" />,
             }}
           />
           <Tab.Screen 
             name="Profile" 
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="account-circle-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="account-circle" />,
             }}
           >
             {(props) => (
@@ -192,9 +204,7 @@ export default function TabNavigator() {
             name="Leaderboard" 
             component={SafeLeaderboardScreen}
             options={{
-              tabBarIcon: ({ color, size }) => (
-                <MaterialCommunityIcons name="crown-outline" size={size} color={color} />
-              ),
+              tabBarIcon: (props) => <TabIcon {...props} icon="crown" />,
             }}
           />
         </Tab.Navigator>
@@ -212,6 +222,24 @@ export default function TabNavigator() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  tabIconPill: {
+    width: 56,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabIconPillActive: {
+    backgroundColor: COLORS.tabActiveIndicator,
+  },
+  tabLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  tabLabelActive: {
+    fontWeight: '700',
   },
   loadingContainer: {
     ...StyleSheet.absoluteFillObject,
