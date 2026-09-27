@@ -192,17 +192,24 @@ export default function LeaderboardScreen() {
   };
 
   /**
-   * After a friend request / league action, offer notifications once (with a reason)
-   * instead of asking at first launch. Delay lets the closing modal finish animating.
+   * "Turn on notifications?" with a reason, instead of asking at first launch.
+   * At most once per device (shouldOfferNotificationPrompt); the OS prompt only
+   * follows "Turn on". Delay lets a closing modal finish animating.
    */
-  const offerNotificationsAfterSocialAction = useCallback(() => {
-    if (!consumeSocialAction()) return;
+  const anyModalOpenRef = useRef(false);
+  const offeredForContextRef = useRef(false);
+  const offerNotificationPrompt = useCallback(() => {
     setTimeout(async () => {
+      if (anyModalOpenRef.current) {
+        // A pop-up opened meanwhile (e.g. from a notification tap) — try again later.
+        offeredForContextRef.current = false;
+        return;
+      }
       if (!(await shouldOfferNotificationPrompt())) return;
       markNotificationPromptShown();
       showAppAlert({
         title: 'Turn on notifications?',
-        message: 'Get a notification when friends accept your request, add you to a league or summon you to the pub.',
+        message: 'Get a notification when friends send or accept a request, add you to a league or summon you to the pub.',
         tone: 'neutral',
         buttons: [
           { text: 'Not now', variant: 'secondary' },
@@ -217,6 +224,27 @@ export default function LeaderboardScreen() {
       });
     }, 450);
   }, [authUser?.id, showAppAlert]);
+
+  /** After the user's own friend request / league action (see noteSocialAction). */
+  const offerNotificationsAfterSocialAction = useCallback(() => {
+    if (!consumeSocialAction()) return;
+    offerNotificationPrompt();
+  }, [offerNotificationPrompt]);
+
+  // People who mostly receive requests never take a social action themselves, so
+  // also offer once they have friends, a league or a request waiting.
+  const hasSocialContext =
+    friendsLeaderboard.length > 1 || leagues.length > 0 || pendingRequestsCount > 0;
+  const anyModalOpen =
+    showAddFriendModal || showCreateLeagueModal || showJoinLeagueModal
+    || showLeagueActionsModal || showShareLeagueModal || showLeaveLeagueModal
+    || showLeagueSelector || !!feedback;
+  anyModalOpenRef.current = anyModalOpen;
+  useEffect(() => {
+    if (!hasSocialContext || anyModalOpen || offeredForContextRef.current) return;
+    offeredForContextRef.current = true;
+    offerNotificationPrompt();
+  }, [hasSocialContext, anyModalOpen, offerNotificationPrompt]);
 
   const confirmLeaveLeague = async () => {
     if (!selectedLeague || !currentUser || leavingLeague) {
